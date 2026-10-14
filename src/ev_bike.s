@@ -10,10 +10,18 @@
 ;   POTHOLE HOP  hop clean over a pothole
 ;   CLOSE CALL   in the way of a car or the 501, slip out just in time
 ;   DRAFTING     tuck in behind the 501: it pulls you along
+;   TTC TRANSFER clear both rails of a track in one hop (on no card: steer
+;                first, hop a beat later, so the hop lasts over both). It
+;                pays 120 x the chain its TRACK HOP set (never raises it),
+;                and is good for one ride: the next needs another kind of
+;                trick first (CLOSE CALL, POTHOLE HOP, DRAFT): no zig-zag farm
 ; Mix them inside 2.5 s of each other and they chain, x2 .. x8. Cross a rail
 ; on the ground and the groove grabs your wheel: RAIL WOBBLE, a quarter of
 ; your speed and the chain. Sit in one line too long and Queen St comes for
 ; you: a fresh pothole in your lane, or the 501 up the tracks behind you.
+; Everyone crosses the streetcar tracks that cut across Queen (XING_AT): the
+; first is ~7 s in, with HOP THE RAILS: B! until you've scored a TRACK HOP.
+; A wipeout drops 2 of your TTC tokens (no points fee on the card).
 .p816
 .smart -
 .include "globals.inc"
@@ -42,7 +50,8 @@ HOP_GAP     = 240           ; road between two scoring track hops
 WOB_T       = 24
 BIKE_LANE   = 186           ; start / respawn here (clear of the 501 and the doors)
 INV_GETUP   = 120           ; blink frames after getting back on
-WIPE_COST   = 200           ; points per wipeout on a delivered run
+DROP_TOK    = 2             ; tokens a wipeout drops
+XING_HINT   = 340           ; HOP THE RAILS: B! this far before a crossing
 CHAIN_WIN   = 150           ; 2.5 s to land the next style move
 CHAIN_MAX   = 8
 STYLE_CAP   = 50000
@@ -67,12 +76,16 @@ CA_TRAM  = 3
 CA_HOLE  = 4
 CA_PED   = 5
 CA_REAR  = 6
+CA_PARKD = 7                ; into a parked car (from behind)
+CA_ONCOM = 8                ; head-on with a southbound car
+CA_STOPD = 9                ; into the car stopped in the bike lane
 
 ; style moves
 SM_HOP   = 0
 SM_CLOSE = 1
 SM_DRAFT = 2
 SM_BUNNY = 3
+SM_XFER  = 4                ; TTC TRANSFER: both rails of a track, one hop
 
 ; run state (words)
 b_px     = ev_ram + 0
@@ -100,7 +113,12 @@ b_hopsc  = ev_ram + 44      ; 1 = this hop already scored a rail
 b_prow   = ev_ram + 46      ; 1 = a crash message is up on POP_ROW
 b_fired  = ev_ram + 48      ; 1 = stood still too long: YOU'RE FIRED! (ev_fail 4)
 b_stroke = ev_ram + 50      ; frames left in the last pedal stroke (a tap of A)
-b_pmid   = ev_ram + 52      ; 1 = a panel is up on rows 8-10
+b_pmid   = ev_ram + 52      ; 1 = a panel is up on rows 8-11
+b_wobn   = ev_ram + 54      ; RAIL WOBBLE panels shown (the hint goes after 2)
+b_hopok  = ev_ram + 56      ; 1 = this hop's first rail scored a TRACK HOP
+b_tracks = ev_ram + 58      ; 1 = scored a TRACK HOP (no more rail hints)
+b_coach  = ev_ram + 60      ; 1 = the chain coach line has been shown
+b_nxing  = ev_ram + 62      ; next crossing (index * 2 into xing_at)
 ; drawer / HUD bookkeeping (cleared by init, < 512)
 b_oamhw  = ev_ram + 384     ; OAM bytes used last frame (the local clear)
 b_hq     = ev_ram + 386     ; HUD caches: what is on screen now
@@ -127,6 +145,9 @@ b_kind   = ev_ram + 428
 b_dcap   = ev_ram + 430     ; top speed in the slipstream (the 501's + a bit)
 b_lastk  = ev_ram + 464     ; the last style move
 b_pbuf   = ev_ram + 432     ; popup text built here (24 bytes)
+b_line2  = ev_ram + 466     ; a popup's second line (this bank), 0 = none
+b_l2pal  = ev_ram + 468     ; ...and its palette
+b_xok    = ev_ram + 470     ; 1 = a TTC TRANSFER pays (set by the other tricks)
 
 ; entities: one word per entity per field, X = index * 2
 NUM_ENT = 16
@@ -152,6 +173,7 @@ T_POTHOLE  = 7
 T_TOKEN    = 8
 T_PED      = 9
 T_FINISH   = 10
+T_XING     = 11             ; streetcar tracks across the road
 
 .segment "EVENTS1"
 .a8
@@ -234,6 +256,8 @@ bike_init:
     stx b_hopd
     ldx #BIKE_LANE
     stx b_campx
+    ldx #$0001
+    stx b_xok
     jsr spawn_ahead
     rts
 
@@ -708,16 +732,21 @@ move_x:
     bne @rail
     rts
 
-; crossed a rail. In the air (a hop): TRACK HOP, once a hop, HOP_GAP of
-; road between scoring ones. On the ground the groove grabs the front wheel:
-; RAIL WOBBLE (a quarter of your speed and the chain). Keeps Y.
+; crossed a rail (or the tracks across the road). In the air (a hop): the
+; first rail is a TRACK HOP (HOP_GAP of road between scoring ones), and a
+; second rail in the same hop, after one that scored, is a TTC TRANSFER. On
+; the ground the groove grabs the front wheel: RAIL WOBBLE (a quarter of
+; your speed and the chain). Keeps Y.
 rail_cross:
     lda b_hop
     beq @ground
     lda b_hopsc
-    jne @x
-    lda #$01
-    sta b_hopsc
+    cmp #2
+    jcs @x
+    inc b_hopsc
+    cmp #1
+    beq @second
+    stz b_hopok
     A16
     lda b_dist
     sec
@@ -727,8 +756,21 @@ rail_cross:
     lda b_dist
     sta b_hopd
     A8
+    lda #$01
+    sta b_hopok
+    sta b_tracks
     phy
     lda #SM_HOP
+    jsr style_award
+    ply
+    rts
+@second:
+    lda b_hopok
+    and b_xok
+    jeq @x
+    stz b_xok
+    phy
+    lda #SM_XFER
     jsr style_award
     ply
     rts
@@ -754,11 +796,16 @@ rail_cross:
     A8
     phy
     SFX SFX_STEP
+    lda b_wobn                  ; the hint twice, then just the wobble
+    cmp #2
+    bcs @quiet
+    inc b_wobn
     LDPTR0 str_wobble
     lda #TP_ORANGE
     jsr pop_mid
     ldx #50
     stx b_popup
+@quiet:
     ply
     rts
 @x16:
@@ -841,7 +888,7 @@ crash:
     pha
     lda b_state
     cmp #ST_RIDE
-    bne @no
+    jne @no
     ldx b_inv
     bne @no
     lda #ST_CRASH
@@ -861,6 +908,24 @@ crash:
     stz b_wob
     lda #14
     sta b_shake
+    ; a wipeout drops DROP_TOK of your tokens (all you have, if fewer):
+    ; the second line says so, and the HUD count goes down
+    lda b_tokens
+    beq @nodrop
+    ldx #.loword(str_drop1)
+    cmp #DROP_TOK
+    bcc @drop
+    lda #DROP_TOK
+    ldx #.loword(str_drop2)
+@drop:
+    stx b_line2
+    eor #$FFFF
+    sec
+    adc b_tokens
+    sta b_tokens
+    lda #TP_ORANGE
+    sta b_l2pal
+@nodrop:
     A8
     SFX SFX_CRASH
     pla
@@ -890,17 +955,13 @@ crash:
 ; reads over the traffic. pop_mid: ptr0 = text, A = palette, centred on
 ; row 9 (panel rows 8-10). pop_near: ptr0 = text, yellow, on POP_ROW right
 ; over the rider (panel POP_ROW-1 .. +1), so a wipeout's SPLAT! lands where
-; the crash is. pop_clear: whichever is up.
+; the crash is. Either takes a second line from b_line2 (a string in this
+; bank, palette b_l2pal; the panel grows a row) and clears b_line2.
+; pop_clear: whichever is up.
 pop_mid:
     pha
     jsr pop_clear
-    jsr ptr0_len
-    tya
-    clc
-    adc #4
-    sta tmp1                    ; panel width
-    lda #3
-    sta tmp1+1
+    jsr pop_size                ; tmp1 = panel w x h, tmp6 = widest line
     lda #32
     sec
     sbc tmp1
@@ -921,9 +982,61 @@ pop_mid:
     ora #$20
     ldx #(9*32)
     jsl txt_print_centre
+    ldx b_line2
+    beq @one
+    jsr line2_ptr
+    ldx #(10*32)
+    jsl txt_print_centre
+@one:
     stz txt_bg
+    ldx #$0000
+    stx b_line2
     lda #$01
     sta b_pmid
+    rts
+
+; tmp1 = panel width (widest line + 4) x height (3, or 4 with a second
+; line), tmp6 = the widest line's length. ptr0 = line 1. Keeps ptr0.
+pop_size:
+    jsr ptr0_len
+    sty tmp6
+    lda #3
+    sta tmp1+1
+    ldx b_line2
+    beq @w
+    inc tmp1+1
+    ldy #$0000
+@l:
+    lda a:$0000,x
+    beq @n
+    inx
+    iny
+    bra @l
+@n:
+    tya
+    cmp tmp6
+    bcc @w
+    sta tmp6
+@w:
+    lda tmp6
+    clc
+    adc #4
+    sta tmp1
+    rts
+
+; ptr0 = b_line2 (this bank), A = its text attribute
+line2_ptr:
+    A16
+    lda b_line2
+    sta ptr0
+    A8
+    phk
+    pla
+    sta ptr0+2
+    lda b_l2pal
+    asl a
+    asl a
+    ora #$20
     rts
 
 ; Y = length of the text at ptr0
@@ -939,10 +1052,9 @@ ptr0_len:
 
 pop_near:
     jsr pop_clear
-    jsr ptr0_len
-    sty tmp6
-    ; text column: rider column - len/2, kept on screen with room for the
-    ; panel (2 .. 30-len)
+    jsr pop_size
+    ; panel column: rider column - width/2, kept on screen (text column
+    ; 2 .. 30-widest)
     lda b_px+1
     lsr a
     lsr a
@@ -969,12 +1081,6 @@ pop_near:
     bcs @c3
     sta tmp7
 @c3:
-    lda tmp6
-    clc
-    adc #4
-    sta tmp1
-    lda #3
-    sta tmp1+1
     A16
     lda tmp7
     and #$00FF
@@ -986,18 +1092,51 @@ pop_near:
     jsl txt_box
     lda #TXT_WIN
     sta txt_bg
-    A16
-    lda tmp7
-    and #$00FF
-    clc
-    adc #(POP_ROW*32)
-    tax
-    A8
+    lda #POP_ROW
+    sta tmp6+1
     lda #($20 | (TP_YELLOW << 2))
-    jsl txt_print
+    jsr @line
+    ldx b_line2
+    beq @one
+    jsr line2_ptr
+    inc tmp6+1
+    jsr @line
+@one:
     stz txt_bg
+    ldx #$0000
+    stx b_line2
     lda #$01
     sta b_prow
+    rts
+; ptr0 centred in the panel on row tmp6+1, attribute A
+@line:
+    pha
+    jsr ptr0_len
+    sty tmp2
+    lda tmp6
+    sec
+    sbc tmp2
+    lsr a
+    clc
+    adc tmp7
+    sta tmp2
+    lda tmp6+1
+    A16
+    and #$00FF
+    asl a
+    asl a
+    asl a
+    asl a
+    asl a
+    sta tmp3
+    lda tmp2
+    and #$00FF
+    clc
+    adc tmp3
+    tax
+    A8
+    pla
+    jsl txt_print
     rts
 
 pop_clear:
@@ -1006,7 +1145,7 @@ pop_clear:
     stz b_pmid
     ldx #(8*32)
     A16
-    lda #$0320
+    lda #$0420
     sta tmp1
     A8
     stz tmp2
@@ -1018,7 +1157,7 @@ pop_clear:
     stz b_prow
     ldx #((POP_ROW-1)*32)
     A16
-    lda #$0320
+    lda #$0420
     sta tmp1
     A8
     stz tmp2
@@ -1027,14 +1166,20 @@ pop_clear:
 @x:
     rts
 
-crash_msgs: .addr cm0, cm1, cm2, cm3, cm4, cm5, cm6
+crash_msgs: .addr cm0, cm1, cm2, cm3, cm4, cm5, cm6, cm7, cm8, cm9
 cm0: .byte "DOORED!", 0
 cm1: .byte "CAUGHT A TRACK!", 0     ; (unused: rails wobble now)
-cm2: .byte "SPLAT!", 0
+cm2: .byte "SPLAT! RAN INTO A CAR", 0
 cm3: .byte "HIT BY THE 501!", 0
 cm4: .byte "POTHOLE!", 0
-cm5: .byte "SORRY! SORRY!", 0
+cm5: .byte "JAYWALKER! SORRY! SORRY!", 0
 cm6: .byte "KISSED THE 501!", 0
+cm7: .byte "SPLAT! PARKED CAR", 0
+cm8: .byte "SPLAT! ONCOMING CAR", 0
+cm9: .byte "SPLAT! CAR IN BIKE LANE", 0
+str_drop2: .byte "DROPPED 2 TOKENS", 0
+str_drop1: .byte "DROPPED 1 TOKEN", 0
+.assert DROP_TOK = 2, error, "str_drop2 says 2"
 
 ; ------------------------------------------------------------------
 ; style_award: A = SM_ move. A different move inside CHAIN_WIN frames
@@ -1042,7 +1187,18 @@ cm6: .byte "KISSED THE 501!", 0
 ; points = base * chain. Banner "TRACK HOP! X3 +45".
 style_award:
     sta b_kind
+    cmp #SM_HOP                 ; any trick but a hop re-arms the TRANSFER
+    beq @arm
+    cmp #SM_XFER
+    beq @arm
+    lda #$01
+    sta b_xok
+@arm:
     A16
+    lda b_kind
+    and #$00FF
+    cmp #SM_XFER                ; a TRANSFER is the same hop as its TRACK
+    beq @xf                     ; HOP: it keeps that chain, never raises it
     lda b_chaint
     beq @first
     lda b_kind                  ; the same move again keeps the chain going;
@@ -1060,6 +1216,7 @@ style_award:
 @keep:
     lda b_kind
     sta b_lastk
+@xf:
     lda #CHAIN_WIN
     sta b_chaint
     ; points = base * chain
@@ -1140,6 +1297,18 @@ style_award:
     inx
     stz b_pbuf,x
     LDPTR0 b_pbuf
+    ; the first trick of the run: the coach line says how chains work
+    ldy #50
+    lda b_coach
+    bne @nocoach
+    inc b_coach
+    ldx #.loword(str_coach)
+    stx b_line2
+    lda #TP_WHITE
+    sta b_l2pal
+    ldy #100
+@nocoach:
+    sty b_popup
     lda b_chain
     cmp #3
     lda #TP_CYAN
@@ -1147,8 +1316,6 @@ style_award:
     lda #TP_YELLOW              ; x3, x4: gold
 @pal:
     jsr pop_mid
-    ldx #50
-    stx b_popup
     SFX SFX_COIN
     rts
 ; A16 = value, Y = place: emits a digit (skips leading zeros), A = remainder
@@ -1181,12 +1348,14 @@ style_award:
     pla
     rts
 
-sm_base:  .byte 60, 100, 60, 80     ; x the chain (x8 max: 800, three digits)
-sm_names: .addr smn0, smn1, smn2, smn3
+sm_base:  .byte 60, 100, 60, 80, 120    ; x the chain (x8 max: 960, three digits)
+sm_names: .addr smn0, smn1, smn2, smn3, smn4
 smn0: .byte "TRACK HOP!", 0
 smn1: .byte "CLOSE CALL!", 0
 smn2: .byte "DRAFTING THE 501", 0
 smn3: .byte "POTHOLE HOP!", 0
+smn4: .byte "TTC TRANSFER!", 0
+str_coach: .byte "NEW TRICK IN 2 S: X2", 0
 
 ; ------------------------------------------------------------------
 bike_draw:
@@ -1680,14 +1849,15 @@ str_start:  .byte "QUEEN", 0
 str_end:    .byte "SPADINA", 0
 
 ; ------------------------------------------------------------------
-; Delivered:  DELIVERY     1000 + distance/16 (562) + time left/3 (~20 a s)
-;              TIPS & STYLE 50 a TTC token + STYLE
-;              WIPEOUT X200 200 each (the true cost: never more than 400)
+; Delivered:  RIDE         1000 + distance/16 (562) + time left/3 (20 a s)
+;              TOKENS+STYLE 50 a TTC token + STYLE
+;              no penalty: a wipeout costs a heart, time, the chain and the
+;              DROP_TOK tokens it dropped (on screen as it happens)
 ; Not delivered (wiped out 1, out of time 2, gave up 3, fired 4): no
 ; delivery fee, no tips. RIDE = distance/24 (1 per 4 metres, up to 375) is
 ; the score; TIPS & STYLE still goes in ev_break+2 and the card shows it in
 ; grey as FORFEIT (card_forfeit), so a first-timer who wipes out sees what
-; their tokens and hops would have paid. A delivery (>= 1162) always beats
+; their tokens and hops would have paid. A delivery (>= 1562) always beats
 ; a failed run.
 ; ev_break = base, bonus, penalty; ev_score = base + bonus - penalty.
 ; Stats: METRES (distance / 6), TOKENS, WIPEOUTS, STYLE.
@@ -1753,22 +1923,8 @@ bike_score:
     clc
     adc #1000
     sta ev_break
-    ; WIPEOUTS = 200 each
-    lda #$0000
-    ldx b_wipes
-    beq @nowipe
-@wipe:
-    clc
-    adc #WIPE_COST
-    dex
-    bne @wipe
-@nowipe:
-    sta ev_break+4
-    lda ev_break
     clc
     adc ev_break+2
-    sec
-    sbc ev_break+4
     sta ev_score
     A8
     stz ev_fail

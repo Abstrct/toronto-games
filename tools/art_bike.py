@@ -244,7 +244,7 @@ STREETCAR = ['#000000', '#101018', '#d02828', '#901818', '#f06050', '#f0f0f0', '
 MISC = ['#000000', '#101018', '#f0b888', '#402818', '#d8f838', '#78b818', '#383848', '#f8d020',
         '#b08010', '#fff4b0', '#26262c', '#5c5c66', '#f8f8f8', '#101010', '#e02818', '#f8e040']
 FX = ['#000000', '#101018', '#f8e040', '#f88820', '#ffffff', '#e02818',
-      '#08080c', '#24242c', '#5a5a64', '#84848e', '#b04808']
+      '#08080c', '#24242c', '#5a5a64', '#84848e', '#b04808', '#b8b8c8']
 
 
 def car_pal(name):
@@ -509,7 +509,8 @@ FAST = [('rider_0', ''), ('rider_1', ''), ('rider_2', ''), ('rider_3', ''),
         ('tumble0', ''), ('tumble1', ''), ('rider_crash', ''), ('shadow', ''), ('wind', ''),
         ('pow0', ''), ('pow1', ''), ('token', ''), ('door', ''), ('pothole', ''), ('car', ''),
         ('car', 'v'), ('ped0', ''), ('ped0', 'h'), ('ped1', ''), ('ped1', 'h'), ('finish', ''),
-        ('warn', ''), ('streetcar', ''), ('streetcar', 'v'), ('brake', ''), ('hazard', '')]
+        ('warn', ''), ('streetcar', ''), ('streetcar', 'v'), ('brake', ''), ('hazard', ''),
+        ('xing', '')]
 
 
 def fast_meta(sh):
@@ -602,6 +603,16 @@ def build_sprites():
     for bx in (54, 70):
         d.rectangle([bx, 128, bx + 3, 130], fill=7)
         d.rectangle([bx + 1, 129, bx + 2, 129], fill=9)
+    # streetcar tracks across the road (FX palette), one 16-px repeat: a
+    # concrete bed with seams, two steel rails, each with its dark groove
+    d.rectangle([64, 81, 79, 94], fill=8)
+    d.line([64, 81, 79, 81], fill=7)
+    d.line([64, 94, 79, 94], fill=7)
+    d.line([71, 82, 71, 93], fill=7)
+    for ry in (84, 90):
+        d.line([64, ry, 79, ry], fill=11)
+        d.line([64, ry + 1, 79, ry + 1], fill=9)
+        d.line([64, ry + 2, 79, ry + 2], fill=6)
 
     sh.obj('rider_0', 0, 0, 16, 32)
     sh.obj('rider_1', 16, 0, 16, 32)
@@ -629,6 +640,7 @@ def build_sprites():
     sh.obj('wind', 48, 112, 16, 16, 8, 8)
     sh.obj('brake', 0, 128, 48, 8, 24, -38)
     sh.obj('hazard', 48, 128, 32, 8, 16, 1)
+    sh.obj('xing', 64, 80, 16, 16)
     out('bike_spr.bin', sh.tiles())
     with open('build/bike_meta.inc', 'w') as f:
         f.write(sh.meta_inc())
