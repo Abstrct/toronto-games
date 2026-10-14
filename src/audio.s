@@ -8,6 +8,9 @@
 .include "globals.inc"
 
 .import spc_blob, spc_blob_end, pitch_table, music_data, song_table, instruments
+.export sfx_result
+
+SONG_JINGLE = 11            ; songs 11-13: the result jingles (tools/songs.py)
 
 .segment "ZEROPAGE"
 a0:         .res 2
@@ -38,6 +41,10 @@ sfx_next:   .res 1
 sfx_id:     .res 4
 sfx_t:      .res 4
 sfx_pitch:  .res 8
+mus_inst:   .res 4      ; each music voice's instrument (put back after a fade)
+mus_faded:  .res 1      ; music_stop faded the music voices out (GAIN mode)
+mus_mv:     .res 1      ; master volume now (climbs to mus_mvt: the podium swell)
+mus_mvt:    .res 1      ; the song's master volume (song_mvol)
 
 .segment "CODE"
 .a8
@@ -318,10 +325,13 @@ music_play:
     tax
     A8
     lda f:song_mvol,x
-    ldx #$0C                ; MVOL L
-    jsr dsp_write
-    ldx #$1C                ; MVOL R
-    jsr dsp_write
+    sta mus_mvt
+    lda f:song_swell,x      ; a swell starts lower and climbs a step a frame
+    bne @mv
+    lda mus_mvt
+@mv:
+    sta mus_mv
+    jsr set_mvol
     lda mus_id
     A16
     and #$00FF
@@ -368,6 +378,7 @@ music_play:
     lda a3
     cmp #$04
     bne @inst
+    stz mus_faded           ; load_inst put every voice back on its ADSR
     lda non_sh
     and #$F7
     sta non_sh
@@ -382,8 +393,20 @@ music_play:
     plx
     rtl
 
-; load_inst: A = instrument id, a3 lo = voice
+; load_inst: A = instrument id, a3 lo = voice (0-3)
+; set_mvol: master volume L and R = A
+set_mvol:
+    ldx #$0C                ; MVOL L
+    jsr dsp_write
+    ldx #$1C                ; MVOL R
+    jmp dsp_write
+
 load_inst:
+    pha
+    lda a3
+    TAXB
+    pla
+    sta mus_inst,x
     A16
     and #$00FF
     asl a
@@ -410,17 +433,71 @@ music_keep:
 @p2:
     jml music_play
 
+; music_stop: the music fades out over about 130 ms (a key-off drops in 8 ms,
+; which steps on real speakers). Sound effects carry on.
 music_stop:
     phx
     stz music_on
     lda apu_ok
     beq @x
-    ldx #DSP_KOF
-    lda #$0F
-    jsr dsp_write
+    jsr mus_fade
 @x:
     plx
     rtl
+
+; mus_fade: voices 0-3 leave their ADSR for GAIN "linear decrease", rate 16
+; (-32 every 64 samples: full scale to silence in 128 ms), from wherever each
+; envelope is. GAIN goes first so the switch never sees a stale direct gain.
+mus_fade:
+    lda #$01
+    sta mus_faded
+    ldx #$0007              ; voice 0 GAIN
+@v:
+    lda #$90
+    jsr dsp_write
+    dex
+    dex                     ; ADSR1
+    lda #$00                ; bit 7 clear: the envelope follows GAIN
+    jsr dsp_write
+    A16
+    txa
+    clc
+    adc #$0012              ; the next voice's GAIN
+    tax
+    A8
+    cpx #$0047
+    bne @v
+    rts
+
+; mus_reinst: after a fade, music_on came back on (the pause menu resumes the
+; song where it stopped): every music voice gets its instrument, so its ADSR, back
+mus_reinst:
+    stz mus_faded
+    stz a3
+@l:
+    lda a3
+    TAXB
+    lda mus_inst,x
+    jsr load_inst
+    inc a3
+    lda a3
+    cmp #$04
+    bne @l
+    rts
+
+; ------------------------------------------------------------------
+; sfx_result: the result card's jingle, under two seconds, on the music voices
+; (it replaces whatever song is on; the card is otherwise silent), then it
+; fades out by itself.  A = 0 finished, 1 failed, 2 new record (anything
+; else plays the finish). Keeps X and Y.
+sfx_result:
+    cmp #$03
+    bcc @ok
+    lda #$00
+@ok:
+    clc
+    adc #SONG_JINGLE
+    jml music_play
 
 ; ------------------------------------------------------------------
 audio_tick:
@@ -434,6 +511,17 @@ audio_tick:
     stz kof_mask
     lda music_on
     beq @sfx
+    lda mus_faded
+    beq @swell
+    jsr mus_reinst
+@swell:
+    lda mus_mv
+    cmp mus_mvt
+    bcs @run
+    inc a
+    sta mus_mv
+    jsr set_mvol
+@run:
     dec mus_wait
     bne @sfx
     jsr music_step
@@ -521,10 +609,16 @@ music_step:
     cmp mus_len
     bcc @x
     lda mus_loop
+    cmp #$FFFF
+    beq @end                ; a jingle: no loop
     sta mus_step
 @x:
     A8
     rts
+@end:
+    A8
+    stz music_on
+    jmp mus_fade
 
 ; A = $80.. drum id (voice 3): kick, snare, hat, open hat, crash, low tom, high tom, rim
 drum_hit:
@@ -685,7 +779,7 @@ sfx_update:
     TAYB
     lda sfx_id,y
     cmp #$FF
-    beq @next
+    jeq @next
     A16
     and #$00FF
     asl a
@@ -708,10 +802,24 @@ sfx_update:
     sta kof_mask
     bra @next
 @alive:
+    sta a2                  ; this effect's frame
+    lda f:sfx_table+13,x
+    and #$7F
+    beq @two
+    cmp a2
+    beq @third
+@two:
+    lda a2
     cmp f:sfx_table+8,x
     bne @slide
+    jsr sfx_rekey
     A16
     lda f:sfx_table+6,x
+    bra @store
+@third:
+    jsr sfx_rekey
+    A16
+    lda f:sfx_table+14,x
     bra @store
 @slide:
     A16
@@ -742,13 +850,39 @@ sfx_update:
     jne @slot
     rts
 
+; sfx_rekey: a chime's next note strikes again (the row's fsw2 bit 7):
+; the effect's voice keys on this frame. X = the row, a6 = the slot.
+sfx_rekey:
+    lda f:sfx_table+13,x
+    bpl @x
+    phx
+    lda a6
+    TAXB
+    lda f:voice_bit+4,x
+    ora kon_mask
+    sta kon_mask
+    plx
+@x:
+    rts
+
 ; effect table: 16-byte rows ----------------------------------------
-.macro FX fsrc, fad1, fad2, fvol, fp1, fp2, fsw, flen, fsl, fnz
+; source, ADSR1, ADSR2, volume, pitch 1, pitch 2 from frame fsw, length in
+; frames, pitch slide per frame, noise clock (0 = tone), then optionally a
+; third pitch from frame fsw2 (bit 7 of fsw2: key on again at fsw and fsw2,
+; so each pitch is a new strike)
+.macro FX fsrc, fad1, fad2, fvol, fp1, fp2, fsw, flen, fsl, fnz, fsw2, fp3
     .byte fsrc, fad1, fad2, fvol
     .word fp1, fp2
     .byte fsw, flen
     .word (fsl) & $FFFF
-    .byte fnz, 0, 0, 0
+    .byte fnz
+    .ifblank fsw2
+    .byte 0
+    .word 0
+    .else
+    .byte fsw2
+    .word fp3
+    .endif
 .endmacro
 
 sfx_table:
@@ -770,6 +904,15 @@ sfx_table:
     FX 0, $FF, $10, $30, 1000, 1000,  0, 40,    0, $14  ; 15 cheer
     FX 2, $FF, $E0, $30, 8573, 8573,  0,  2,    0,  0   ; 16 tick
     FX 4, $FF, $E0, $49, 1430, 1350,  8, 48,  -14,  0   ; 17 groan (wah-wah, sliding down)
+    ; 18 chime: the TTC's three-note "please stand clear of the doors", E6 C6 G5
+    FX 3, $FF, $6E, $55, 5401, 4286, 14, 60,    0,  0, $80 | 28, 3211
+    ; 19 ferry: the Island ferry's deep horn, a low swoop up into a long blast
+    FX 4, $FA, $E9, $55,  380,  420,  6, 80,    0,  0
+    ; 20 firework: a low boom for the podium bursts, softer than the splash so
+    ; the podium reprise can sit above the events without the bursts clipping
+    FX 0, $FF, $15, $30, 1000, 1000,  0, 24,    0, $12
+sfx_table_end:
+.assert sfx_table_end - sfx_table = 21 * 16, error, "sfx_table rows must be 16 bytes"
 
 ; echo_on: first song turns the echo up (lead + harmony only)
 echo_on:
@@ -789,18 +932,33 @@ echo_on:
 @x:
     rts
 
-; master volume per song (SONG_* order). $7F is full scale; most songs sit a
-; little under it so stacked sound effects don't clip, the sparse regatta song
-; gets the full level, and the podium reprise (fireworks on top) the least.
+; master volume per song (SONG_* order). $7F is full scale; the event songs
+; sit under it (-16 to -18 dBFS AC RMS) so stacked sound effects don't clip.
+; The podium reprise is the one song above the events (about -16 dBFS with
+; the fireworks on top; peaks 0.5 dB under clipping with SFX_SPLASH bursts,
+; 1.2 dB with SFX_FIREWORK ones) and swells into it.
 song_mvol:
     .byte $6C   ; 0 title       KC Incidental
     .byte $70   ; 1 menu        Bobcaygeese
     .byte $6C   ; 2 bike        Gold Guns Gulls
     .byte $70   ; 3 standings   Ahead by a Centimetre
     .byte $64   ; 4 bay         Whelp, I'm Alive
-    .byte $64   ; 5 tallboy     Hay, Officer
-    .byte $7F   ; 6 regatta     Brother Downwind
+    .byte $70   ; 5 tallboy     Hay, Officer
+    .byte $72   ; 6 regatta     Brother Downwind
     .byte $70   ; 7 off-leash   If I Had a Million Collars
-    .byte $5C   ; 8 podium      Podium Reprise
+    .byte $76   ; 8 podium      Podium Reprise: a lift over the events (see below)
     .byte $6C   ; 9 parking     Green P Shuffle
-    .byte $64   ; 10 subway     Please Stand Clear
+    .byte $6A   ; 10 subway     Please Stand Clear
+    .byte $7A   ; 11 jingle     finished
+    .byte $7A   ; 12 jingle     failed
+    .byte $7A   ; 13 jingle     new record
+song_mvol_end:
+.assert song_mvol_end - song_mvol = SONG_JINGLE + 3, error, "song_mvol: one per song"
+
+; where a song's master volume starts (0 = at song_mvol): the podium fanfare
+; climbs $3F -> $76 a step a frame, a one-second swell out of its snare roll
+song_swell:
+    .byte 0, 0, 0, 0, 0, 0, 0, 0
+    .byte $3F   ; 8 podium
+    .byte 0, 0, 0, 0, 0
+.assert * - song_swell = SONG_JINGLE + 3, error, "song_swell: one per song"

@@ -432,9 +432,43 @@ def please_stand_clear():
               'x . h k s . h . ' + 'k k h . s . h h ' + rep(ride, 6) + ' k . s . s . s s T T t t s s s s')
     return song((6, 6), [SAW, ARP12, BASS, DRUMS], join(run), loop=0)
 
+# ---------------------------------------------------------------------------
+# 11-13 result jingles (audio.s sfx_result): under two seconds each, played on
+# the music voices when a result card comes up, then they fade out by
+# themselves (the last chord rings until the fade). Not loops: loop=None.
+
+# 11 finished: a three-note pickup into a ringing C major "ta-da"
+def jingle_finish():
+    return song(5, [LEAD25, PLUCK, BASS, DRUMS], [
+        'G4 C5 E5:2 G5:2 E5:2 C6:14',
+        'E4 G4 C5:2 E5:2 C5:2 G5:14',
+        'C3:4 G2:4 C3:14',
+        'r r r . s . s s x:12 . .'], loop=None)
+
+
+# 12 failed: the sad trombone, wah wah wah wahhh, sliding C - B - Bb - Am
+def jingle_fail():
+    return song(6, [SAW, PAD, BASS, DRUMS], [
+        'G4:3 F#4:3 F4:3 E4:9',
+        'E4:3 D#4:3 D4:3 C4:9',
+        'C3:3 B2:3 Bb2:3 A2:9',
+        'k:3 k:3 k:3 t:9'], loop=None)
+
+
+# 13 new record: a brass arpeggio up to a top C, a crash and a held chord
+def jingle_record():
+    return song(5, [SAW, LEAD50, BASS, DRUMS], [
+        'G4 C5 E5 G5 C6:2 G5:2 E5 G5 C6:12',
+        'E4 G4 C5 E5 G5:2 E5:2 C5 E5 G5:12',
+        'C3:2 G2:2 C3:2 G2:2 E3:2 C3:12',
+        'k . s . k . s . s s x:12'], loop=None)
+
+
 def all_songs():
     """In SONG_* order: title, menu, bike, standings, bay, tallboy, regatta,
-    off-leash, podium, parking, subway."""
+    off-leash, podium, parking, subway, then the result jingles (finish,
+    fail, record)."""
     return [kc_incidental(), bobcaygeese(), gold_guns_gulls(), ahead_by_a_centimetre(),
             whelp_im_alive(), hay_officer(), brother_downwind(), million_collars(),
-            podium_reprise(), green_p_shuffle(), please_stand_clear()]
+            podium_reprise(), green_p_shuffle(), please_stand_clear(),
+            jingle_finish(), jingle_fail(), jingle_record()]
