@@ -5,7 +5,9 @@ at the top of src/ev_park.s) through the Game that run_bot is driving; they
 find it on the caller's frame, so pt.py needs no hook. No-skill bots are
 exploit detectors: holding UP, mashing B while walking, random input.
 """
+import os
 import sys
+DEBUG = os.environ.get("PARK_DEBUG")
 
 from policies import Policy, idle, hold_up, random_input, A, B, X, UP, DOWN, LEFT, RIGHT
 
@@ -13,8 +15,10 @@ from policies import Policy, idle, hold_up, random_input, A, B, X, UP, DOWN, LEF
 K_X, K_Y, K_DASH, K_DASHCD, K_BALLS, B_STATE = 0, 2, 16, 18, 26, 48
 K_STATE, K_STUM = 10, 288
 K_LIVE, K_CALM, K_ARMED, K_CHAIN = 540, 542, 544, 548
-D_SLOT, D_X, D_Y, D_STATE = 80, 96, 112, 176
-DS_ALERT, DS_CHARGE, DS_SIT = 1, 2, 7
+D_SLOT, D_X, D_Y, D_STATE, D_KIND = 80, 96, 112, 176, 208
+DS_ALERT, DS_CHARGE, DS_SIT, DS_CROUCH, DS_LUNGE = 1, 2, 7, 9, 10
+THREAT = (DS_ALERT, DS_CHARGE, DS_CROUCH, DS_LUNGE)
+WINDOW = (DS_CROUCH, DS_LUNGE)          # the red "!", then the lunge: B pays by hand
 NUM_ENT = 8
 
 
@@ -48,7 +52,8 @@ class _Peeker(Policy):
         for i in range(NUM_ENT):
             if r[D_SLOT + 2 * i] == 0xFF:
                 continue
-            dogs.append({'i': i, 'x': r[D_X + 2 * i + 1], 'y': w(D_Y + 2 * i), 'st': r[D_STATE + 2 * i]})
+            dogs.append({'i': i, 'x': r[D_X + 2 * i + 1], 'y': w(D_Y + 2 * i), 'st': r[D_STATE + 2 * i],
+                         'kind': r[D_KIND + 2 * i]})
         return me, dogs
 
     def press(self, m, btn):
@@ -85,9 +90,11 @@ def _sitter(me, dogs, reach):
 
 
 class park_ace(_Peeker):
-    """Walks up, sidesteps every charging dog at the very last moment (CLOSE SHAVE),
-    a ball if the step is on cooldown, and pats every dog it dodged (DODGE 'N' PAT)."""
-    dodge_at = 20
+    """Perfect eyes: sidesteps every lunging dog at the last moment (CLOSE SHAVE),
+    stepping INTO his side when he isn't dead ahead (MATADOR), a ball if the
+    step is on cooldown, and pats every dog it dodged (DODGE 'N' PAT)."""
+    dodge_at = 18
+    matador = True
 
     def act(self, t, tel, rng):
         me, dogs = self.view()
@@ -97,16 +104,23 @@ class park_ace(_Peeker):
             return self.done(_toward(me, sit))
         threat = None
         for d in dogs:
-            if d['st'] != DS_CHARGE:
+            if d['st'] not in WINDOW:
                 continue
             dist = abs(d['x'] - me['x']) + abs(d['y'] - me['y'])
-            if threat is None or dist < threat:
-                threat = dist
-        if threat is not None and threat < self.dodge_at:
-            if me['cd'] == 0:
-                m = self.press(m, B)
-            elif me['dash'] == 0 and me['balls'] and me['ball'] == 0 and threat < 24:
-                m = self.press(m, A)
+            if threat is None or dist < threat[0]:
+                threat = (dist, d)
+        if threat is not None:
+            dist, d = threat
+            m &= ~UP                                  # stand and face him
+            if self.matador and d['st'] == DS_CROUCH and abs(d['x'] - me['x']) < 8:
+                m |= RIGHT if me['x'] < 128 else LEFT  # open an angle on him: OLE needs one
+            if d['st'] == DS_LUNGE and dist < self.dodge_at:
+                if me['cd'] == 0:
+                    m = self.press(m, B)
+                    if self.matador and abs(d['x'] - me['x']) >= 4:
+                        m |= LEFT if d['x'] < me['x'] else RIGHT
+                elif me['dash'] == 0 and me['balls'] and me['ball'] == 0:
+                    m = self.press(m, A)
         # drift back toward the middle of the park between dogs
         if threat is None and not me['dash']:
             if me['x'] < 100 and t % 3 == 0:
@@ -114,6 +128,25 @@ class park_ace(_Peeker):
             elif me['x'] > 156 and t % 3 == 0:
                 m |= LEFT
         return self.done(m)
+
+
+class park_dawdle(park_ace):
+    """park_ace walking north only part of the time (Rob's timeout farm, round 6):
+    with one go per dog, a slower walk must never pay more than a fast one."""
+    duty = 45
+
+    def act(self, t, tel, rng):
+        m = super().act(t, tel, rng)
+        if (t % 100) >= self.duty:
+            m &= ~UP
+        return m
+
+
+def _dawdle_at(n):
+    return type('park_dawdle%d' % n, (park_dawdle,), {"duty": n})
+
+
+DAWDLE = [_dawdle_at(n) for n in (30, 45, 60, 80)]
 
 
 class park_fetcher(_Peeker):
@@ -124,7 +157,7 @@ class park_fetcher(_Peeker):
         m = UP
         near = None
         for d in dogs:
-            if d['st'] not in (DS_ALERT, DS_CHARGE):
+            if d['st'] not in THREAT:
                 continue
             dist = abs(d['x'] - me['x']) + abs(d['y'] - me['y'])
             if near is None or dist < near[0]:
@@ -132,7 +165,7 @@ class park_fetcher(_Peeker):
         if near:
             if me['balls'] and me['ball'] == 0:
                 m = self.press(m, A)
-            elif near[1] == DS_CHARGE and near[0] < 34 and me['cd'] == 0:
+            elif near[1] in WINDOW and near[0] < 34 and me['cd'] == 0:
                 m = self.press(m, B)
         return self.done(m)
 
@@ -149,7 +182,7 @@ class park_sloppy(_Peeker):
         m = UP
         live = set()
         for d in dogs:
-            if d['st'] != DS_CHARGE:
+            if d['st'] not in WINDOW:
                 continue
             live.add(d['i'])
             if d['i'] not in self.aim:          # a new charge: how well will I read it?
@@ -229,7 +262,7 @@ class leash_human(_Peeker):
             m = (m & ~RIGHT) | LEFT
         live = set()
         for d in dogs:
-            if d['st'] not in (DS_ALERT, DS_CHARGE):
+            if d['st'] not in THREAT:
                 continue
             live.add(d['i'])
             if d['i'] not in self.plan:
@@ -254,7 +287,7 @@ class leash_human(_Peeker):
             elif kind == 'ball' and now_me['ball'] == 0:
                 m = self.press(m, A)
                 self.plan[d['i']] = ('done', 0)
-            elif kind == 'time' and d['st'] == DS_CHARGE and dist < aim:
+            elif kind == 'time' and d['st'] in WINDOW and dist < aim:
                 m = self.press(m, B)
                 self.plan[d['i']] = ('done', 0)
         for i in list(self.plan):
@@ -301,43 +334,64 @@ class park_hand(_Peeker):
     """The CURVE bot: a practised player with a human hand.
 
     It knows nothing about its own reaction time. It reacts only to what's
-    on screen: a dog is a threat from the frame its "!" shows (over the dog
-    or pinned to the bottom edge); it judges the charge by eye (the gap and
-    how fast it's closing) and presses B when the dog is `T` frames out from
-    where it wants the step to land. `T` is learned during the run from what
-    it sees happen:
-      - the gap at the moment its walker visibly sidesteps (early or late,
-        and by about how much);
-      - the popup: DODGE (too early: he was set, no bonus), NICE TIMING,
-        CLOSE SHAVE, or TACKLED (too late: lean earlier next time).
-    The first dog it gets set on the "!" (as the coach line says). With one
-    heart left, or a dog coming from off the bottom, it plays safe the same
-    way. A hand that scatters a lot aims for NICE TIMING rather than the
-    shave. Between dogs it walks north and goes back for a pat when the dog
-    it dodged sits within easy reach."""
+    on screen: a dog is a threat from the frame its white "!" shows (over the
+    dog or pinned to the bottom edge); the red "!" says he's crouched to
+    spring, and the lunge is the dog leaving the ground. It learns, as a
+    player does:
+      - each kind's crouch (doodle, lab, husky, corgi look different), from
+        watching the red "!" turn into a lunge;
+      - its own lag, from where its walker visibly steps compared with
+        where it meant to, and from the popups (DODGE: too early, he wasn't
+        in range; TACKLED: too late).
+    The first dog it gets set on the "!" (as the coach says). With one heart
+    left, or a dog coming from off the bottom, it plays safe the same way.
+    A kind it hasn't seen spring yet: B as soon as the red "!" shows (NICE
+    TIMING). A kind it knows: B timed for late in the lunge (CLOSE SHAVE),
+    stepping into his side (MATADOR) while its hand is steady; a hand that
+    scatters a lot goes back to NICE TIMING. It has walked the park before,
+    so it starts out knowing roughly how long each kind crouches (KNOWN).
+    It stands still while a dog is on it, and goes back for a pat when the
+    dog it dodged sits within easy reach."""
 
-    T0 = 12                  # first guess: press about a quarter second out
+    KNOWN = {0: 25, 1: 21, 2: 19, 3: 29}   # crouch frames by kind, from earlier walks
+
+    O0 = 10.0                # first guess at its own lag (frames): it leads a little
     safe = False             # park_safe: gets set on every "!" (the safe line)
-    SHAVE_AIM, SAFE_AIM = 15, 29
+    nice_only = False        # park_nice: never tries the shave
+    SHAVE_AIM = 17           # px between him and me when the step should go (early = NICE, late = tackled)
+    LUNGE = 2.5              # px a frame he closes in the lunge (by eye)
 
     def __init__(self):
         super().__init__()
-        self.T = float(self.T0)
-        self.seen = {}           # dog slot -> plan
+        self.O = self.O0
+        self.C = dict(self.KNOWN)  # kind -> crouch frames (seen this walk, or known)
+        self.crouch = {}         # dog slot -> (t, kind, gap) when the red "!" showed
+        self.leap = {}           # dog slot -> (t, gap) when he sprang
+        self.plan = {}           # dog slot -> 'arm' / 'done' / press frame
+        self.prevst = {}
         self.hold_b = 0
-        self.gap = {}            # dog slot -> recent gaps (closing speed by eye)
-        self.cnt = None          # tackles / dodges / hand / shaves seen so far
-        self.timing = None       # (dog, closing speed, aim) of the press in flight
-        self.errs = []           # how far off the landed steps were (px)
+        self.side = 0
+        self.cnt = None
+        self.timing = None       # (dog, aim) of the press in flight
+        self.errs = []
         self.prev_dash = 0
         self.dogs_seen = 0
+        self.cool = 0
+        self.sh_try = self.sh_ok = 0     # shave attempts, and the ones not tackled
+        self.last = None
 
-    def aim(self):
-        if len(self.errs) >= 2 and sum(abs(e) for e in self.errs[-4:]) / len(self.errs[-4:]) > 9:
-            return self.SAFE_AIM
-        return self.SHAVE_AIM
+    def shaky(self):
+        """tackled lately, or a hand whose last few steps (after the first few,
+        while it found its lag) landed well off: NICE TIMING for a while
+        (it keeps trying the shave one dog in four)"""
+        if self.dogs_seen < self.cool:
+            return True
+        if self.sh_try >= 3 and self.sh_ok < 0.7 * self.sh_try and self.dogs_seen % 5:
+            return True                       # the shave isn't paying for my hand
+        e = self.errs[3:][-3:]
+        return len(e) >= 2 and sum(abs(x) for x in e) / len(e) > 7 and self.dogs_seen % 4
 
-    def learn(self, me, dogs):
+    def learn(self, t, me, dogs):
         r = self.g.core.peek(self.g.sym['ev_ram'], 600)
         w = lambda o: r[o] | r[o + 1] << 8
         cnt = (w(K_TACKLE), w(K_DODGED), w(K_HAND), w(K_SHAVES))
@@ -345,76 +399,106 @@ class park_hand(_Peeker):
             self.cnt = cnt
         tk, dd, hd, sh = (c - p for c, p in zip(cnt, self.cnt))
         self.cnt = cnt
-        hurt = r[K_HURT]
-        # the walker visibly steps aside: how big was the gap?
-        if me['dash'] and not self.prev_dash and self.timing:
-            i, v, aim = self.timing
-            d = next((e for e in dogs if e['i'] == i), None)
-            if d is not None:
-                g = abs(d['x'] - me['x']) + abs(d['y'] - me['y'])
-                err = g - aim
-                self.errs.append(err)
-                # early is safe, so correct it in full; late, by half
-                fix = (1.0 if err > 0 else 0.5) * err / v
-                self.T -= max(-4.0, min(8.0, fix))
+        for d in dogs:
+            was = self.prevst.get(d['i'])
+            if d['st'] == DS_CROUCH and was != DS_CROUCH:
+                self.crouch[d['i']] = (t, d['kind'], abs(d['x'] - me['x']) + abs(d['y'] - me['y']))
+            if d['st'] == DS_LUNGE and was == DS_CROUCH and d['i'] in self.crouch:
+                c = t - self.crouch[d['i']][0]                     # his rhythm, seen
+                self.C[d['kind']] = (self.C[d['kind']] * 3 + c) / 4 if d['kind'] in self.C else c
+                self.leap[d['i']] = (t, abs(d['x'] - me['x']) + abs(d['y'] - me['y']))
+            self.prevst[d['i']] = d['st']
+        # the walker visibly steps aside: where was he just then? (frames early)
+        if me['dash'] and not self.prev_dash and self.timing and self.last:
+            i, aim = self.timing
+            pme, pdogs = self.last
+            d = next((e for e in pdogs if e['i'] == i), None)
+            err = None
+            if d is not None and d['st'] == DS_LUNGE:
+                err = (abs(d['x'] - pme['x']) + abs(d['y'] - pme['y']) - aim) / self.LUNGE
+            elif d is not None and d['st'] == DS_CROUCH and i in self.crouch:
+                t0, kind, gap = self.crouch[i]     # he hadn't even sprung
+                err = t0 + self.C.get(kind, 16) - t + (gap - aim) / self.LUNGE
+            if err is not None and aim == self.SHAVE_AIM:
+                self.errs.append(err * self.LUNGE)
+                self.O -= 0.5 * max(-6.0, min(8.0, err))
+                if DEBUG: print("  step err %.1f frames, dog was %s, O now %.1f" % (err, d["st"], self.O))
         self.prev_dash = me['dash']
+        self.last = (me, dogs)
         if self.timing:
             if tk:
-                self.T += 4                 # too late: lean earlier
+                self.O += 4                  # too late: lean earlier
+                self.cool = self.dogs_seen + 4
+                self.sh_try += self.timing[1] == self.SHAVE_AIM
                 self.errs.append(-12)
                 self.timing = None
             elif dd:
-                if not hd:
-                    self.T -= 1.5           # plain DODGE: he was set, so it was early
+                if self.timing[1] == self.SHAVE_AIM:
+                    self.sh_try += 1
+                    self.sh_ok += 1
                 self.timing = None
-        self.T = max(-3.0, min(40.0, self.T))
-        return hurt
+        self.O = max(-2.0, min(40.0, self.O))
+        return r[K_HURT]
 
     def act(self, t, tel, rng):
         me, dogs = self.view()
-        hurt = self.learn(me, dogs)
+        hurt = self.learn(t, me, dogs)
         cam = self.g.core.peek(self.g.sym['ev_ram'] + K_CAM, 2)
         cam = cam[0] | cam[1] << 8
         m = UP
         live = set()
         for d in dogs:
-            if d['st'] not in (DS_ALERT, DS_CHARGE):
+            if d['st'] not in THREAT:
                 continue
             live.add(d['i'])
             dist = abs(d['x'] - me['x']) + abs(d['y'] - me['y'])
-            hist = self.gap.setdefault(d['i'], [])
-            hist.append(dist)
-            del hist[:-4]
-            if d['i'] not in self.seen:
-                self.seen[d['i']] = 'watch'
+            if d['i'] not in self.plan:
+                self.plan[d['i']] = None
                 self.dogs_seen += 1
-            plan = self.seen[d['i']]
+            plan = self.plan[d['i']]
+            if d['st'] != DS_ALERT:
+                m &= ~UP                          # he's coming: stand and face him
             if plan == 'done':
                 continue
-            # closing speed, by eye, over the last few frames (never under a walk)
-            v = max(2.6, (hist[0] - hist[-1]) / max(1, len(hist) - 1))
             behind = d['y'] - cam > 192           # coming from off the bottom: no read on it
-            if self.dogs_seen == 1 or hurt >= 2 or behind or self.safe:
+            if plan is None and (self.dogs_seen == 1 or hurt >= 2 or behind or self.safe):
                 if not me['armed']:
                     self.hold_b = 8               # get set on the "!"
-                self.seen[d['i']] = 'done'
+                self.plan[d['i']] = 'done'
                 continue
-            aim = self.aim()
-            if d['st'] == DS_ALERT:
-                if d['y'] < me['y'] and dist < 64:
-                    m &= ~UP                      # he's right ahead, barking: wait for him
+            if d['st'] not in WINDOW or d['i'] not in self.crouch:
                 continue
-            if dist <= aim + v * self.T:
+            t0, kind, gap = self.crouch[d['i']]
+            if plan is None:                       # the red "!": shave or NICE?
+                side = 0
+                shave = kind in self.C and not self.nice_only and not self.shaky()
+                if shave and abs(d['x'] - me['x']) >= 6:
+                    side = LEFT if d['x'] < me['x'] else RIGHT   # OLE: step into his side
+                self.plan[d['i']] = plan = (shave, side)
+            shave, side = plan
+            aim = self.SHAVE_AIM if shave else gap
+            if not shave:
+                when = t0                          # B on the red "!": NICE TIMING
+            elif d['i'] in self.leap:              # he's sprung: time it off that
+                tl, gl = self.leap[d['i']]
+                when = tl + (gl - aim) / self.LUNGE - self.O
+            else:                                  # his rhythm, from the crouch
+                when = t0 + self.C[kind] + (dist - aim) / self.LUNGE - self.O
+            if t >= when:
+                if DEBUG:
+                    print('  press t=%d dog %d st %d dist %d cd %d shave %s O %.1f' % (t, d['i'], d['st'], dist, me['cd'], shave, self.O))
                 self.hold_b = 8
-                self.seen[d['i']] = 'done'
-                self.timing = (d['i'], v, aim)
-        for i in list(self.seen):
+                self.side = side
+                self.plan[d['i']] = 'done'
+                self.timing = (d['i'], aim)
+        for i in list(self.plan):
             if i not in live:
-                del self.seen[i]
-                self.gap.pop(i, None)
+                del self.plan[i]
+                self.crouch.pop(i, None)
+                self.leap.pop(i, None)
         if self.hold_b:
             self.hold_b -= 1
-            m |= B
+            m |= B | self.side
         elif not live and not me['dash']:
             sit = _sitter(me, dogs, 70)
             if sit is not None:
@@ -453,14 +537,28 @@ class park_safe(park_hand):
     safe = True
 
 
+class leash_dana(park_hand):
+    """Dana, round 6: the safe line to the letter (B on every white "!"),
+    never goes back for a pat. A flawless one must reach bronze."""
+    safe = True
+
+    def act(self, t, tel, rng):
+        m = super().act(t, tel, rng)
+        me, dogs = self.view()
+        if not me['live'] and not me['dash'] and not (m & B):
+            m = (m & ~(LEFT | RIGHT | DOWN)) | UP
+        return m
+
+
 class park_nice(park_hand):
-    """park_hand that only ever aims for NICE TIMING (B a stride out), never the shave."""
-    SHAVE_AIM = 29
+    """park_hand that only ever aims for NICE TIMING (B on the red "!"), never the shave."""
+    nice_only = True
 
 
-POLICIES = {c.__name__: c for c in [park_ace, park_fetcher, park_sloppy, park_timing, leash_human, leash_nervous, park_hand, park_safe, park_nice,
-                                     up_mash_b, up_mash_ab] + BLIND}
+POLICIES = {c.__name__: c for c in [park_ace, park_fetcher, park_sloppy, park_timing, leash_human, leash_nervous, park_hand, park_safe, park_nice, leash_dana,
+                                     up_mash_b, up_mash_ab] + BLIND + DAWDLE}
 DEFAULTS = {'park': ['idle', 'hold_up', 'up_mash_b', 'up_mash_ab', 'up_blind_b40', 'up_blind_b60', 'random_input',
-                     'park_timing', 'park_sloppy', 'leash_human', 'leash_nervous', 'park_fetcher', 'park_hand', 'park_ace']}
+                     'park_timing', 'park_sloppy', 'leash_human', 'leash_nervous', 'park_fetcher', 'park_safe',
+                     'park_hand', 'park_ace']}
 CURVE = {'park': 'park_hand'}
 
