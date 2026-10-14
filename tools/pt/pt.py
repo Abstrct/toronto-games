@@ -23,6 +23,7 @@ Script language (space separated; superset of tools/run.py):
     (tokens)*N       repeat a group, e.g. (pLEFT pRIGHT)*20
     s:NAME           screenshot (PNG, 2x) into the session's shots/
     film:NAME:N:K    N frames, one every K, as a contact sheet + GIF
+    wav:NAME:N       record N frames of audio to NAME.wav (peak, clipping, stereo width)
     save:LABEL       named checkpoint;  load:LABEL  jump back to it
     goto:TARGET      cached jump to a scene (see `pt.py scenes`)
     until:COND[:MAX] run until COND holds (default MAX 3600 frames).
@@ -495,6 +496,37 @@ class Runner:
         self.g.step(0)
         self.outputs.append({'film': sp, 'gif': gp, 'frames': n, 'every': k})
 
+    def wav(self, name, n):
+        """Record n frames of audio to NAME.wav and measure it."""
+        import array
+        import math
+        import wave
+        rawp = os.path.join(self.outdir, name + '.raw')
+        self.g.core.cmd('wav ' + rawp)
+        self.wait(n)
+        self.g.core.cmd('wavend')
+        data = open(rawp, 'rb').read()
+        os.remove(rawp)
+        wp = os.path.join(self.outdir, name + '.wav')
+        w = wave.open(wp, 'wb')
+        w.setnchannels(2)
+        w.setsampwidth(2)
+        w.setframerate(32040)
+        w.writeframes(data)
+        w.close()
+        d = array.array('h', data)
+        L, R = d[0::2], d[1::2]
+        if not L:
+            return {'wav': wp, 'frames': n, 'silent': True}
+        ml, mr = sum(L) / len(L), sum(R) / len(R)
+        rms = lambda xs: math.sqrt(sum(x * x for x in xs) / len(xs)) if xs else 0
+        mid = [((a - ml) + (b - mr)) / 2 for a, b in zip(L, R)]
+        side = [((a - ml) - (b - mr)) / 2 for a, b in zip(L, R)]
+        rm, rs = rms(mid), rms(side)
+        return {'wav': wp, 'frames': n, 'peak': max(map(abs, d)), 'clipped': sum(1 for x in d if abs(x) >= 32700),
+                'rms': round(rm), 'side_db': round(20 * math.log10(rs / rm), 1) if rm and rs else None,
+                'silent': rm < 50}
+
     # --- the language
     def execute(self, script):
         for tok in tokenize(script):
@@ -516,6 +548,10 @@ class Runner:
             _, name, n, k = tok.split(':')
             os.makedirs(self.outdir, exist_ok=True)
             self.film(name, int(n), int(k))
+        elif tok.startswith('wav:'):
+            _, name, n = tok.split(':')
+            os.makedirs(self.outdir, exist_ok=True)
+            self.outputs.append(self.wav(name, int(n)))
         elif tok.startswith('until:'):
             parts = tok[6:].split(':')
             self.until(parts[0], int(parts[1]) if len(parts) > 1 else 3600)
@@ -714,7 +750,9 @@ def compact_events(evs):
 
 
 # ---------------------------------------------------------------- bots
-def run_bot(event, policy_name, seed, max_frames=60 * 240, film=None):
+def run_bot(event, policy_name, seed, max_frames=60 * 240, film=None, latency=0, jitter=0, miss=0.0):
+    """latency/jitter/miss model a human: each decision lands latency +- jitter
+    frames late, and a fraction `miss` of decisions never happen."""
     from policies import POLICIES
     pol = POLICIES[policy_name]()
     g = Game()
@@ -727,9 +765,21 @@ def run_bot(event, policy_name, seed, max_frames=60 * 240, film=None):
     lag = 0
     prev = g.last
     hold = 0
+    want = 0
+    pending = []                 # (frame the hand gets there, mask)
+    hrng = random.Random(seed * 7919 + 1)
     while t < max_frames:
         if t % pol.every == 0:
-            hold = pol.act(t, g.last, rng)
+            m = pol.act(t, g.last, rng)
+            if not latency and not jitter and not miss:
+                hold = m
+            elif m != want and hrng.random() >= miss:
+                want = m
+                pending.append((t + max(0, latency + hrng.randint(-jitter, jitter)), m))
+        if pending:
+            pending.sort()
+            while pending and pending[0][0] <= t:
+                hold = pending.pop(0)[1]
         v = g.step(1, hold)
         if v['ev_fail'] > prev['ev_fail']:
             fails.append(t)
@@ -750,6 +800,7 @@ def run_bot(event, policy_name, seed, max_frames=60 * 240, film=None):
     g.step(20, 0)
     st = g.state(full=False)
     res = {'event': event, 'policy': policy_name, 'seed': seed, 'score': st['ev_score'],
+           'latency': latency, 'success': st['ev_fail'] == 0,
            'fails': st['ev_fail'], 'fail_frames': fails, 'frames': t,
            'finished': t < max_frames, 'stats': st['ev_stat'], 'lag': lag,
            'end_scene': st['scene']}
@@ -776,6 +827,60 @@ def parallel_map(fn, jobs, workers):
 
 def _bot_job(j):
     return run_bot(*j)
+
+
+def _curve_job(j):
+    event, pol, seed, maxf, lat = j
+    return run_bot(event, pol, seed, maxf, latency=lat, jitter=lat // 4, miss=0.03 if lat else 0.0)
+
+
+def cmd_curve(a):
+    """Score and finish rate against human reaction time. A good event degrades
+    gracefully: an average human (~15 frames, 250 ms) still finishes and clearly
+    beats standing still."""
+    sys.path.insert(0, HERE)
+    from policies import POLICIES, DEFAULTS, CURVE
+    skilled = [p for p in DEFAULTS[a.event] if not is_trivial(p) and p != 'random_input']
+    pol = a.policy or CURVE.get(a.event) or (skilled[-1] if skilled else None)
+    if not pol:
+        sys.exit('no skilled bot for %s: write one in tools/pt/policies_%s.py (set CURVE)' % (a.event, a.event))
+    _warm([a.event])
+    lats = [int(x) for x in a.latencies.split(',')]
+    jobs = [(a.event, pol, a.seed + i, a.max_frames, L) for L in lats for i in range(a.runs)]
+    jobs += [(a.event, 'idle', a.seed + i, a.max_frames, 0) for i in range(2)]
+    rows = parallel_map(_curve_job, jobs, a.jobs)
+    idle = statistics.median(r['score'] for r in rows if r['policy'] == 'idle')
+    print('\n%s: %s with a human hand (latency +- latency/4 frames, 3%% missed inputs); idle scores %d'
+          % (EVENT_TITLE[a.event], pol, idle))
+    print('  %8s %6s %6s %6s %8s %6s' % ('latency', 'ms', 'median', 'min', 'finished', 'secs'))
+    curve = {}
+    for L in lats:
+        rs = [r for r in rows if r['policy'] == pol and r['latency'] == L]
+        med = statistics.median(r['score'] for r in rs)
+        fin = sum(r['success'] for r in rs) / len(rs)
+        curve[L] = (med, fin)
+        print('  %8d %6d %6d %6d %7d%% %6.1f' % (L, round(L * 1000 / 60), med, min(r['score'] for r in rs),
+                                                round(100 * fin), statistics.median(r['frames'] for r in rs) / 60))
+    flags = []
+    human = min(lats, key=lambda L: abs(L - 15))
+    hm, hf = curve[human]
+    if hf < 0.5:
+        flags.append('an average human (%d frames) finishes only %d%% of runs' % (human, round(100 * hf)))
+    if hm <= 1.5 * idle + 100:
+        flags.append('an average human (%d frames) scores about what standing still scores (%d vs %d)' % (human, hm, idle))
+    fast = min(lats)
+    if curve[fast][0] > 0 and hm > 0 and curve[fast][0] / hm > 3:
+        flags.append('cliff: %d-frame play scores %.0fx the %d-frame score' % (fast, curve[fast][0] / hm, human))
+    elif curve[fast][0] > 0 and hm == 0:
+        flags.append('cliff: %d-frame play scores %d, %d-frame play scores 0' % (fast, curve[fast][0], human))
+    print('\nFLAGS' if flags else '\nno flags')
+    for f in flags:
+        print('  !', f)
+    out = os.path.join(PT, 'reports', 'curve_%s_%d.json' % (a.event, int(time.time())))
+    os.makedirs(os.path.dirname(out), exist_ok=True)
+    json.dump({'rom': rom_id(), 'event': a.event, 'policy': pol, 'idle': idle, 'flags': flags, 'rows': rows},
+              open(out, 'w'), indent=1)
+    print('full results:', os.path.relpath(out, ROOT))
 
 
 def cmd_bot(a):
@@ -1114,6 +1219,14 @@ def main():
     p.add_argument('-s', '--seed', type=int, default=1)
     p.add_argument('-j', '--jobs', type=int, default=os.cpu_count())
     p.add_argument('--max-frames', type=int, default=60 * 240)
+    p = sub.add_parser('curve', help='score and finish rate against human reaction time')
+    p.add_argument('event', choices=EVENTS)
+    p.add_argument('-p', '--policy')
+    p.add_argument('-l', '--latencies', default='0,6,9,12,15,18,24')
+    p.add_argument('-n', '--runs', type=int, default=4)
+    p.add_argument('-s', '--seed', type=int, default=1)
+    p.add_argument('-j', '--jobs', type=int, default=os.cpu_count())
+    p.add_argument('--max-frames', type=int, default=60 * 240)
     p = sub.add_parser('balance', help='all events x default policies, with design flags')
     p.add_argument('events', nargs='*', choices=EVENTS + [[]], default=None)
     p.add_argument('-n', '--runs', type=int, default=6)
@@ -1159,6 +1272,8 @@ def main():
         cmd_bot(a)
     elif a.cmd == 'balance':
         cmd_balance(a)
+    elif a.cmd == 'curve':
+        cmd_curve(a)
     elif a.cmd == 'fuzz':
         cmd_fuzz(a)
     elif a.cmd == 'golden':

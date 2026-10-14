@@ -78,6 +78,24 @@ Policies live in `tools/pt/policies.py`. The no-skill ones (`idle`, `hold_a`,
 Results go to `build/pt/reports/`. To add a skilled bot, write a class with
 `act(t, telemetry, rng) -> mask` and add it to `DEFAULTS`.
 
+## Human curve
+
+```bash
+python3 tools/pt/pt.py curve bike            # skilled bot at 0..24 frames of reaction latency
+```
+
+The skilled bot's decisions land `latency ± latency/4` frames late, and 3% of them are missed. That's
+roughly how a human hand differs from a bot with perfect RAM perception. A well-tuned event degrades
+gracefully. At 15 frames (250 ms, an average adult) the run should finish at least half the time and clearly
+beat standing still, and the expert should score no more than about 3× the average human.
+
+Caveats:
+- The bot plans with perfect information and only acts late. Give it a human-like look-ahead (react to what's
+  on screen, plan from hazards that have been visible for a while), or the curve measures the bot's myopia, not the game.
+- Rhythm and anticipation inputs, like Bay's beat taps, aren't reactions. A plain delay only shifts their phase, so
+  rhythm events need their own human model (e.g. timing noise around the beat, plus latency only on hazards).
+- Plug-ins choose the bot with `CURVE = {'<event>': 'policy'}`.
+
 ## Robustness
 
 ```bash

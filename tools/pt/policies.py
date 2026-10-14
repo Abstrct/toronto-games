@@ -177,6 +177,11 @@ DEFAULTS = {
 }
 
 
+# the skilled bot `pt.py curve <event>` slows down to human reaction times;
+# plug-ins may set CURVE = {'<event>': 'policy'}
+CURVE = {}
+
+
 # per-event bots live in policies_<event>.py next to this file; each may define
 # POLICIES (name -> class) and DEFAULTS (event -> list) to add or replace
 def _plugins():
@@ -188,6 +193,7 @@ def _plugins():
             m = importlib.import_module(f[:-3])
             POLICIES.update(getattr(m, 'POLICIES', {}))
             DEFAULTS.update(getattr(m, 'DEFAULTS', {}))
+            CURVE.update(getattr(m, 'CURVE', {}))
 
 
 _plugins()
