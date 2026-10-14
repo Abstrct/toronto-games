@@ -116,7 +116,7 @@ START goes to the main menu.
 | 2 | Bobcaygeese | The Tragically Hip, "Bobcaygeon" | menus, sign-up, records |
 | 3 | Off-Leash Alert | Trinity Bellwoods, 3/4 view | D-pad walk · B when a "!" shows: sidestep (hold ◀ or ▶ to pick a side) · A throw a tennis ball | Walk from the Queen St gate to the Dundas gate. A dog with a "!" is about to charge. Press B early to get set and you sidestep safely, or press it as he lunges for NICE TIMING or a CLOSE SHAVE bonus. Then walk up and pat him (DODGE 'N' PAT). Every 3 dogs in a row wins back a heart; three tackles and you're done. |
 | 4 | Ahead by a Centimetre | The Tragically Hip, "Ahead by a Century" | event standings, final table |
-| 5 | Harbour Regatta | Toronto Harbour, top-down | Tap ◀ ▶ turn one notch (hold to keep turning) · A hike out in gusts | Round buoys 1, 2 and 3 (sail inside the dotted ring), then cross the line. The diamonds ahead of the bow show where you're pointed. You can't sail into the wind, so zig-zag. Style: TIGHT ROUNDING and FERRY SURF (ride the Island ferry's wake). A run that doesn't finish still scores for each leg; drifting for 10 seconds ends the race. |
+| 5 | Whelp, I'm Alive | Metric, "Help I'm Alive" | Bay St Power Walk |
 | 6 | Hay, Officer | Mother Mother, "Hayloft" | Tallboy Trot |
 | 7 | TTC Surfing | Line 1, Bloor-Yonge to Union | D-pad lean | Ride to Union hands-free. Every lurch is announced: listen for the beeps, squeal or hiss, and watch the yellow arrow, then lean that way to keep the dot in the ring. Leave the ring and you grab something, which means more germs. Clean legs build a STANDING SURF chain. Twenty germs and you're PATIENT ZERO. |
 | 8 | If I Had a Million Collars | Barenaked Ladies, "If I Had $1000000" | Off-Leash Alert |
