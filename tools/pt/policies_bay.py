@@ -1,15 +1,18 @@
 """Bay St Power Walk bots.
 
-The event is a rhythm game: one step per 8th note of "Whelp, I'm Alive"
-(15 frames), PERFECT within +-2 frames, GOOD within +-4, EARLY/LATE (a short
-stride) out to +-7. The song starts on the first frame of control, so 8th
-note k lands at t = 15k + PHASE; k % 8 == 0 is a bar's downbeat (the gold
-PRESTO tick, Y).
+The event is a rhythm game on "Whelp, I'm Alive" (15 frames an 8th note). The
+walk is on the BEAT, the big dots (every quarter note, 30 frames): PERFECT is
+the landing frame -2..+3 (a press read the frame after the landing scores 0,
+the landing frame itself -1), GOOD -4..+5, EARLY/LATE (a short stride) out
+to the edge of the 8th. A beat is only missed when neither its 8th nor the "and" after it got a
+step. DOUBLE TIME: a good step on the beat and another on the small dot after
+it is a longer stride and twice the style. The song starts on the first frame
+of control, so 8th k lands at t = 15k + PHASE; k % 8 == 0 is a bar's downbeat
+(the gold PRESTO dot, Y).
 
-Skilled bots also look where they're going: they read the crowd from event
-RAM (positions, lanes) like a player reads the screen. `bay_human` reads it
-15 frames late, misses things and taps loosely: it is the "decent human who
-follows the card" the event is tuned for.
+`bay_ear` is the curve bot: it reads only the screen (the dots in OAM) and
+taps as each dot lands, without pre-compensating pt's hand latency. The older
+bots (`bay_beat` family) step on every 8th from RAM timing.
 """
 import collections
 import inspect
@@ -341,6 +344,266 @@ class bay_hand(Policy):
         return 0
 
 
+def _sprite_tiles():
+    """MS_*_BASE tile numbers of the event's sprites (build/bay_meta.inc)."""
+    import os
+    import re
+    here = os.path.dirname(os.path.abspath(__file__))
+    meta = os.path.join(here, '..', '..', 'build', 'bay_meta.inc')
+    out = {}
+    for m in re.finditer(r'^MS_(\w+)_BASE = (\d+)', open(meta).read(), re.M):
+        out[m.group(1)] = int(m.group(2))
+    return out
+
+
+TARGET_X = 56       # screen x of a dot sprite landing in the target (BEAT_X - 4)
+DOT_Y = 204         # the dots' sprite row (BEAT_Y - 4)
+HIT_Y = 199         # the "where your step landed" mark
+
+
+class bay_ear(bay_hand):
+    """The curve bot: taps to what a person sees and hears, never to RAM.
+
+    Each frame it reads the sprites on screen (the OAM the PPU shows this
+    frame): the dots sliding into the target at 2 px a frame tell it when the
+    next big dot (a beat), small dot (the "and") and gold dot (a bar) will
+    land. It presses AS THE DOT LANDS, the frame the target lights and the
+    note sounds, plus human timing noise (motor sd 0.6 + 0.12 L frames, a
+    slowly wandering inner beat, the odd dropped step).
+
+    It does NOT pre-compensate pt's hand latency L: its presses reach the
+    game L +- L/4 frames late. All it gets is what a person gets: the mark
+    under the strip (where the step landed) and EARLY / LATE, from which it
+    nudges its timing by a fraction (phase correction, gain `alpha`, read off
+    the screen to +-1 frame). alpha = 0 is a player who never adapts.
+
+    Lanes: when a red ! shows over someone in its lane (or a jogger behind)
+    it moves to the lane with the most room, L frames later; slower hands
+    overlook L% of them and lean on EXCUSE ME. Experts (L < 9) walk double
+    time (every dot), swipe PRESTO on the gold dots and weave."""
+    alpha = 0.3
+    double = None       # None: experts only
+    presto_on = None
+    excuse = True
+
+    def __init__(self):
+        super().__init__()
+        self.tiles = _sprite_tiles()
+        self.landings = {}      # frame a dot lands -> 'big' | 'small' | 'gold'
+        self.planned = set()
+        self.queue = []         # (emit frame, mask)
+        self.corr = 0.0         # learned anticipation, frames
+        self.busy_until = 0
+        self.second = None
+        self.last_hit = None
+
+    def setup(self):
+        L = self.L = _hand_latency()
+        S = L if self.skill is None else self.skill
+        self.S = S
+        self.sd = 0.6 + 0.12 * S
+        self.drift_sd = 0.02 * S
+        self.drop = 0.01 + 0.001 * S if S else 0.0
+        self.react = 76
+        self.p_blind = 0.01 * S if self.blind is None else self.blind
+        self.prefer_lanes = S < 9
+        self.dbl = (S < 12) if self.double is None else self.double
+        self.presto = (S < 12) if self.presto_on is None else self.presto_on
+        if not self.excuse:
+            self.prefer_lanes = True
+
+    def screen(self):
+        g = self.game
+        oam = g.core.peek(g.sym['oam_buf'], 512)
+        hi = g.core.peek(g.sym['oam_hi'], 32)
+        spr = []
+        for i in range(128):
+            x, y, tile, attr = oam[4 * i:4 * i + 4]
+            if y >= 224:
+                continue
+            if (hi[i >> 2] >> ((i & 3) * 2)) & 1:
+                x -= 256
+            spr.append((x, y, tile | (attr & 1) << 8))
+        return spr
+
+    def look_beat(self, t, spr):
+        T = self.tiles
+        kinds = {T['TICKBIG']: 'big', T['TICKSM']: 'small', T['TICKGOLD']: 'gold'}
+        warn = False
+        hit = None
+        for x, y, tile in spr:
+            if y == DOT_Y and tile in kinds and x > TARGET_X:
+                land = t + (x - TARGET_X) // 2
+                self.landings.setdefault(land, kinds[tile])
+            elif y == HIT_Y and tile == T['HIT']:
+                hit = x
+            elif tile == T['WARN']:
+                warn = True
+        if hit is not None and hit != self.last_hit:
+            # a new mark: where my last step landed, read to +-1 frame
+            self.feedback((TARGET_X - hit) / 2.0)
+        self.last_hit = hit
+        return warn
+
+    def feedback(self, d):
+        if not self.alpha:
+            return
+        seen = d + self.rng.choice((-1, 0, 0, 1)) * 0.5
+        # aim: the landing frame (-1) and the one after (0) are dead centre
+        self.corr += self.alpha * (seen + 0.5)
+        self.corr = max(-12.0, min(12.0, self.corr))
+
+    def plan(self, t):
+        rng = self.rng
+        for land, kind in sorted(self.landings.items()):
+            if land in self.planned or land <= t:
+                continue
+            if kind == 'small' and not self.dbl:
+                continue
+            self.planned.add(land)
+            self.drift = 0.9 * self.drift + rng.gauss(0, self.drift_sd) if self.drift_sd else 0.0
+            if rng.random() < self.drop:
+                continue
+            at = land + rng.gauss(0, self.sd) + self.drift - self.corr
+            emit = max(t, int(round(at)))
+            m = self.foot
+            self.foot = RIGHT if self.foot == LEFT else LEFT
+            if kind == 'gold' and self.presto:
+                m |= Y
+            self.queue.append((emit, m))
+        self.queue.sort()
+        for k in [k for k in self.landings if k < t - 30]:
+            del self.landings[k]
+
+    def hazards(self, t, rng):
+        """The red ! is up: what a person on the sidewalk does about it."""
+        seen = self.eyes.look()
+        if not seen:
+            return 0
+        me, ents = seen
+        if me['state'] not in (0, 1):
+            return 0
+
+        def noticed(e):
+            key = (e['type'], e['wx'] // 32, e['lane'])
+            if key not in self.noticed:
+                self.noticed[key] = rng.random() >= self.p_blind
+            return self.noticed[key]
+        for e in ents:
+            e['rel'] = _rel(e, me)
+        live = [e for e in ents if not e['flags'] & 0x0C]
+        horizon = 150 if self.S < 9 else 96     # experts read the whole street
+        ahead = [e for e in live if e['lane'] == me['lane'] and -2 < e['rel'] < horizon
+                 and e['type'] != T_JOGGER and noticed(e)]
+        jog = [e for e in live if e['type'] == T_JOGGER and e['lane'] == me['lane']
+               and -200 < e['rel'] < 0 and noticed(e)]
+        if not ahead and not jog:
+            return 0
+        here = 0 if jog else min(e['rel'] for e in ahead)
+
+        def room(lane):
+            if any(e['lane'] == lane and e['type'] == T_JOGGER and -120 < e['rel'] < 8 for e in live):
+                return -1                       # a jogger coming up that lane
+            if any(e['lane'] == lane and -20 < e['rel'] < 20 for e in live):
+                return -1                       # someone right beside you
+            return min((e['rel'] for e in live if e['lane'] == lane and e['rel'] >= 20
+                        and e['type'] != T_JOGGER), default=999)
+        # neighbours, or two lanes over when the middle one is passable now
+        lanes = [l for l in (me['lane'] - 1, me['lane'] + 1) if 0 <= l <= 2]
+        if me['lane'] != 1 and room(1) >= 28:
+            lanes.append(2 - me['lane'])
+        best = max(lanes, key=lambda l: (room(l) - 12 * (abs(l - me['lane']) - 1), rng.random()))
+        walkers = ahead and all(e['type'] < T_JOGGER for e in ahead) and not jog
+        can_excuse = (self.excuse and walkers and t - self.excuse_at > 45
+                      and min(e['rel'] for e in ahead) < (36 if self.S < 9 else 60))
+        if room(best) > here + 8 and room(best) >= 28 and (self.prefer_lanes or not can_excuse
+                                                          or room(best) > 90):
+            m = X if best < me['lane'] else B
+            if abs(best - me['lane']) == 2:
+                self.second = (t + 7, m)
+            return m
+        if can_excuse:
+            self.excuse_at = t
+            return A
+        # about to walk into a cart or a board with no gap anywhere: squeezing
+        # past somebody walking beats that
+        solid = [e for e in ahead if e['type'] >= T_CART and e['rel'] < 44]
+        if solid:
+            soft = [l for l in (me['lane'] - 1, me['lane'] + 1) if 0 <= l <= 2 and not any(
+                e['lane'] == l and (e['type'] >= T_JOGGER and -120 < e['rel'] < 30) for e in live)]
+            if soft:
+                return X if soft[0] < me['lane'] else B
+        return 0
+
+    def act(self, t, tel, rng):
+        self.rng = rng
+        if self.L is None:
+            self.setup()
+        spr = self.screen()
+        warn = self.look_beat(t, spr)
+        self.plan(t)
+        while self.queue and self.queue[0][0] <= t:
+            _, m = self.queue.pop(0)
+            if self.tap_until > t - 1:
+                continue        # a thumb can't press twice at once
+            self.tap_mask = m
+            self.tap_until = t + TAP
+        if t < self.tap_until:
+            return self.tap_mask
+        if t < self.act_until:
+            return self.act_mask
+        if self.second and t >= self.second[0]:
+            self.act_mask = self.second[1]
+            self.act_until = t + TAP
+            self.second = None
+            return self.act_mask
+        nxt = self.queue[0][0] if self.queue else t + 99
+        # a person knows they just pressed: no second lane change until the
+        # first one has shown on screen
+        if self.dodges and (warn or self.S < 9) and t % 3 == 0 and t + 5 < nxt and t >= self.busy_until:
+            s = self.hazards(t, rng)
+            if s == A and not self.excuse:
+                s = 0
+            if s:
+                self.act_mask = s
+                self.act_until = t + TAP
+                if s != A:
+                    self.busy_until = t + self.L + self.L // 4 + 6
+                return s
+        return 0
+
+
+class bay_steady(bay_ear):
+    """The steady on-beat walker: a step on every big dot (average human
+    timing), moves over a lane whenever a red ! warns, never says EXCUSE ME."""
+    skill = 15
+    excuse = False
+    double = False
+    presto_on = False
+
+
+class bay_ear_raw(bay_ear):
+    """bay_ear that never adapts its timing (alpha 0): taps on the landing,
+    plus pt's hand latency, all run."""
+    alpha = 0.0
+
+
+class bay_ear_dt(bay_ear):
+    """bay_ear that always tries DOUBLE TIME and PRESTO, however loose its
+    timing: is the expert's walk worth it for an ordinary hand?"""
+    double = True
+    presto_on = True
+
+
+
+class bay_walkman(bay_ear):
+    """Steps on every big dot like an average human and never looks up: no
+    lanes, no EXCUSE ME (Marcus's round-4 run)."""
+    skill = 15
+    dodges = False
+    double = False
+    presto_on = False
+
 class bay_casual(bay_hand):
     """A decent rhythm player who doesn't dodge perfectly (Gord, Marcus):
     human timing (sd ~3.1 + drift) and hand latency even outside `curve`,
@@ -477,12 +740,14 @@ class bay_mashy(Policy):
         return m
 
 
-POLICIES = {c.__name__: c for c in [bay_beat, bay_hand, bay_casual, bay_stepper, bay_ace, bay_human, bay_sloppy, bay_rookie, bay_blind,
+POLICIES = {c.__name__: c for c in [bay_beat, bay_hand, bay_ear, bay_steady, bay_ear_raw, bay_ear_dt, bay_walkman, bay_casual, bay_stepper, bay_ace, bay_human, bay_sloppy, bay_rookie, bay_blind,
                                      bay_spam, bay_steady6, bay_double, bay_halfout, bay_mash,
                                      bay_mash10, bay_mashy]}
 
 DEFAULTS = {'bay': ['idle', 'mash_a', 'random_input', 'bay_mash', 'bay_mash10', 'bay_mashy',
                     'bay_steady6', 'bay_halfout', 'bay_blind', 'bay_spam', 'bay_double', 'bay_rookie',
-                    'bay_human', 'bay_stepper', 'bay_casual', 'bay_sloppy', 'bay_hand', 'bay_beat', 'bay_ace']}
+                    'bay_human', 'bay_stepper', 'bay_casual', 'bay_sloppy', 'bay_steady', 'bay_hand', 'bay_ear',
+                    'bay_beat', 'bay_ace']}
 
-CURVE = {'bay': 'bay_hand'}
+CURVE = {'bay': 'bay_ear'}
+

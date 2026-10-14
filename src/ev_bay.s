@@ -5,13 +5,20 @@
 ;
 ; Rhythm: the song runs at 15 frames per 8th note (16ths alternate 8,7) and
 ; is sequenced on this CPU once per main-loop pass, so w_ph (0..14) is locked
-; to it: w_ph = 0 is the frame an 8th note sounds. Every 8th is a "slot"
-; (w_ph 9..14 and 0 belong to the coming beat, 1..8 to the one just played;
-; one frame is allowed for pad/display latency). The
-; first alternating step in a slot sets the stride (PERFECT within 2 frames,
-; GOOD within 4, 5-7 out is EARLY/LATE: a short stride, never a dead stop);
-; consecutive good slots build the GROOVE (speed); 4 taps inside 19 frames
-; is a mash and trips you.
+; to it: w_ph = 0 is the frame an 8th note keys on, and the frame the dot
+; visibly lands in the target (the sprites drawn a pass earlier go up in
+; this frame's vblank). Every 8th is a "slot" (w_ph 9..14 and 0 belong to
+; the coming 8th, 1..8 to the one just played). A press read in the landing
+; frame scores -1, the next frame 0: PERFECT is -3..+2, GOOD -5..+4, so the
+; landing frame and the one after are both dead centre. 6-7 out is
+; EARLY/LATE: a short stride, never a dead stop.
+;  The walk is on the BEAT (the big dots, every quarter note: 2 steps a
+; second, a brisk walk). A beat is only missed when neither its 8th nor the
+; "and" after it got a step, so a walker a little late, or one who steps on
+; the "and" all along, still walks. DOUBLE TIME: a good step on the beat and
+; another on the small dot after it (8 steps every 2 s) is a longer stride
+; and twice the PERFECTs: that is the expert's walk. Consecutive good beats
+; build the GROOVE (speed); 4 taps inside 19 frames is a mash and trips you.
 ; Style: unbroken PERFECT steps build the POWER WALK combo (x2..x5, every
 ; PERFECT scores the level); GOOD holds it; anything sloppy, a bump, a
 ; double step or an "EXCUSE ME!" breaks it, so weaving through lanes beats
@@ -37,10 +44,11 @@ TIME_LIMIT = 60*60
 BEAT       = 15             ; frames per 8th note
 ACCEL      = $0010          ; speed approach per frame (8.8 px/frame)
 DECEL      = $0008
-SPD_OFF    = $00A0          ; EARLY / LATE: a short stride
+SPD_OFF    = $00C0          ; EARLY / LATE: a short stride
 SPD_STUT   = $0060          ; a double step
 SPD_GOOD   = $0120
 SPD_PERF   = $0130
+SPD_DT     = $0030          ; DOUBLE TIME: the longer stride on top
 GROOVE_MAX = 8              ; streak cap; each step of streak adds 7/256 px/frame
 DOORS_T    = 10*60          ; "doors closing" with this many frames left
 
@@ -156,6 +164,9 @@ w_warn   = ev_ram + 608         ; slot of the next one in your way ($FFFF none)
 w_warnr  = ev_ram + 610         ; ... how far ahead
 w_jogw   = ev_ram + 612         ; slot of a jogger coming up behind you
 w_jogr   = ev_ram + 614         ; ... how far back (negative)
+w_bgrade = ev_ram + 616         ; grade of this beat's own 8th (0 none)
+w_dt     = ev_ram + 617         ; DOUBLE TIME: stepping every 8th
+w_dtn    = ev_ram + 618         ; double-time steps (word)
 
 T_SUIT    = 1
 T_TOURIST = 2
@@ -210,12 +221,30 @@ ev_bay:
     bne @loop
     jsl music_stop
     jsr bay_score
+    jsr hud_off
     jsl score_card
     jsl hdma_off
     plb
     rtl
 
 .include "evcommon.inc"
+
+; before the result card: blank the HUD rows that would peek out beside and
+; under it (KING / the progress bar / UNION, GROOVE and the combo)
+hud_off:
+    ldx #(3*32)
+    lda #1
+    jsr @rows
+    ldx #(25*32)
+    lda #2
+@rows:
+    sta tmp1+1
+    lda #32
+    sta tmp1
+    stz tmp2
+    lda #$20
+    jsl txt_fill
+    rts
 
 
 bay_init:
@@ -264,6 +293,8 @@ bay_init:
     lda #$30
     sta w_pri
     ldx #$FFFF
+    stx w_warn                  ; nobody in the way yet (no stray '!' on
+    stx w_jogw                  ; the intro card)
     stx h_sec
     stx h_pass
     stx h_cof
@@ -451,7 +482,8 @@ beat_advance:
 @x:
     rts
 
-; close the slot when the phase passes the half-way point
+; close the slot when the phase passes the half-way point. The walk is
+; judged a beat at a time: the beat's own 8th, then the "and" after it.
 beat_slot:
     lda w_ph
     cmp #9
@@ -460,9 +492,47 @@ beat_slot:
 @close:
     lda w_state
     cmp #ST_WALK
-    jne @reset
+    bne @off
+    lda w_beat
+    lsr a
+    bcs @and                    ; odd: the "and" after a beat
+    lda w_sbest                 ; the beat: grade it now, or (nothing yet)
+    sta w_bgrade                ; wait and see if the step comes on the "and"
+    beq @reset
+    jsr slot_grade
+    bra @reset
+@and:
     lda w_sbest
-    beq @miss
+    bne @astep
+    stz w_dt                    ; nothing on the "and": single time again
+    lda w_bgrade
+    bne @reset0
+    lda w_since                 ; nothing on the beat or after it: missed,
+    cmp #34                     ; unless the step came early (within a beat
+    bcc @reset0                 ; and a bit of now)
+    jsr slot_miss
+    bra @reset0
+@astep:
+    lda w_bgrade
+    beq @late
+    lda w_sbest                 ; double time: a good "and" was judged as it
+    cmp #G_OFF                  ; landed; a sloppy one (or a double step)
+    bne @reset0                 ; costs a notch like any sloppy step
+@late:
+    lda w_sbest
+    jsr slot_grade              ; the beat's step, late or on the "and"
+    bra @reset0
+@off:
+    stz w_dt
+@reset0:
+    stz w_bgrade
+@reset:
+    stz w_sbest
+    stz w_staps
+    rts
+
+; a beat walked: A = its grade (G_OFF / G_GOOD / G_PERFECT)
+slot_grade:
     cmp #G_OFF
     beq @sloppy
     lda #GROOVE_MAX
@@ -473,30 +543,33 @@ beat_slot:
     sta tmp0
     lda w_streak
     cmp tmp0
-    bcs @reset
+    bcs @x
     inc w_streak
     lda w_streak
     cmp #GROOVE_MAX
-    bne @reset
+    bne @x
     lda w_groove
-    bne @reset
+    bne @x
     inc w_groove
     ldx #.loword(str_groove)
     lda #TP_GREEN
     ldy #50
     jsr popup
-    bra @reset
+    lda #TIP_DT                 ; the walk is easy now: show the expert's
+    ldx #.loword(str_tdt)       ; way to go faster
+    jmp tip
 @sloppy:
-    lda w_streak                ; a sloppy step costs two notches of groove
-    sec
-    sbc #2
-    bcs @sl
-    lda #0
+    lda w_streak                ; a sloppy step costs a notch of groove
+    beq @sl
+    dec a
 @sl:
     sta w_streak
     stz w_groove
-    bra @reset
-@miss:
+@x:
+    rts
+
+; a beat skipped altogether
+slot_miss:
     lda w_streak                ; a skipped beat costs three
     sec
     sbc #3
@@ -511,7 +584,7 @@ beat_slot:
     A8
     bne @was                    ; walking (or tried to): say so
     lda w_staps
-    beq @reset
+    beq @x
 @was:
     jsr sloppy_tip
     lda #G_MISS
@@ -526,12 +599,10 @@ beat_slot:
     sbc tmp0
     sta w_target
     A8
-@reset:
-    stz w_sbest
-    stz w_staps
+@x:
     rts
 
-str_groove: .byte "IN THE GROOVE! TOP SPEED", 0
+str_groove: .byte "IN THE GROOVE! FULL STRIDE", 0
 
 ; the third EARLY / LATE / MISS of the run: how the strip works
 sloppy_tip:
@@ -566,8 +637,11 @@ tip:
 
 TIP_LANE  = $01
 TIP_BEAT  = $02
+TIP_DT    = $04
 str_tlane: .byte "TIP: UP/DOWN TO SWITCH LANES", 0
-str_tbeat: .byte "TIP: STEP AS EACH DOT LANDS", 0
+str_tbeat: .byte "TIP: STEP AS BIG DOTS LAND", 0
+str_tdt:   .byte "TIP: STEP SMALL DOTS TOO!", 0
+str_dt:    .byte "DOUBLE TIME!", 0
 
 ; X = message (this bank), A = text palette, Y = frames on show.
 ; Queued: popup_flush prints the last one asked for once a frame (a step,
@@ -598,9 +672,10 @@ popup_flush:
     stz txt_bg
     rts
 
-; tmp1 = signed frames from the nearest 8th (one frame of pad / display
-; latency allowed for: a press in time with the note lands at ph 1),
-; A = |tmp1| (0..7)
+; tmp1 = signed frames from the nearest 8th (0: read the frame after the
+; landing frame), A = how far off that is for grading: |tmp1|, one less on
+; the early side, so the landing frame itself (-1) is dead centre too and
+; PERFECT (A < 3) is -3..+2
 beat_offset:
     lda w_ph
     dec a
@@ -615,8 +690,7 @@ beat_offset:
     sta tmp1
     ora #$00
     bpl @abs
-    eor #$FF
-    inc a
+    eor #$FF                    ; -d - 1 = |d| - 1
 @abs:
     rts
 
@@ -658,6 +732,7 @@ input_steps:
     lda w_sbest
     beq @first
     jsr combo_break             ; double step
+    stz w_dt
     lda w_sbest
     cmp #G_OFF
     jeq @step                   ; already sloppy
@@ -666,14 +741,7 @@ input_steps:
     A16
     lda #SPD_STUT               ; a stutter: shorter than any stride,
     sta w_target
-    lda w_speed                 ; and it checks you on the spot
-    lsr a
-    lsr a
-    sta tmp2
-    lda w_speed
-    sec
-    sbc tmp2
-    sta w_speed
+    lsr w_speed                 ; and it checks you on the spot
     A8
     jsr beat_offset
     lda tmp1
@@ -688,9 +756,9 @@ input_steps:
     cmp #3
     bcc @g
     dey
-    cmp #6
+    cmp #5
     bcc @g
-    dey                         ; 6-7 frames out: EARLY / LATE
+    dey                         ; -6/-7, +5..+7: EARLY / LATE
 @g:
     tya
     sta w_sbest
@@ -699,6 +767,7 @@ input_steps:
     sta w_hitd                  ; where the step landed, for the strip
     lda #16
     sta w_hitt
+    jsr double_time
     jsr set_target
     lda w_sbest
     cmp #G_OFF
@@ -750,11 +819,52 @@ set_target:
     clc
     adc tmp3
     sta tmp3
-    A8
-    A16
+    lda w_dt
+    and #$00FF
+    beq @t
+    lda tmp3
+    clc
+    adc #SPD_DT
+    sta tmp3
+@t:
     lda tmp3
     sta w_target
     A8
+    rts
+
+; DOUBLE TIME is a good step on the "and" right after a good step on the
+; beat; a sloppy step anywhere drops back to single time.
+double_time:
+    lda w_sbest
+    cmp #G_GOOD
+    bcc @single
+    lda w_ph                    ; the 8th this step belongs to
+    cmp #9
+    lda w_beat
+    bcc @n
+    inc a
+@n:
+    lsr a
+    bcc @x                      ; on the beat: wait for the "and"
+    lda w_bgrade
+    cmp #G_GOOD
+    bcc @x                      ; the beat itself wasn't good
+    A16
+    inc w_dtn
+    A8
+    lda w_dt
+    bne @x
+    inc w_dt
+    ldx w_popup                 ; say so, unless something else is up
+    bne @x
+    ldx #.loword(str_dt)
+    lda #TP_GREEN
+    ldy #40
+    jmp popup
+@x:
+    rts
+@single:
+    stz w_dt
     rts
 
 ; ---- POWER WALK combo -------------------------------------------------
@@ -765,7 +875,13 @@ combo_perfect:
     sta w_combo
 @cap:
     jsr combo_level
-    lda w_level                 ; every PERFECT step scores the level
+    lda w_dt                    ; every PERFECT step scores the level,
+    beq @one
+    lda w_level                 ; twice that in DOUBLE TIME
+    asl a
+    bra style_add
+@one:
+    lda w_level
 style_add:
     A16
     and #$00FF
@@ -897,6 +1013,7 @@ spd_base: .word 0, SPD_OFF, SPD_GOOD, SPD_PERF
 trip:
     lda #ST_STUMBLE
     sta w_state
+    stz w_dt
     ldx #24
     stx w_timer
     stz w_streak
@@ -1343,6 +1460,7 @@ bump_player:
     pha
     lda #ST_STUMBLE
     sta w_state
+    stz w_dt
     ldx #24
     stx w_timer
     stz w_streak
@@ -2488,9 +2606,13 @@ draw_beat:
     ldx #MS_TARGETLIT_BASE
     lda w_flash
     bne @tg
+    lda w_beat                  ; lit as a beat (a big dot) lands
+    lsr a
+    bcs @dark
     lda w_ph
     cmp #3
     bcc @tg
+@dark:
     ldx #MS_TARGET_BASE
 @tg:
     stx tmp6
@@ -2530,9 +2652,12 @@ draw_beat:
     A16
     sta spr_x
     A8
-    ldx #MS_TICKBIG_BASE        ; every 8th is a step ...
     lda d_b
-    and #$07
+    ldx #MS_TICKSM_BASE         ; the "and": a small dot (double time)
+    lsr a
+    bcs @tk
+    ldx #MS_TICKBIG_BASE        ; every beat is a step ...
+    and #$03
     bne @tk
     ldx #MS_TICKGOLD_BASE       ; ... the bar's downbeat is PRESTO gold
 @tk:
@@ -2613,6 +2738,9 @@ draw_marker:
     sbc #43
     sta spr_y
     A8
+    lda w_beat                  ; a nod on every beat
+    lsr a
+    bcs @nb
     lda w_ph
     cmp #4
     bcs @nb
@@ -3215,15 +3343,13 @@ str_grvl:   .byte "GROOVE", 0
 ; made it:  1000 + 25/sec to spare + 15/pass + 20/coffee + STYLE
 ;           (STYLE: the combo level for every PERFECT step, 10 x level a
 ;           PRESTO TAP)
-;           card: BASE (1000 + time + passes + a full cup, 320) + STYLE
+;           card: WALK (1000 + time + passes + a full cup, 320) + STYLE
 ;           - SPILLS (20 a sip of coffee lost)
-; missed:   distance/5 + 5/pass (always under a finish); gave up: the same,
-;           ev_fail 3. Card: BASE only.
+; missed:   WALK = distance/5 + 5/pass, + STYLE - SPILLS as above; the
+;           total stays under 1000 (a finish never scores less): past 990
+;           the STYLE row is cut back, below 0 the SPILLS row is. Gave up:
+;           the same, ev_fail 3.
 bay_score:
-    A16
-    stz ev_break+2
-    stz ev_break+4
-    A8
     A16
     lda w_time
     sta tmp0
@@ -3238,15 +3364,27 @@ bay_score:
     sta ev_stat+2
     lda w_spills
     sta ev_stat+4
-    stz ev_stat+6
+    lda w_style
+    sta ev_stat+6
+    sta ev_break+2              ; + STYLE
+    lda #16
+    sec
+    sbc w_coffee
+    and #$00FF                  ; sips lost
+    asl a
+    asl a
+    sta tmp1
+    asl a
+    asl a
+    clc
+    adc tmp1                    ; *20
+    sta ev_break+4              ; - SPILLS
     lda w_made
     and #$00FF
     beq @missed
     lda w_quit
     and #$00FF
     bne @missed
-    lda w_style
-    sta ev_stat+6
     lda tmp4
     asl a
     asl a
@@ -3270,27 +3408,8 @@ bay_score:
     sbc w_passed                ; p*15
     clc
     adc tmp4
-    sta ev_break                ; BASE
-    lda w_style
-    sta ev_break+2              ; + STYLE
-    lda #16
-    sec
-    sbc w_coffee
-    and #$00FF                  ; sips lost
-    asl a
-    asl a
-    sta tmp1
-    asl a
-    asl a
-    clc
-    adc tmp1                    ; *20
-    sta ev_break+4              ; - SPILLS
-    lda ev_break
-    clc
-    adc ev_break+2
-    sec
-    sbc ev_break+4
-    sta ev_score
+    sta ev_break                ; WALK
+    jsr @sum
     A8
     stz ev_fail
     rts
@@ -3309,8 +3428,22 @@ bay_score:
     adc w_passed                ; p*5
     clc
     adc tmp0
-    sta ev_score
-    sta ev_break                ; BASE (no bonus, no penalty)
+    sta ev_break                ; WALK
+    clc
+    adc ev_break+2
+    cmp #990
+    bcc @c0
+    lda #990                    ; under a finish: cut the STYLE row back
+    sec
+    sbc ev_break
+    sta ev_break+2
+    lda #990
+@c0:
+    cmp ev_break+4
+    bcs @c1
+    sta ev_break+4              ; never below 0: cut the SPILLS row back
+@c1:
+    jsr @sum
     A8
     lda w_quit
     beq @one
@@ -3321,5 +3454,15 @@ bay_score:
 @f:
     sta ev_fail
     rts
+@sum:
+    .a16
+    lda ev_break
+    clc
+    adc ev_break+2
+    sec
+    sbc ev_break+4
+    sta ev_score
+    rts
+    .a8
 
 .include "bay_meta.inc"
