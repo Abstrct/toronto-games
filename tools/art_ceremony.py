@@ -84,7 +84,9 @@ NUM35 = {
 }
 
 
-def podium():
+def podium(wide=False):
+    """the 2-1-3 podium; wide=True: one long gold step for a mass tie (five or
+    more co-champions: ceremony.s swaps in its rows 24-27)"""
     img = Image.new('RGBA', (256, 256), (0, 0, 0, 0))
     d = ImageDraw.Draw(img)
     top = rgb('#f8f8f8')
@@ -92,7 +94,9 @@ def podium():
     dark = rgb('#888898')
     gold = rgb('#f8c820')
     # blocks: 2nd (left), 1st (centre), 3rd (right)
-    for (x0, x1, y0, n) in ((80, 112, STEP2_Y, '2'), (112, 144, STEP1_Y, '1'), (144, 176, STEP3_Y, '3')):
+    blocks = ((80, 176, STEP1_Y, '1'),) if wide else \
+        ((80, 112, STEP2_Y, '2'), (112, 144, STEP1_Y, '1'), (144, 176, STEP3_Y, '3'))
+    for (x0, x1, y0, n) in blocks:
         d.rectangle([x0, y0, x1 - 1, 223], fill=side)
         d.rectangle([x0, y0, x1 - 1, y0 + 2], fill=top)
         d.line([x1 - 1, y0, x1 - 1, 223], fill=dark)
@@ -117,7 +121,9 @@ FIRE = [
 # jersey, 6 shade, 7 trim, 10 white, 12/13 yellow, 14/15 grey, 1 outline),
 # so each firework bursts in a champion's sponsor colours and eight athletes
 # can share the eight sprite palettes.
-MEDAL_ROWS = ['5.....7.', '.5...7..', '..5.7...', '..1111..', '.1ffh1..', '.1fff1..', '.1fff1..', '..111...']
+# medal on the chest: dark ribbon from the shoulders, a dark-rimmed disc with a
+# highlight, so gold still reads on a yellow jersey and silver on a white one
+MEDAL_ROWS = ['1......1', '.1....1.', '..1111..', '.1fhff1.', '1fhffff1', '1ffffff1', '.1ffff1.', '..1111..']
 
 
 def burst(d, cx, cy, rays, r0, r1, cols, step=1.0, droop=0.0):
@@ -190,7 +196,9 @@ def build():
     ts = TileSet(4)
     m2 = convert_bg(bg, pals, 2, ts)
     m1 = convert_bg(fg, pals, 2, ts, priority=True)
+    mw = convert_bg(podium(wide=True), pals, 2, ts, priority=True)
     out('cer_tiles.bin', ts.data())
+    out('cer_bg1w.bin', map_bytes(mw)[:2048])
     out('cer_bg1.bin', map_bytes(m1)[:2048])
     out('cer_bg2.bin', map_bytes(m2)[:2048])
     data = bytearray()

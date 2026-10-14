@@ -2,6 +2,12 @@
 
     python3 tools/pt/demo_export.py            # record all, write src/demo_data.inc, rebuild, verify
     python3 tools/pt/demo_export.py --verify   # just replay the committed streams and check them
+    python3 tools/pt/demo_export.py --list     # which bot each event's demo would use
+
+Every event in pt.EVENTS gets a demo when it has a bot: POLICY below, else
+the event's curve bot (CURVE in its policies_<event>.py), else none. Events
+without a bot are written as $FFFF and the ROM's rotation (game.s demo_play)
+skips them, so a new event joins the attract cycle as soon as it has a bot.
 
 How it works: the ROM has a harness hook, `demo_force` (game.s). Poked to 2
 at the title, the next START runs demo_play in *record* mode: the event in
@@ -29,9 +35,18 @@ import pt  # noqa: E402
 
 ROOT = pt.ROOT
 OUT = os.path.join(ROOT, 'src', 'demo_data.inc')
-DEMO_EVENTS = 5                 # events 0..4 have bots to record
+# the bot that plays each event's demo (fallback: the event's CURVE bot)
 POLICY = {'bike': 'bike_pro', 'bay': 'bay_beat', 'park': 'park_ace', 'cops': 'cops_pro',
           'sail': 'sail_expert'}
+
+
+def demo_policy(name):
+    """-> the policy name for this event's demo, or None (no demo)"""
+    from policies import POLICIES, CURVE
+    for p in (POLICY.get(name), CURVE.get(name)):
+        if p and p in POLICIES:
+            return p
+    return None
 FRAMES = 1680                   # game frames per demo: ~28 s, intro + countdown included
 CHECK_AT = FRAMES - 40          # NMI frame of the RAM comparison
 
@@ -66,7 +81,7 @@ def record(ev):
     from policies import POLICIES
     name = pt.EVENTS[ev]
     g = pt.Game()
-    pol = POLICIES[POLICY[name]]()
+    pol = POLICIES[demo_policy(name)]()
     pol.game = g
     rng = random.Random(1992 + ev)
     start_demo(g, ev, 2)
@@ -107,14 +122,20 @@ def rle(masks):
 
 
 def write_inc(streams):
+    """streams: one entry per pt.EVENTS, (runs, snap, policy) or None for no demo"""
     lines = ['; Attract-demo joypad streams: written by tools/pt/demo_export.py, do not edit.',
              '; Runs of (pad mask word, frames byte); a frames byte of 0 ends a stream.',
              '; demo_start: byte offset of each event\'s stream ($FFFF = no demo).',
              'demo_blob:']
     offs, off = [], 0
-    for ev, (runs, snap) in enumerate(streams):
+    for ev, s in enumerate(streams):
+        if s is None:
+            offs.append(0xFFFF)
+            lines.append('; %s: no demo (no bot)' % pt.EVENTS[ev])
+            continue
+        runs, snap, pol = s
         offs.append(off)
-        lines.append('; %s: %d runs, policy %s, expect %s' % (pt.EVENTS[ev], len(runs), POLICY[pt.EVENTS[ev]], snap))
+        lines.append('; %s: %d runs, policy %s, expect %s' % (pt.EVENTS[ev], len(runs), pol, snap))
         flat = []
         for m, n in runs:
             flat += ['$%02X' % (m & 0xFF), '$%02X' % (m >> 8), '%d' % n]
@@ -124,7 +145,7 @@ def write_inc(streams):
         off += 3 * len(runs) + 3
     lines.append('demo_start:')
     lines.append('    .word ' + ', '.join('$%04X' % o for o in offs))
-    lines.append('    .res (NUM_EVENTS - %d) * 2, $FF' % len(offs))
+    lines.append('.assert * - demo_start = NUM_EVENTS * 2, error, "demo_start: one word per event"')
     open(OUT, 'w').write('\n'.join(lines) + '\n')
     return off
 
@@ -158,12 +179,15 @@ def expected():
 def verify():
     exp = expected()
     ok = True
-    for ev in range(DEMO_EVENTS):
+    for ev in range(len(pt.EVENTS)):
         name = pt.EVENTS[ev]
+        if name not in exp:
+            print('%-7s no demo' % name)
+            continue
         snap, back, on = play(ev)
         good = snap == exp.get(name) and back and on == 0
         ok &= good
-        print('%-5s %s  playback %s  recorded %s  back to title %s' % (
+        print('%-7s %s  playback %s  recorded %s  back to title %s' % (
             name, 'OK  ' if good else 'FAIL', snap, exp.get(name), back))
     return ok
 
@@ -171,15 +195,25 @@ def verify():
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--verify', action='store_true')
+    ap.add_argument('--list', action='store_true')
     a = ap.parse_args()
+    if a.list:
+        for name in pt.EVENTS:
+            print('%-7s %s' % (name, demo_policy(name) or '(no bot: skipped)'))
+        return
     subprocess.run(['make'], cwd=ROOT, check=True, capture_output=True)
     if not a.verify:
         streams = []
-        for ev in range(DEMO_EVENTS):
+        for ev, name in enumerate(pt.EVENTS):
+            pol = demo_policy(name)
+            if pol is None:
+                streams.append(None)
+                print('%-7s no bot: no demo' % name)
+                continue
             masks, snap = record(ev)
             runs = rle(masks)
-            streams.append((runs, snap))
-            print('%-5s %d frames -> %d runs, %s' % (pt.EVENTS[ev], len(masks), len(runs), snap))
+            streams.append((runs, snap, pol))
+            print('%-7s %d frames -> %d runs, %s, %s' % (name, len(masks), len(runs), pol, snap))
         size = write_inc(streams)
         print('wrote %s (%d bytes)' % (os.path.relpath(OUT, ROOT), size))
         subprocess.run(['make'], cwd=ROOT, check=True, capture_output=True)

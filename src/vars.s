@@ -62,11 +62,23 @@ cur_player: .res 1
 game_mode:  .res 1
 event_on:   .res NUM_EVENTS     ; 1 = event is in this competition
 event_idx:  .res 1
+; The turn's result, read by score_card (cards.s). game.s clears ev_fail,
+; ev_break and ev_giveup before every turn.
 ev_score:   .res 2
+; ev_fail: 0 finished, 1 the event's own fail line (cards.s ev_fails),
+; 2 out of time, 3 gave up, 4 the event's second fail line (ev_fails2, e.g.
+; the bike's idle kick: YOU'RE FIRED!). The event sets it; the card never
+; second-guesses it.
 ev_fail:    .res 1
 ev_stat:    .res 8              ; up to 4 words of per-event stats for the result card
 ev_break:   .res 6              ; result card arithmetic: base, bonus, penalty words (base + bonus - penalty = ev_score)
-ev_giveup:  .res 1              ; set by the pause menu: the running event ends now (ev_fail = 3)
+; ev_giveup: set by the pause menu (CALL IT A DAY). Every event loop checks
+; it each frame and ends with ev_fail 3, scored exactly like a failed run
+; (the event's own fail formula for what was done so far: never a bonus for
+; quitting, never less than failing would have scored). An event whose run
+; is already over (end condition met, or the finish/fail animation playing)
+; ignores it and reports the real result.
+ev_giveup:  .res 1
 records:    .res 16 * NUM_EVENTS * 5 ; top 5 per event, rank-major: score(2) name(9) pad(5)
 ev_ram:     .res EV_RAM_SIZE    ; scratch shared by whichever screen is running
 pause_ok:   .res 1              ; 1 = START pauses (event play: countdown to score card)

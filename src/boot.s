@@ -477,9 +477,9 @@ demo_banner:
     rts
 
 str_demo:  .byte "DEMO - PRESS START", 0
-; per event: the banner row (BIKE BAY PARK COPS SAIL)
-demo_rows: .byte 4, 4, 4, 4, 5
-    .res NUM_EVENTS - 5, 4
+; per event: the banner row (BIKE BAY PARK COPS SAIL PARKING SUBWAY)
+demo_rows: .byte 4, 4, 4, 4, 5, 4, 26
+.assert * - demo_rows = NUM_EVENTS, error, "demo_rows: one banner row per event"
 
 ; ------------------------------------------------------------------
 ; pause_game: freeze the event until START is pressed again. The music stops
