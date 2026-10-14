@@ -27,6 +27,21 @@ C = {k: rgb(v) for k, v in {
 }.items()}
 
 CURB = 232
+FAR_CARS = [('#3870c0', '#28508c'), ('#c8c8cc', '#98989c'), ('#2a7a48', '#1c5a34'), ('#a83030', '#782020')]
+
+
+def far_car(d, x, y, cols):
+    """A parked car on the far side, nose down (southbound), 22 x 38."""
+    body, shade = rgb(cols[0]), rgb(cols[1])
+    d.rounded_rectangle([x, y, x + 21, y + 37], radius=4, fill=rgb('#181820'))
+    d.rounded_rectangle([x + 1, y + 1, x + 20, y + 36], radius=3, fill=body)
+    d.rectangle([x + 3, y + 25, x + 18, y + 29], fill=rgb('#283048'))     # windshield (front is down)
+    d.rectangle([x + 3, y + 7, x + 18, y + 9], fill=rgb('#283048'))       # rear window
+    d.rectangle([x + 4, y + 11, x + 17, y + 23], fill=shade)             # roof
+    d.point((x + 3, y + 36), fill=rgb('#f8f0c0'))
+    d.point((x + 18, y + 36), fill=rgb('#f8f0c0'))
+    d.point((x + 3, y + 1), fill=rgb('#c02020'))
+    d.point((x + 18, y + 1), fill=rgb('#c02020'))
 
 
 def street():
@@ -40,11 +55,13 @@ def street():
             n = noise[y % 32][x % 32]
             base = C['park'] if (x < 80 or x >= 200) else C['asph']
             px[x, y] = C['asph2'] if n < 0.07 else (C['asph3'] if n > 0.95 else base)
-    # lane markings: double yellow centre, parking lines
-    for x in (138, 139, 141, 142):
-        d.line([x, 0, x, 255], fill=C['yellow'])
-    d.rectangle([78, 0, 79, 255], fill=C['white'])
-    d.rectangle([200, 0, 201, 255], fill=C['white'])
+    # Brunswick: no centre line, just the parking-lane edges (dashed)
+    for y in range(0, 256, 16):
+        d.rectangle([78, y, 79, y + 9], fill=C['white'])
+        d.rectangle([200, y, 201, y + 9], fill=C['white'])
+    # parked up the far side too
+    for i, y in enumerate((44, 100, 150, 204)):
+        far_car(d, 53, y, FAR_CARS[i % len(FAR_CARS)])
     # left: houses, lawns, sidewalk, curb
     for i, y in enumerate(range(0, 256, 64)):
         d.rectangle([0, y, 23, y + 63], fill=C['grass'])
@@ -75,11 +92,11 @@ def street():
     d.rectangle([248, 0, 255, 255], fill=C['hedge'])
     for y in range(0, 256, 8):
         d.ellipse([248, y, 255, y + 7], fill=C['hedge2'])
-    # Green P sign and a street tree on the right sidewalk
-    d.rectangle([240, 8, 241, 18], fill=C['pole'])
-    d.ellipse([236, 2, 245, 11], fill=C['gp'])
-    d.rectangle([239, 4, 240, 9], fill=C['gp2'])
-    d.rectangle([240, 4, 242, 6], fill=C['gp2'])
+    # Green P sign (below the HUD panel) and a street tree on the right sidewalk
+    d.rectangle([240, 56, 241, 66], fill=C['pole'])
+    d.ellipse([236, 50, 245, 59], fill=C['gp'])
+    d.rectangle([239, 52, 240, 57], fill=C['gp2'])
+    d.rectangle([240, 52, 242, 54], fill=C['gp2'])
     d.ellipse([235, 196, 246, 207], fill=C['pit'])
     d.ellipse([233, 188, 248, 203], fill=C['t1'])
     d.ellipse([234, 188, 245, 199], fill=C['t2'])
@@ -143,6 +160,25 @@ def draw_truck(sh, x0, y0):
     sh.outline(x0, y0, 32, 48)
 
 
+def draw_cyclist(sh, x0, y0, k):
+    d = sh.draw()
+    d.rectangle([x0 + 7, y0 + 1, x0 + 8, y0 + 8], fill=4)          # front wheel
+    d.rectangle([x0 + 7, y0 + 23, x0 + 8, y0 + 30], fill=4)        # back wheel
+    d.rectangle([x0 + 7, y0 + 9, x0 + 8, y0 + 22], fill=15)        # frame
+    d.rectangle([x0 + 3, y0 + 7, x0 + 12, y0 + 8], fill=15)        # handlebar
+    # knees pumping (navy pants)
+    kl, kr = (16, 20) if k == 0 else (20, 16)
+    d.ellipse([x0 + 3, y0 + kl, x0 + 6, y0 + kl + 4], fill=5)
+    d.ellipse([x0 + 9, y0 + kr, x0 + 12, y0 + kr + 4], fill=5)
+    d.ellipse([x0 + 3, y0 + 11, x0 + 12, y0 + 21], fill=12)        # hi-vis jacket
+    d.line([x0 + 4, y0 + 13, x0 + 3, y0 + 9], fill=12, width=2)    # arms to the bars
+    d.line([x0 + 11, y0 + 13, x0 + 12, y0 + 9], fill=12, width=2)
+    d.rectangle([x0 + 5, y0 + 16, x0 + 10, y0 + 20], fill=7)       # courier bag
+    d.ellipse([x0 + 5, y0 + 10, x0 + 10, y0 + 15], fill=13)        # helmet
+    d.point((x0 + 6, y0 + 11), fill=10)
+    sh.outline(x0, y0, 16, 32)
+
+
 def build_sprites():
     sh = Sheet(256)
     d = sh.draw()
@@ -197,9 +233,14 @@ def build_sprites():
     d.rectangle([107, 185, 108, 188], fill=14)
     d.point((107, 190), fill=14)
 
+    # cyclist seen from above, riding north (officer palette): 2 pedal frames
+    for k in range(2):
+        draw_cyclist(sh, 48 + k * 16, 192, k)
     for k in range(9):
         band, col = k // 2, k % 2
         sh.obj('pcar%d' % k, col * 48, band * 48, 48, 48)
+    sh.obj('cyc0', 48, 192, 16, 32, 8, 16)
+    sh.obj('cyc1', 64, 192, 16, 32, 8, 16)
     sh.obj('parked', 96, 0, 32, 48)
     sh.obj('truck', 96, 48, 32, 48)
     sh.obj('cop0', 96, 96, 16, 32, 8, 30)
@@ -248,6 +289,7 @@ def build():
     view.alpha_composite(render(sh, (96, 96, 16, 32), OFFICER), (232, 60))
     view.alpha_composite(render(sh, (96, 144, 8, 8), TRUCK), (240, 116))
     view.alpha_composite(render(sh, (96, 152, 16, 16), TRUCK), (236, 104))
+    view.alpha_composite(render(sh, (48, 192, 16, 32), OFFICER), (162, 150))
     preview(view, 'parking.png')
     return '%d tiles, %d pals' % (len(ts), len(pals))
 
