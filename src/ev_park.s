@@ -18,6 +18,7 @@
 .include "screens.inc"
 
 .import park_tiles, park_map, park_solid, park_pal, park_spr, park_spr_pal
+.import trick_seen          ; boot.s: the attract demo's WATCH THAT MOVE! cue
 
 PARK_H     = 2560
 START_Y    = 2532
@@ -2655,6 +2656,7 @@ dodged:
     beq @nm
 @mat:
     inc k_matad
+    jsl trick_seen
     lda matador_msgs,y
     sta ptr0
     lda k_style

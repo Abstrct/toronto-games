@@ -1091,7 +1091,7 @@ card_stat_pick:
 card_stat_pick_fail:
     .byte 0, 2                  ; bike: METRES, WIPEOUTS (tokens and style are forfeit)
     .byte 0, 2                  ; bay: TIME LEFT, SPILLS
-    .byte 1, 2                  ; park: DOGS DODGED, TACKLES
+    .byte 2, 1                  ; park: TACKLES, DOGS DODGED (the tackles ended it)
     .byte 0, 2                  ; cops: SIP 'N' HOPS, HURDLES
     .byte 1, 2                  ; sail: MARKS ROUNDED, BUMPS
     .byte 0, 2                  ; parking: SPOTS PARKED, TICKETS
@@ -4044,7 +4044,7 @@ eb5: .byte "THREE SPOTS ON BRUNSWICK.", $0A, "PARK IT. DON'T DENT A BMW.", 0
 eb6: .byte "SURF LINE 1 TO UNION.", $0A, "GRAB A POLE, GET GERMS.", 0
 ec0: .byte "D-PAD STEER    A PEDAL", $0A, "B HOP RAILS AND POTHOLES", $0A, "TOKENS 50, WIPEOUT DROPS 2", 0
 ec1: .byte "ALTERNATE ", TXT_ARROW_L+32, " ", TXT_ARROW_R+32, " ON BIG DOTS", $0A, "SMALL DOTS = DOUBLE TIME", $0A, "UP/DOWN LANE  A EXCUSE ME", 0
-ec2: .byte "D-PAD WALK   A THROW BALL", $0A, "SAFE: B ON ! = 100 A DOG", $0A, "BOLD: B ON RED ! = 200-450", 0
+ec2: .byte "D-PAD WALK   A THROW BALL", $0A, "SAFE: B ON ! = 100 PER DOG", $0A, "BOLD: RED ! 200, LATE 400+", 0
 ec3: .byte "YELLOW CHALK: TAP A", $0A, "RED CHALK: HOLD A", $0A, "HOLD B: SIP, COP CAN'T SEE", 0
 ec4: .byte "LEFT/RIGHT: TURN  A: HIKE", $0A, "YELLOW ARROW: NEXT MARK", $0A, "GREEN DIAMONDS: ON COURSE", 0
 ec5: .byte "UP: REAR BUMPER TO LINE", $0A, "BACK IN: DOWN+RIGHT, THEN", $0A, "DOWN+LEFT ON NOW! A: PARK", 0
@@ -4101,7 +4101,7 @@ bl_germs:  .byte "GERMS", 0
 card_fail_note:
     .addr fn_bike,   fn_bike_n, fn_bike_q, fn_bike_s    ; bike
     .addr fn_bay,    fn_bay,    fn_bay,    fn_bay       ; bay
-    .addr fn_park,   fn_park_t, fn_park_t, fn_park_n    ; park
+    .addr fn_park,   fn_park_t, fn_park_q, fn_park_n    ; park
     .addr fn_cops,   fn_cops,   fn_cops_q, fn_cops      ; cops
     .addr fn_sail,   fn_sail_t, fn_sail_t, fn_sail_h    ; sail
     .addr fn_pk,     fn_pk,     fn_pk_q,   fn_pk_i      ; parking
@@ -4111,7 +4111,8 @@ fn_bike_n: .byte "OUT OF TIME. NO DELIVERY", $0A, "SAY THE 501 SHORT-TURNED", 0
 fn_bike_q: .byte "NO DELIVERY, NO TOKENS", $0A, "PAID FOR THE RIDE ONLY", 0
 fn_bike_s: .byte "STOPPED 8 S. NO DELIVERY", $0A, "PAID FOR THE RIDE ONLY", 0
 fn_bay:    .byte "THE 5:42 LEFT WITHOUT YOU", $0A, "WALK PAID BY DISTANCE", 0
-fn_park:   .byte "3 HEARTS GONE. NO DOGS!", 0
+fn_park:   .byte "HEARTS GONE: DOGS FORFEIT", 0
+fn_park_q: .byte "GAVE UP: DOGS FORFEIT", 0
 fn_park_t: .byte "NO DUNDAS, NO DOGS!", 0
 fn_park_n: .byte "NO STEP NORTH IN 10 S", 0
 fn_cops:   .byte "COP CAUGHT YOU: FINED 1/4", 0
