@@ -26,6 +26,7 @@ B_HOP, B_HOPCD = 400, 42
 NUM_ENT = 16
 E_TYPE, E_X, E_WY, E_VY, E_VX, E_TIMER, E_FLAGS = 64, 96, 128, 192, 224, 256, 320
 T_PARKED, T_PARKED_S, T_CAR_N, T_CAR_S, T_TRAM_N, T_TRAM_S, T_HOLE, T_TOKEN, T_PED = range(1, 10)
+T_XING = 11         # streetcar tracks across the road: everyone crosses them
 HW = {1: 15, 2: 15, 3: 15, 4: 15, 5: 19, 6: 19, 7: 11, 9: 8}
 HH = {1: 29, 2: 29, 3: 29, 4: 29, 5: 55, 6: 55, 7: 14, 9: 14}
 RAILS = (83, 107, 151, 175)
@@ -62,14 +63,30 @@ class _Reader(Policy):
         me = {'x': w(B_PX) / 256, 'vx': s16(w(B_VX)) / 256, 'speed': w(B_SPEED) / 256,
               'dist': w(B_DIST), 'state': r[B_STATE], 'inv': w(B_INV)}
         ents = []
+        me['xing'] = None       # rel of the tracks across the road, if on the way
         for i in range(NUM_ENT):
             t = r[E_TYPE + 2 * i]
+            if t == T_XING:
+                rel = s16((w(E_WY + 2 * i) - me['dist']) & 0xFFFF)
+                if rel > 0 and (me['xing'] is None or rel < me['xing']):
+                    me['xing'] = rel
             if not t or t > 9:
                 continue
             ents.append({'t': t, 'x': w(E_X + 2 * i) / 256, 'rel': s16((w(E_WY + 2 * i) - me['dist']) & 0xFFFF),
                          'vy': s16(w(E_VY + 2 * i)) / 256, 'vx': s16(w(E_VX + 2 * i)) / 256,
                          'timer': w(E_TIMER + 2 * i), 'flags': r[E_FLAGS + 2 * i]})
         return me, ents
+
+
+def xing_due(me, lag=0.0, early=10):
+    """True when B now (landing `lag` frames late) puts the hop over the
+    tracks across the road: they're about `early` frames off when it lands
+    (a hop is 20 frames in the air)"""
+    rel, sp = me.get('xing'), me['speed']
+    if rel is None or sp < 1.4:
+        return False
+    k = rel / sp - lag
+    return 3 <= k <= early
 
 
 class _Camp(_Reader):
@@ -197,6 +214,7 @@ class _Planner(_Reader):
         return LEFT
 
     hop_rails = False   # B as it's about to cross a rail (a TRACK HOP, not a wobble)
+    hop_xing = True     # B for the tracks across the road (HOP THE RAILS: B!)
 
     def act(self, t, tel, rng):
         m = self.act1(t, tel, rng)
@@ -204,7 +222,9 @@ class _Planner(_Reader):
             me = self.me
             r = self.g.core.peek(self.ev + B_HOPCD, 2)
             vx = me['vx']
-            if me['state'] == 0 and r[0] == 0 and r[1] == 0 and me['speed'] >= 1.4 and abs(vx) > 0.5:
+            if me['state'] == 0 and r[0] == 0 and r[1] == 0 and self.hop_xing and xing_due(me):
+                m |= B
+            elif me['state'] == 0 and r[0] == 0 and r[1] == 0 and me['speed'] >= 1.4 and abs(vx) > 0.5:
                 for rail in RAILS:
                     k = (rail - me['x']) / vx
                     if 2 <= k <= 10:
@@ -581,12 +601,14 @@ class bike_ace(bike_courier):
 CLOSE_D = 40                   # src/ev_bike_ent.inc
 CLOSE_T = (1, 2, 3, 4, 5, 6)   # parked cars, cars and the 501 (near_tab)
 B_HOPD, B_CHAIN, B_CHAINT = 402, 406, 408
+B_XOK = 470                    # 1 = a TTC TRANSFER would pay
 
 
 class bike_stylist(bike_courier):
     close_bonus = 90
     hop_bonus = 45
     hole_bonus = 60
+    xfer_bonus = 110    # TTC TRANSFER: steer, then hop a beat later, over both rails
     wobble_cost = 40
     greed = 60
     waits = tuple(range(0, 25, 3))
@@ -595,6 +617,7 @@ class bike_stylist(bike_courier):
         bike_courier.__init__(self)
         self.lag = None
         self.delays = (0, 10, 20)
+        self.b_at = None
 
     def read(self):
         me, ents = bike_courier.read(self)
@@ -603,6 +626,7 @@ class bike_stylist(bike_courier):
         me['hop_ready'] = ((me['dist'] - w(B_HOPD)) & 0xFFFF) >= 240
         me['chain'] = w(B_CHAIN) if w(B_CHAINT) else 0
         me['hop'] = w(B_HOP)
+        me['xok'] = self.g.core.peek(self.ev + B_XOK, 1)[0]
         self.last_read = (me, ents)
         return me, ents
 
@@ -618,6 +642,7 @@ class bike_stylist(bike_courier):
             self.nerve = max(0.0, min(1.0, 1 - self.lag / 12))
             self.close_bonus *= self.nerve
             self.hop_bonus *= self.nerve
+            self.xfer_bonus *= self.nerve
 
     def fwd(self, me):
         out, my, v = [], 0.0, me['speed']
@@ -679,7 +704,7 @@ class bike_stylist(bike_courier):
                         first = k
                         if can_hop and 3 <= k <= 16:
                             continue
-                    elif can_hop and 3 <= first <= 16 and k <= 19:
+                    elif can_hop and 3 <= first <= 16 and k <= 21:
                         continue
                     c += self.wobble_cost
         if t_settle > 0 or abs(x_now - x0) > 2:
@@ -692,6 +717,8 @@ class bike_stylist(bike_courier):
                     if 3 <= k <= 16:
                         c -= self.hop_bonus * mult
                     break
+            if me['xok'] and self.xfer_frame(x0, L) is not None:
+                c -= self.xfer_bonus * mult
         for e in ents:
             if e['t'] == T_HOLE and 40 < e['rel'] < 168 and abs(e['x'] - L) < HW[T_HOLE] and self.hole_hoppable(me, e):
                 c -= self.hole_bonus * mult
@@ -714,15 +741,40 @@ class bike_stylist(bike_courier):
                         inpath = True
         return c
 
+    def xfer_frame(self, x0, L):
+        """a move from rest at x0 to L over both rails of a track: the frame
+        after the steer to press B so the hop is over both, else None"""
+        rs = sorted((r for r in RAILS if min(x0, L) < r < max(x0, L)), key=lambda r: abs(r - x0))
+        if len(rs) < 2 or abs(rs[0] - rs[1]) > 30:
+            return None
+        k1 = next(i for i in range(200) if PROG[i] >= abs(rs[0] - x0))
+        k2 = next(i for i in range(200) if PROG[i] >= abs(rs[1] - x0))
+        p = max(k2 - 20, MINCHG)
+        return p if p <= k1 - 1 else None
+
     def act(self, t, tel, rng):
         self.rng = rng
         me, ents = self.read()
         self.calibrate(t, me)
+        if self.b_at is not None and t >= self.b_at:
+            # the beat after the steer: hop now (TTC TRANSFER)
+            self.b_at = None
+            if me['state'] == 0 and me['hopcd'] == 0 and not self.cur & B:
+                if t < self.cmd_end:
+                    self.cmd_mask |= B
+                return self.out(t, self.cur | B)
         m = self.decide(t, me, ents)
+        lag = self.lag or 0
+        # the tracks across the road: hop them
+        if (me['state'] == 0 and me['hopcd'] == 0 and not m & B and xing_due(me, lag)
+                and t - self.last_change >= 2):
+            m |= B
+            if t < self.cmd_end:
+                self.cmd_mask |= B
+            return self.out(t, m)
         # a pothole in our line: hop it
         if (me['state'] == 0 and me['hopcd'] == 0 and me['speed'] >= 1.4 and not m & B
                 and t - self.last_change >= 2):
-            lag = self.lag or 0
             for e in ents:
                 if e['t'] != T_HOLE or not self.visible(e):
                     continue
@@ -787,13 +839,17 @@ class bike_stylist(bike_courier):
         n = min(range(MINCHG, 199), key=lambda k: abs(DISP[k] - abs(d)))
         m = (RIGHT if d > 0 else LEFT) | base
         if self.hops and me['speed'] >= 1.4 and me['hopcd'] == 0 and t >= self.busy_until:
-            for r in RAILS:
-                if min(x0, L) < r < max(x0, L):
-                    dr = abs(r - x0)
-                    k = next(i for i in range(200) if PROG[i] >= dr)
-                    if 3 <= k <= 16:
-                        m |= B
-                    break
+            p = self.xfer_frame(x0, L) if self.xfer_bonus and me['hop_ready'] and me['xok'] else None
+            if p is not None:
+                self.b_at = t + p
+            else:
+                for r in RAILS:
+                    if min(x0, L) < r < max(x0, L):
+                        dr = abs(r - x0)
+                        k = next(i for i in range(200) if PROG[i] >= dr)
+                        if 3 <= k <= 16:
+                            m |= B
+                        break
         self.cmd_mask = m
         self.cmd_end = t + n
         self.exp_x = L
@@ -826,6 +882,7 @@ class bike_commuter(_Reader):
     reach = 50          # ...this far from where it is
     sloppy = 0.05
     hold = 70           # frames ahead that count as "in my way"
+    xing_hop = 0.8      # hops the tracks across the road (HOP THE RAILS: B!)
 
     def __init__(self):
         self.g = None
@@ -897,6 +954,7 @@ class bike_commuter(_Reader):
         return False
 
     def act(self, t, tel, rng):
+        self._rng = rng
         me, ents = self.read()
         if me['state'] != 0:
             self.target = HOME
@@ -922,6 +980,10 @@ class bike_commuter(_Reader):
         # by what it thinks its thumb takes)
         if t < self.b_until:
             m |= B
+        elif me['hopcd'] == 0 and me.get('xing') and self.xing_try(me) and \
+                xing_due(me, lag * rng.uniform(0.75, 1.25), early=8):
+            self.b_until = t + 3
+            m |= B
         elif me['hopcd'] == 0 and sp >= 1.4:
             for e in ents:
                 if e['t'] != T_HOLE or not 0 < e['rel'] <= self.sight:
@@ -934,6 +996,12 @@ class bike_commuter(_Reader):
                     m |= B
                 break
         return m
+
+    def xing_try(self, me, rng=None):
+        key = (me['dist'] + me['xing']) // 50
+        if key not in self.hopping:
+            self.hopping[key] = self._rng.random() < self.xing_hop
+        return self.hopping[key]
 
     def start_move(self, L, x, t):
         d = L - x
@@ -1035,6 +1103,7 @@ class bike_dana(bike_commuter):
     """Steers round everything, never hops (Dana, round 5)."""
     hop_pref = 0.0
     rail_hop = 0.0
+    xing_hop = 0.0
 
 
 class bike_gord(bike_commuter):

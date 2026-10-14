@@ -274,7 +274,43 @@ curb_busy:
     rts
 
 ; ------------------------------------------------------------------
+; streetcar tracks across Queen: everyone crosses them, hop or wobble.
+; The first comes ~7 s in, in the quiet warm-up, with the rails hint.
+xing_at: .word 1000, 4300, 7300
+xing_end:
+
+spawn_xing:
+    ldx b_nxing
+    cpx #(xing_end - xing_at)
+    bcs @x
+    A16
+    lda b_dist
+    clc
+    adc #(XING_HINT + 20)
+    cmp f:xing_at,x
+    A8
+    bcc @x
+    jsr alloc_ent
+    bcs @x                      ; (full: next frame)
+    phx
+    ldx b_nxing
+    A16
+    lda f:xing_at,x
+    inx
+    inx
+    stx b_nxing
+    plx
+    sta E_WY,x
+    lda #T_XING
+    sta E_TYPE,x
+    lda #(128*256)
+    sta E_X,x
+    A8
+@x:
+    rts
+
 spawn_ahead:
+    jsr spawn_xing
 @l:
     A16
     lda b_nextsp
@@ -1120,6 +1156,8 @@ str_stopped: .byte "CAR IN BIKE LANE. AGAIN.", 0
 ; per-type behaviour (X = entity, tmp0 = rel)
 ent_logic:
     lda E_TYPE,x
+    cmp #T_XING
+    jeq xing_logic
     cmp #T_PARKED
     jne @tram
     lda E_X+1,x
@@ -1220,6 +1258,74 @@ ent_logic:
     rts
 @x16b:
     A8
+    rts
+
+; the tracks across the road (X = it, tmp0 = rel): until you've scored a
+; TRACK HOP, HOP THE RAILS: B! as they come up; then crossing them is a
+; rail crossing like any other (TRACK HOP in the air, RAIL WOBBLE if not)
+str_xhint: .byte "HOP THE RAILS: B!", 0
+xing_logic:
+    lda b_state
+    jne @x
+    lda b_tracks
+    bne @cross
+    lda E_FLAGS,x
+    and #$40
+    bne @cross
+    A16
+    lda tmp0
+    bmi @cross16
+    cmp #XING_HINT
+    bcs @cross16
+    cmp #200                    ; late: it goes up over anything
+    bcc @hint
+    lda b_popup                 ; else a callout finishes first
+    cmp #20
+    bcs @cross16
+@hint:
+    A8
+    lda E_FLAGS,x
+    ora #$40
+    sta E_FLAGS,x
+    A16
+    lda tmp0
+    pha
+    A8
+    LDPTR0 str_xhint
+    lda #TP_ORANGE
+    jsr pop_mid
+    ldx #50
+    stx b_popup
+    A16
+    pla
+    sta tmp0
+    A8
+    ldx b_cur
+@cross:
+    A16
+@cross16:
+    lda E_REL,x                 ; over them this frame: rel > 0 -> <= 0
+    beq @x16
+    bmi @x16
+    lda tmp0
+    beq @over
+    bpl @x16
+@over:
+    lda tmp0
+    pha
+    A8
+    phy
+    jsr rail_cross
+    ply
+    A16
+    pla
+    sta tmp0
+    A8
+    ldx b_cur
+    rts
+@x16:
+    A8
+@x:
     rts
 
 ; tucked in behind the 501 (X = tram, tmp0 = rel): slipstream
@@ -1349,10 +1455,10 @@ tram_follow:
     rts
 
 ; hw+4, hh+10, kind (1 car, 2 tram, 3 hole, 4 token, 5 ped), near-miss
-hw_tab:   .byte 0, 15, 15, 15, 15, 19, 19, 11,  9,  8, 0
-hh_tab:   .byte 0, 29, 29, 29, 29, 55, 55, 14, 15, 14, 0
-kind_tab: .byte 0,  1,  1,  1,  1,  2,  2,  3,  4,  5, 0
-near_tab: .byte 0,  1,  1,  1,  1,  1,  1,  0,  0,  0, 0
+hw_tab:   .byte 0, 15, 15, 15, 15, 19, 19, 11,  9,  8, 0, 0
+hh_tab:   .byte 0, 29, 29, 29, 29, 55, 55, 14, 15, 14, 0, 0
+kind_tab: .byte 0,  1,  1,  1,  1,  2,  2,  3,  4,  5, 0, 0
+near_tab: .byte 0,  1,  1,  1,  1,  1,  1,  0,  0,  0, 0, 0
 
 ent_collide:
     lda b_state
@@ -1406,11 +1512,11 @@ ent_collide:
     cmp #1
     beq @car
     cmp #2
-    beq @tram
+    jeq @tram
     cmp #3
-    beq @hole
+    jeq @hole
     cmp #5
-    beq @ped
+    jeq @ped
     rts
 @restore:
     ldx b_cur
@@ -1451,6 +1557,26 @@ ent_collide:
     SFX SFX_STEP
     rts
 @carhit:
+    ; say what you hit
+    lda E_TYPE,x
+    cmp #T_CAR_N
+    beq @carn
+    cmp #T_CAR_S
+    beq @cars
+    cmp #T_PARKED
+    bne @parkd
+    lda E_X+1,x
+    cmp #(STOP_X + 1)
+    bcs @parkd
+    lda #CA_STOPD
+    jmp crash
+@parkd:
+    lda #CA_PARKD
+    jmp crash
+@cars:
+    lda #CA_ONCOM
+    jmp crash
+@carn:
     lda #CA_CAR
     jmp crash
 @tram:
@@ -1732,7 +1858,7 @@ bm_hibits:
     .byte $00, $40, $80, $C0
 
 ; draw pass per type: 0 traffic and people, 1 things on the road surface
-pass_tab: .byte 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 1
+pass_tab: .byte 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 1, 1
 
 ents_draw:
     ldx #$0000
@@ -1784,7 +1910,7 @@ ents_draw:
 
 draw_tab:
     .addr dr_none, dr_car, dr_car_s, dr_car, dr_car_s, dr_tram, dr_tram_s
-    .addr dr_hole, dr_token, dr_ped, dr_finish
+    .addr dr_hole, dr_token, dr_ped, dr_finish, dr_xing
 
 dr_none:
     rts
@@ -1959,3 +2085,24 @@ dr_finish:
     rts
 
 str_spadina: .byte "SPADINA AHEAD!", 0
+
+; tracks across the road, curb to curb (13 x 16 px, FX palette)
+dr_xing:
+    lda #$2E
+    sta tmp5
+    A16
+    lda #32
+    sta spr_x
+    A8
+@sq:
+    LDPTR1 bm_xing
+    jsr bmeta
+    A16
+    lda spr_x
+    clc
+    adc #16
+    sta spr_x
+    cmp #232
+    A8
+    bcc @sq
+    rts
