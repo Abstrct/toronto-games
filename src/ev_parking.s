@@ -66,7 +66,7 @@ VR_MAX   = 48           ; reverse 0.375 px/f
 ACC_F    = 4
 ACC_R    = 3
 BRAKE    = 8
-STEER_RT = 8            ; wheel slew per frame (32 = one notch)
+STEER_RT = 16           ; wheel slew per frame (64 = full lock: 4 frames)
 TH_MAX   = $3800        ; heading clamp (about 79 degrees)
 
 IDLE_TOW = 10*60        ; frames without a button before the tow truck comes
@@ -92,6 +92,7 @@ F_WALK   = $08
 F_HYD    = $10
 F_HEDGE  = $20
 F_BIKE   = $40
+F_OVER   = $80          ; pulled up past the line (no ONE-MOVE)
 
 ; blockers (k_hit)
 H_CARA   = $01
@@ -141,6 +142,8 @@ k_jig    = ev_ram + 76      ; shake timer
 k_inspot = ev_ram + 78      ; 1 = in the spot zone (lamps lit)
 CX       = ev_ram + 80      ; 4 corner x (words, px): RL RR FL FR
 CY       = ev_ram + 88
+CX8      = ev_ram + 248     ; the same in 8.8 (what the blockers test)
+CY8      = ev_ram + 256
 k_oax    = ev_ram + 96      ; pose before this frame's move
 k_oay    = ev_ram + 98
 k_oth    = ev_ram + 100
@@ -195,6 +198,25 @@ k_rt     = ev_ram + 216     ; timing an answer to "BACK IN"
 k_rtst   = ev_ram + 218     ; 0 not yet, 1 timing, 2 done this spot
 k_nowb   = ev_ram + 220     ; NOW! / GET READY gap thresholds (biased by $80)
 k_rdyb   = ev_ram + 222
+k_stuck  = ev_ram + 224     ; frames the car has been blocked while you drive it
+k_stuckv = ev_ram + 226     ; the gear it was blocked in: 1 forward, $FF reverse
+k_bgap   = ev_ram + 228     ; result box: blank lines between its rows (HDMA)
+k_half   = ev_ram + 230     ; half in: what it pays (HALF_IN, or WAY_OFF)
+k_front  = ev_ram + 232     ; clearance to the car ahead / behind (signed px)
+k_rear   = ev_ram + 234
+k_rows   = ev_ram + 236     ; result box layout: rows, screen line, row
+k_line   = ev_ram + 238
+k_rowk   = ev_ram + 240
+k_spark  = ev_ram + 242     ; sparkle angle (draw_extras)
+k_stuckn = ev_ram + 244     ; the wheel when it got stuck
+k_bring  = ev_ram + 246     ; the cyclist's bell: this far short of the line
+k_cr     = ev_ram + 264     ; bmw_clear: radius, radius squared
+k_cr2    = ev_ram + 266
+k_psave  = ev_ram + 268     ; pause_ok while the result box has it off
+k_sx     = ev_ram + 270     ; move_car: the blocked pose, and what blocked it
+k_sy     = ev_ram + 272
+k_shit   = ev_ram + 274
+k_hdma   = ev_ram + 512     ; result box: BG3VOFS HDMA table (<= 160 bytes)
 
 .segment "EVENTS2"             ; with Off-Leash and Tallboy (GFX0 is full with TTC Surfing)
 .a8
@@ -232,23 +254,27 @@ ev_parking:
     jsr pk_score
     bra @card
 @quit:
-    ; called it a day from the pause menu: scored as a failed run (what
-    ; was banked, at most 450, the most a run with no park can make)
+    ; called it a day from the pause menu: the spots you finished count,
+    ; the one you walked away from pays nothing (its dings still count).
+    ; The last spot's result box already showing: the run is over anyway.
+    lda k_phase
+    cmp #PH_ANIM
+    bne @q
+    lda k_asleep
+    bne @end
+    lda k_spot
+    cmp #2
+    beq @end
+@q:
     jsl music_stop
-    jsr pk_score
     A16
-    lda ev_score
-    cmp #451
-    bcc @cap
-    sec
-    sbc #450
+    lda k_pen
     clc
-    adc ev_break+4
-    sta ev_break+4
-    lda #450
-    sta ev_score
-@cap:
+    adc k_spen
+    sta k_pen
+    stz k_spen
     A8
+    jsr pk_score
     lda #$03
     sta ev_fail
 @card:
@@ -283,8 +309,9 @@ pk_init:
     sta k_react
     rts
 
-; per spot: length, clock, cyclist
-spot_len:  .word 84, 74, 66
+; per spot: length (shortest, plus 0..spot_var-1 at random), clock, cyclist
+spot_len:  .word 80, 71, 65
+spot_var:  .word 9, 7, 4
 spot_clk:  .word 30*60, 30*60, 25*60
 spot_bike: .word 0, 1, 1
 spot_tgt:  .word TGT_Y, TGT_Y, TGT_Y - 3
@@ -294,8 +321,12 @@ spot_setup:
     lda k_spot
     asl a
     TAXB
+    lda spot_var,x
+    jsl rand_range
     A16
-    lda spot_len,x
+    and #$00FF
+    clc
+    adc spot_len,x
     sta k_len
     clc
     adc #A_REAR
@@ -338,6 +369,7 @@ spot_setup:
     stz k_stime
     stz k_sstrk
     stz k_rtst
+    stz k_stuck
     lda #$FFFF
     sta k_shown
     A8
@@ -357,6 +389,12 @@ spot_setup:
     inc a
     sta k_palB
     jsr restore_car_pals
+    lda #24
+    jsl rand_range
+    clc
+    adc #BIKE_RING
+    sta k_bring
+    stz k_bring+1
     jsr pose_trig
     jsr corners
     jsr spot_eval
@@ -364,17 +402,21 @@ spot_setup:
 
 str_spot1: .byte "SPOT 1: ROOMY. EASY DOES IT", 0
 str_spot2: .byte "SPOT 2: SNUG. MIND THE BIKES", 0
-str_spot3: .byte "SPOT 3: TIGHT. MAID'S ON DUTY", 0
+str_spot3: .byte "SPOT 3: TIGHT, 25 S, BIKES", 0
 
 ; X = message (bank-local), A = text palette: show it in the panel for ~1.7 s
+; (at least MSG_MIN frames; after that a new coach instruction replaces it)
+MSG_T   = 100
+MSG_MIN = 30
 say:
     stx k_msg
     sta k_msgcol
-    lda #100
+    lda #MSG_T
     sta k_msgt
     rts
 
-; X = points: add to this spot's penalties
+; X = points: add to this spot's penalties (the callout says what it cost;
+; the HUD score moves when the spot's box adds it all up)
 add_pen:
     A16
     txa
@@ -382,7 +424,6 @@ add_pen:
     adc k_spen
     sta k_spen
     A8
-    jsr update_total
     rts
 
 ; ------------------------------------------------------------------
@@ -777,8 +818,58 @@ move_car:
     jsr block_check
     lda k_hit
     bne @blocked
+    stz k_stuck                 ; it moved: not stuck
     rts
 @blocked:
+    ; against a parked car: slide along it (the move across or along the
+    ; street alone) rather than stick, if that much is free
+    lda k_hit
+    sta k_shit
+    and #(H_CARA | H_CARB | H_CARL)
+    beq @stop
+    A16
+    lda k_ax
+    sta k_sx
+    lda k_ay
+    sta k_sy
+    lda k_oax
+    sta k_ax
+    A8
+    jsr corners
+    jsr block_check
+    lda k_hit
+    beq @slid
+    A16
+    lda k_sx
+    sta k_ax
+    lda k_oay
+    sta k_ay
+    A8
+    jsr corners
+    jsr block_check
+    lda k_hit
+    beq @slid
+    lda k_shit
+    sta k_hit
+    bra @stop
+@slid:
+    stz k_stuck
+    rts
+@stop:
+    ; stuck against it: how long, and in which gear (for the coach)
+    lda k_stuck
+    inc a
+    beq @sat
+    sta k_stuck
+@sat:
+    lda #$01
+    ldy k_v
+    bpl @gear
+    lda #$FF
+@gear:
+    sta k_stuckv
+    lda k_notch
+    sta k_stuckn
     A16
     lda k_oax
     sta k_ax
@@ -874,145 +965,151 @@ asr7:
 .a8
 
 ; corners of the rotated body: P = axle + lat*r + lon*f,
-; r = (cos, sin), f = (sin, -cos)  (sin/cos scaled by 127)
+; r = (cos, sin), f = (sin, -cos)  (sin/cos scaled by 127). Worked out in
+; 8.8 from the 8.8 axle (CX8 / CY8: what the blockers test, so the car slides
+; along a bumper instead of catching on a rounded pixel), and in whole px
+; (CX / CY: for everything else).
 corners:
-    ; tmp1 = cos*11, tmp2 = sin*11, tmp3 = cos*6, tmp4 = sin*6, tmp5 = cos*32, tmp6 = sin*32 (>>7)
+    ; tmp1 = cos*11, tmp2 = sin*11, tmp3 = cos*6, tmp4 = sin*6, tmp5 = cos*32,
+    ; tmp6 = sin*32, all 8.8 (x 2 / 128 = x 256 / 127, near enough)
     lda k_c
-    ldy #LAT
+    ldy #(LAT * 2)
     jsr smul
     .a16
-    jsr asr7
     sta tmp1
     A8
     lda k_s
-    ldy #LAT
+    ldy #(LAT * 2)
     jsr smul
     .a16
-    jsr asr7
     sta tmp2
     A8
     lda k_c
-    ldy #REAR
+    ldy #(REAR * 2)
     jsr smul
     .a16
-    jsr asr7
     sta tmp3
     A8
     lda k_s
-    ldy #REAR
+    ldy #(REAR * 2)
     jsr smul
     .a16
-    jsr asr7
     sta tmp4
     A8
     lda k_c
-    ldy #FRONT
+    ldy #(FRONT * 2)
     jsr smul
     .a16
-    jsr asr7
     sta tmp5
     A8
     lda k_s
-    ldy #FRONT
+    ldy #(FRONT * 2)
     jsr smul
     .a16
-    jsr asr7
     sta tmp6
-    lda k_ax
-    xba
-    and #$00FF
-    sta tmp7                    ; axle x
-    lda k_ay
-    xba
-    and #$00FF
-    sta tmp0                    ; axle y
     ; rear left (-11, -6): x = ax - c11 - s6, y = ay - s11 + c6
-    lda tmp7
+    lda k_ax
     sec
     sbc tmp1
     sec
     sbc tmp4
-    sta CX
-    lda tmp0
+    sta CX8
+    lda k_ay
     sec
     sbc tmp2
     clc
     adc tmp3
-    sta CY
+    sta CY8
     ; rear right (+11, -6)
-    lda tmp7
+    lda k_ax
     clc
     adc tmp1
     sec
     sbc tmp4
-    sta CX+2
-    lda tmp0
+    sta CX8+2
+    lda k_ay
     clc
     adc tmp2
     clc
     adc tmp3
-    sta CY+2
+    sta CY8+2
     ; front left (-11, +32)
-    lda tmp7
+    lda k_ax
     sec
     sbc tmp1
     clc
     adc tmp6
-    sta CX+4
-    lda tmp0
+    sta CX8+4
+    lda k_ay
     sec
     sbc tmp2
     sec
     sbc tmp5
-    sta CY+4
+    sta CY8+4
     ; front right (+11, +32)
-    lda tmp7
+    lda k_ax
     clc
     adc tmp1
     clc
     adc tmp6
-    sta CX+6
-    lda tmp0
+    sta CX8+6
+    lda k_ay
     clc
     adc tmp2
     sec
     sbc tmp5
-    sta CY+6
+    sta CY8+6
+    ; whole pixels (the bounds keep every corner on screen while you drive)
+    ldx #$0000
+@px:
+    lda CX8,x
+    xba
+    and #$00FF
+    sta CX,x
+    lda CY8,x
+    xba
+    and #$00FF
+    sta CY,x
+    inx
+    inx
+    cpx #8
+    bne @px
     A8
     rts
 
-; k_hit = what the body overlaps: parked cars, hedge, screen bounds
+; k_hit = what the body overlaps: parked cars, hedge, screen bounds (corner
+; tests in 8.8: a corner is in a pixel once it's anywhere inside it)
 block_check:
     stz k_hit
     ldx #$0000
 @c:
     A16
-    lda CX,x
-    cmp #HEDGE
+    lda CX8,x
+    cmp #(HEDGE * 256)
     bcc @nh
     A8
     lda #H_HEDGE
     tsb k_hit
     A16
 @nh:
-    lda CX,x
-    cmp #FAR_X
+    lda CX8,x
+    cmp #(FAR_X * 256)
     bcs @nfar
     ; over in the far parking lane: is there a car parked there?
-    lda CY,x
-    cmp #44
+    lda CY8,x
+    cmp #(44 * 256)
     bcc @nfar
-    cmp #82
+    cmp #(82 * 256)
     bcc @far
-    cmp #100
+    cmp #(100 * 256)
     bcc @nfar
-    cmp #138
+    cmp #(138 * 256)
     bcc @far
-    cmp #150
+    cmp #(150 * 256)
     bcc @nfar
-    cmp #188
+    cmp #(188 * 256)
     bcc @far
-    cmp #204
+    cmp #(204 * 256)
     bcc @nfar
 @far:
     A8
@@ -1020,24 +1117,24 @@ block_check:
     tsb k_hit
     A16
 @nfar:
-    lda CX,x
-    cmp #LEFT_LIM
+    lda CX8,x
+    cmp #(LEFT_LIM * 256)
     bcc @bound
-    lda CY,x
-    cmp #TOP_LIM
+    lda CY8,x
+    cmp #(TOP_LIM * 256)
     bcc @bound
-    cmp #(BOT_LIM + 1)
+    cmp #((BOT_LIM + 1) * 256)
     bcs @bound
     ; parked cars (x 205..227)
-    lda CX,x
-    cmp #SPOT_X0
+    lda CX8,x
+    cmp #(SPOT_X0 * 256)
     bcc @next
-    cmp #(SPOT_X1 + 1)
+    cmp #((SPOT_X1 + 1) * 256)
     bcs @next
-    lda CY,x
-    cmp #A_TOP
+    lda CY8,x
+    cmp #(A_TOP * 256)
     bcc @next
-    cmp #(A_REAR + 1)
+    cmp #((A_REAR + 1) * 256)
     bcs @notA
     A8
     lda #H_CARA
@@ -1045,13 +1142,17 @@ block_check:
     bra @next8
 @notA:
     .a16
-    cmp k_btop
-    bcc @next
     lda k_btop
+    xba                         ; btop * 256
+    cmp CY8,x
+    beq @inB
+    bcs @next
+@inB:
     clc
-    adc #40
-    cmp CY,x
+    adc #(41 * 256)
+    cmp CY8,x
     bcc @next
+    beq @next
     A8
     lda #H_CARB
     tsb k_hit
@@ -1100,80 +1201,62 @@ block_check:
 @x:
     rts
 
-; X, Y = a point (px): carry set if it's inside the car body
+; X, Y = a point (px): carry set if it's inside the car body. Worked out in
+; 8.8 against the 8.8 axle with the PPU's 16 x 8 multiplier, so it doesn't
+; jump a pixel as the axle crosses one.
+PK_M7A = $211B
+PK_M7B = $211C
 pt_in_car:
     A16
     txa
-    sta k_tmp+8
-    lda k_ax
     xba
-    and #$00FF
-    eor #$FFFF
+    and #$FF00
     sec
-    adc k_tmp+8                 ; dx = px - axle x
+    sbc k_ax                    ; dx (8.8)
     sta k_tmp+8
     jsr @abs_ok
     jcs @out
     tya
-    sta k_tmp+10
-    lda k_ay
     xba
-    and #$00FF
-    eor #$FFFF
+    and #$FF00
     sec
-    adc k_tmp+10                ; dy = py - axle y
+    sbc k_ay                    ; dy (8.8)
     sta k_tmp+10
     jsr @abs_ok
-    bcs @out
-    ; lat = (dx*c + dy*s) >> 7
+    jcs @out
+    ; lat = dx*c + dy*s (in 1/128 px: |lat| < LAT*128 is inside)
     lda k_tmp+8
-    sta k_md
-    A8
-    lda k_c
-    jsr smul_w
-    .a16
+    ldy k_c
+    jsr @mul
     sta k_tmp+12
     lda k_tmp+10
-    sta k_md
-    A8
-    lda k_s
-    jsr smul_w
-    .a16
+    ldy k_s
+    jsr @mul
     clc
     adc k_tmp+12
-    jsr asr7
-    ; |lat| < LAT
     bpl @lp
     eor #$FFFF
     inc a
 @lp:
-    cmp #LAT
+    cmp #(LAT * 128)
     bcs @out
-    ; lon = (dx*s - dy*c) >> 7
+    ; lon = dx*s - dy*c: -REAR < lon < FRONT
     lda k_tmp+8
-    sta k_md
-    A8
-    lda k_s
-    jsr smul_w
-    .a16
+    ldy k_s
+    jsr @mul
     sta k_tmp+12
     lda k_tmp+10
-    sta k_md
-    A8
-    lda k_c
-    jsr smul_w
-    .a16
+    ldy k_c
+    jsr @mul
     eor #$FFFF
     sec
     adc k_tmp+12
-    jsr asr7
-    ; -REAR < lon < FRONT
     bmi @neg
-    cmp #FRONT
+    cmp #(FRONT * 128)
     bcs @out
     bra @in
 @neg:
-    cmp #($10000 - REAR + 1)
+    cmp #($10000 - REAR * 128 + 1)
     bcc @out
 @in:
     A8
@@ -1183,14 +1266,26 @@ pt_in_car:
     A8
     clc
     rts
-; A16 = value: carry clear when |value| < 40 (close enough to test)
+; A16 = 8.8 value, Y = sin / cos byte -> A16 = value * it / 256 (signed)
+@mul:
+    .a16
+    A8
+    sta PK_M7A
+    xba
+    sta PK_M7A
+    tya
+    sta PK_M7B
+    A16
+    lda MPYM
+    rts
+; A16 = 8.8 value: carry clear when it's within 40 px (close enough to test)
 @abs_ok:
     .a16
     bpl @ap
     eor #$FFFF
     inc a
 @ap:
-    cmp #40
+    cmp #(40 * 256)
     rts
 .a8
 
@@ -1255,10 +1350,10 @@ on_block:
 @x:
     rts
 
-str_dentA: .byte "BUMPER TAP! (IT'S A BMW)", 0
-str_dentB: .byte "WEE-OO! WEE-OO! WEE-OO!", 0
-str_dentL: .byte "WRONG SIDE! BUMPER TAP!", 0
-str_hedge: .byte "INTO THE HEDGE!", 0
+str_dentA: .byte "BUMPER TAP -150 (IT'S A BMW)", 0
+str_dentB: .byte "WEE-OO! WEE-OO! DENT -150", 0
+str_dentL: .byte "WRONG SIDE! BUMPER TAP -150", 0
+str_hedge: .byte "INTO THE HEDGE! -100", 0
 
 ; curb, sidewalk and hydrant: you can drive over them, it just costs you
 soft_hazards:
@@ -1367,15 +1462,16 @@ soft_hazards:
     A8
     rts
 
-str_curb: .byte "CURB CHECK! SCRAAAPE", 0
-str_walk: .byte "UP ON THE SIDEWALK!", 0
-str_hyd:  .byte "HYDRANT! SPLOOSH!", 0
+str_curb: .byte "CURB CHECK! SCRAAAPE -50", 0
+str_walk: .byte "UP ON THE SIDEWALK! -100", 0
+str_hyd:  .byte "HYDRANT! SPLOOSH! -200", 0
 
 ; ------------------------------------------------------------------
-; the cyclist (spots 2 and 3): once you've pulled up beside the car ahead
-; (or start backing up), the bell rings and she appears at the bottom of
-; the lane, riding up at 1.25 px/f. Your nose swings out across her line as
-; soon as you back in, so check your mirror: wait the ~2 s for her to pass.
+; the cyclist (spots 2 and 3): on your way up to the line (or once you
+; start backing up), the bell rings and she appears at the bottom of the
+; lane, riding up at 1.25 px/f. Your nose swings out across her line as
+; soon as you back in, so the coach has you wait on the line until she's by.
+BIKE_RING = 60              ; the bell: 60-83 px short of the line
 bike_update:
     lda k_bst
     bne @act
@@ -1387,12 +1483,12 @@ bike_update:
     and #F_REV
     bne @go
     A16
-    lda k_v
-    bne @x16
     lda k_ay
     xba
     and #$00FF
-    cmp #(A_REAR + 16)
+    sec
+    sbc k_tgt
+    cmp k_bring
     A8
     bcs @x
 @go:
@@ -1406,12 +1502,7 @@ bike_update:
     ldx #.loword(str_bell)
     lda #TP_CYAN
     jsr say
-    lda #120
-    sta k_msgt
 @x:
-    rts
-@x16:
-    A8
     rts
 @ride:
     cmp #2
@@ -1497,7 +1588,7 @@ bike_update:
     jmp add_pen
 
 str_bell: .byte "DING DING! BIKE! WAIT FOR IT", 0
-str_bike: .byte "HEY! WATCH THE BIKE LANE!", 0
+str_bike: .byte "HEY! WATCH THE BIKE LANE -150", 0
 
 ; the meter maid walks down the sidewalk in the last 10 seconds
 maid_update:
@@ -1580,6 +1671,7 @@ spot_eval:
     sec
     sbc #A_REAR
     sta k_tmp+14                ; front clearance
+    sta k_front
     lda CY
     cmp CY+2
     bcs @x1
@@ -1596,6 +1688,7 @@ spot_eval:
     eor #$FFFF
     sec
     adc k_btop                  ; rear clearance
+    sta k_rear
     cmp k_tmp+14
     bmi @r
     lda k_tmp+14
@@ -1696,12 +1789,50 @@ spot_eval:
 TGT_Y = A_REAR + 3          ; ideal rear axle y before backing in (bumpers level);
                             ; the tight spot wants it 4 px further up (k_tgt)
 ; coach: NOW! when the predicted gap is under 7 + 3/8 of your reaction time
-; (12 px for a quarter second), GET READY 10 px before that (react_time)
+; (12 px for a quarter second), GET READY 10 px before that (react_time),
+; and only once the swing in will clear the car ahead (bmw_clear). Stuck
+; against something, it says how to get out.
 coach:
-    ; the cyclist coming up the lane, not yet past your nose: wait
+    lda k_stuck
+    cmp #12
+    bcc @free
+    cmp #20
+    bne @stk
+    stz k_msgt                  ; cut the bump's joke short: this matters more
+@stk:
+    ldx #.loword(co_backup)     ; blocked going forward: back off
+    lda k_stuckv
+    bpl @set0
+    ldx #.loword(co_pullup)     ; blocked backing up: pull away
+    lda k_hit
+    and #H_CARA
+    beq @set0
+    lda k_stuckn
+    beq @set0
+    ldx #.loword(co_pinned)     ; nose swung onto the BMW: straight back
+@set0:
+    jmp @set
+@free:
+    ; the cyclist coming up the lane, not yet past your nose: wait for her
+    ; (once you're on the line, or backing up)
     lda k_bst
     cmp #2
     bne @nobike
+    lda k_flags
+    and #F_REV
+    bne @bk
+    A16
+    lda k_ay
+    xba
+    and #$00FF
+    sec
+    sbc k_tgt
+    bmi @bk16
+    cmp #9
+    bcs @nob16
+@bk16:
+    A8
+@bk:
     A16
     lda k_by
     xba
@@ -1713,6 +1844,8 @@ coach:
     bcc @nobike
     ldx #.loword(co_wait)
     jmp @set
+@nob16:
+    A8
 @nobike:
     ; wandered across the street with the nose swung round: straighten first
     A16
@@ -1727,13 +1860,13 @@ coach:
     bcc @inlane
     ldx #.loword(co_strl)       ; nose left: reverse on left lock
     lda k_th+1
-    bmi @set0
+    bmi @set1
     ldx #.loword(co_strr)
-@set0:
+@set1:
     jmp @set
 @inlane:
     ; swung past straight (nose into the curb) after backing in: forward and
-    ; left lock brings the nose back out
+    ; left lock brings the nose back out; let go before it's straight
     lda k_flags
     and #F_REV
     beq @noflip
@@ -1741,7 +1874,14 @@ coach:
     bmi @noflip
     cmp #4
     bcc @noflip
+    jsr th_pred
+    bmi @nstop
+    cmp #2
+    bcc @nstop
     ldx #.loword(co_nosein)
+    jmp @set
+@nstop:
+    ldx #.loword(co_stop)
     jmp @set
 @noflip:
     lda k_inspot
@@ -1834,11 +1974,12 @@ coach:
     bra @set
 @far:
     A8
+    lda #F_OVER                 ; overshot the line: no ONE-MOVE this spot
+    tsb k_flags
     ldx #.loword(co_toofar)
     bra @set
 @ready16:
     A8
-@ready:
     ; time how long you take to answer BACK IN (if you aren't already)
     lda k_rtst
     bne @rtx
@@ -1860,6 +2001,15 @@ coach:
 @back:
     ldx #.loword(co_back)
 @set:
+    ; a new instruction ends a callout that has had its moment (a bump's
+    ; joke mustn't hide LET GO TO STOP)
+    cpx k_coach
+    beq @same
+    lda k_msgt
+    cmp #(MSG_T - MSG_MIN + 1)
+    bcs @same
+    stz k_msgt
+@same:
     stx k_coach
     rts
 @turning:
@@ -1875,18 +2025,57 @@ coach:
     ldx #.loword(co_ready)
     bra @set
 @now:
+    ; NOW!, if the nose will swing clear of the car ahead; if not, back
+    ; straight until it will
+    jsr bmw_clear
+    bcc @clr
     ldx #.loword(co_now)
     bra @set
+@clr:
+    ldx #.loword(co_clear)
+    bra @set
 @counter:
+    ; counter-steered too soon (5 px or more before NOW! would have shown):
+    ; it would end up way out from the curb
+    lda k_ang
+    cmp #16
+    bcc @cs
+    jsr gap_pred
+    eor #$80
+    sec
+    sbc #5
+    bcc @cs
+    cmp k_nowb
+    bcc @cs
+    ldx #.loword(co_early)
+    bra @set
+@cs:
     ; counter-steering: swing in until you'll be straight by the time you
     ; let go (heading + turn rate x your reaction time)
+    jsr th_pred
+    bmi @swing
+    ldx #.loword(co_stop)
+    bra @set
+@swing:
+    ldx #.loword(co_swing)
+    bra @set
+
+; A8 = high byte of (heading + this frame's turn x your reaction time), with
+; its flags: where the car will be pointing when your hand catches up
+th_pred:
     A16
     lda k_th
     sec
-    sbc k_oth                   ; turn this frame (+ while swinging in)
-    bmi @now16
+    sbc k_oth                   ; turn this frame (signed)
+    sta k_tmp+12
+    bpl @p
+    eor #$FFFF
+    inc a
+@p:
     cmp #256
-    bcs @now16
+    bcc @ok
+    lda #255
+@ok:
     A8
     sta WRMPYA
     lda k_react
@@ -1897,20 +2086,105 @@ coach:
     nop
     A16
     lda RDMPYL
+    bit k_tmp+12
+    bpl @add
+    eor #$FFFF
+    inc a
+@add:
     clc
     adc k_th
-    bra @pr
-@now16:
-    lda k_th
-@pr:
     A8
     xba
-    bmi @swing
-    ldx #.loword(co_stop)
-    bra @set
-@swing:
-    ldx #.loword(co_swing)
-    bra @set
+    rts
+
+; carry set = swinging in on left lock from here clears the car ahead. The
+; turn centre is C = axle - 32 (cos, sin); the front corner swings round it
+; 54 px out, so C must be about that far from the BMW's rear corner: 53 px,
+; less 1 for every 8 frames your hand takes (you keep turning out till then)
+CLEAR_R = 53
+bmw_clear:
+    lda k_react
+    lsr a
+    lsr a
+    lsr a
+    eor #$FF
+    sec
+    adc #CLEAR_R
+    sta k_cr                    ; r
+    stz k_cr+1
+    sta WRMPYA
+    sta WRMPYB
+    nop
+    nop
+    nop
+    nop
+    ldx RDMPYL
+    stx k_cr2                ; r * r
+    lda k_c
+    ldy #32
+    jsr smul
+    .a16
+    jsr asr7
+    sta k_tmp+12
+    lda k_ax
+    xba
+    and #$00FF
+    sec
+    sbc k_tmp+12                ; C x
+    eor #$FFFF
+    sec
+    adc #SPOT_X0                ; dx
+    jsr @sq
+    bcs @yes
+    sta k_tmp+14
+    A8
+    lda k_s
+    ldy #32
+    jsr smul
+    .a16
+    jsr asr7
+    sta k_tmp+12
+    lda k_ay
+    xba
+    and #$00FF
+    sec
+    sbc k_tmp+12                ; C y
+    eor #$FFFF
+    sec
+    adc #A_REAR                 ; dy
+    jsr @sq
+    bcs @yes
+    clc
+    adc k_tmp+14
+    cmp k_cr2
+    A8
+    rts
+@yes:
+    A8
+    sec
+    rts
+; A16 = d -> A16 = d * d, carry set when |d| is CLEAR_R or more on its own
+@sq:
+    .a16
+    bpl @sp
+    eor #$FFFF
+    inc a
+@sp:
+    cmp k_cr
+    bcs @sx
+    A8
+    sta WRMPYA
+    sta WRMPYB
+    nop
+    nop
+    nop
+    nop
+    A16
+    lda RDMPYL
+    clc
+@sx:
+    rts
+.a8
 
 ; the instructor learns your timing: frames from BACK IN to DOWN, averaged
 ; over the spots, sets when NOW! goes up (gap 7 + 3/8 of it: 12 px at 15 f)
@@ -1964,7 +2238,7 @@ react_time:
     rts
 
 ; A8 = predicted curb gap if you counter-steer now (signed, clamped to -128..127)
-;   = curb - 11 - axle x - 32 (1 - cos) - 5 for the wheel's travel
+;   = curb - 11 - axle x - 32 (1 - cos) - 3 for the wheel's travel
 gap_pred:
     lda k_c
     eor #$FF
@@ -1982,7 +2256,7 @@ gap_pred:
     adc k_tmp+14
     eor #$FFFF
     sec
-    adc #(CURB - 11 - 5)
+    adc #(CURB - 11 - 3)
     bmi @neg
     cmp #127
     bcc @ok
@@ -2005,14 +2279,19 @@ co_strr:   .byte "HOLD DOWN+RIGHT: STRAIGHTEN", 0
 co_lock:   .byte "HOLD DOWN+RIGHT: BACK IN", 0
 co_back:   .byte "HOLD DOWN+RIGHT: BACK IN", 0
 co_wait:   .byte "WAIT! LET THE BIKE GO BY", 0
-co_ready:  .byte "GET READY: DOWN+LEFT SOON", 0
+co_ready:  .byte "KEEP DOWN+RIGHT: GET READY", 0
 co_now:    .byte "NOW! ROLL TO DOWN+LEFT", 0
+co_clear:  .byte "MIND THE BMW: HOLD DOWN ONLY", 0
 co_swing:  .byte "HOLD DOWN+LEFT: SWING IN", 0
+co_early:  .byte "TOO SOON! BACK TO DOWN+RIGHT", 0
 co_stop:   .byte "STRAIGHT! LET GO TO STOP", 0
 co_park:   .byte "A: PARK IT!", 0
-co_fix:    .byte "TOO FAR OUT. FIX IT, OR A", 0
-co_fixin:  .byte "UP ON THE CURB. FIX IT, OR A", 0
+co_fix:    .byte "TOO FAR OUT! A = $75 TICKET", 0
+co_fixin:  .byte "OVER THE CURB! A = $75 TICKET", 0
 co_nosein: .byte "HOLD UP+LEFT: STRAIGHTEN", 0
+co_pinned: .byte "PINNED! HOLD DOWN ONLY", 0
+co_pullup: .byte "STUCK! HOLD UP TO PULL AWAY", 0
+co_backup: .byte "STUCK! HOLD DOWN TO BACK OFF", 0
 
 ; ------------------------------------------------------------------
 ;  work out what this spot scores (carry set = time ran out)
@@ -2038,13 +2317,23 @@ park_result:
     cmp #3
     bcc @parked
 @ticket:
-    ; half in: HALF IN 150, and the $75 TICKET takes 75 back
+    ; half in: HALF IN 150, and the $75 TICKET takes 75 back; both the curb
+    ; and the angle red: WAY OFF 50
     plp
     lda #O_TICKET
     sta k_out
     inc k_tickets
     stz k_streak
     ldx #HALF_IN
+    lda k_gc
+    cmp #3
+    bcc @hp
+    lda k_ga
+    cmp #3
+    bcc @hp
+    ldx #WAY_OFF
+@hp:
+    stx k_half
     stx k_sbase
     ldx #TICKET
     jsr add_pen
@@ -2094,10 +2383,15 @@ park_result:
     stz k_streak
     jmp @done
 @style:
-    ; ONE-MOVE: backed in and never drove forward again
+    ; ONE-MOVE: stopped on the line, backed in and never drove forward
+    ; again, and touched nothing on the way
     lda k_flags
-    and #(F_REV | F_FWD)
+    and #(F_REV | F_FWD | F_OVER)
     cmp #F_REV
+    bne @nq
+    A16
+    lda k_spen
+    A8
     bne @nq
     inc k_onemv
     lda #$01
@@ -2109,22 +2403,33 @@ park_result:
     sta k_sbonus
     A8
 @nq:
-    ; TIME LEFT: 10 a whole second still on the clock
+    ; DEAD CENTRE: the same room ahead and behind, give or take a pixel
+    A16
+    lda k_front
+    sec
+    sbc k_rear
+    inc a
+    cmp #3
+    A8
+    bcs @nc
+    lda #$20
+    tsb k_style
+    A16
+    lda k_sbonus
+    clc
+    adc #CENTRE
+    sta k_sbonus
+    A8
+@nc:
+    ; TIME LEFT: 10 a second still on the clock, to the tenth (1 a 6 frames)
     A16
     lda k_clock
     sta tmp0
     A8
-    lda #60
+    lda #6
     jsl div16
     A16
     lda tmp0
-    sta k_ssec
-    asl a
-    sta k_stime
-    asl a
-    asl a
-    clc
-    adc k_stime                 ; x 10
     sta k_stime
     beq @nt16
     clc
@@ -2211,7 +2516,6 @@ park_result:
     stz k_sbonus
     stz k_v
     A8
-    jsr update_total
     stz k_anim
     stz k_anim+1
     lda #PH_ANIM
@@ -2241,6 +2545,8 @@ park_result:
 out_of_grades: .byte O_PERFECT, O_NICE, O_OK, O_OK
 PARKED   = 200
 HALF_IN  = 150
+WAY_OFF  = 50                   ; half in with the curb and angle lamps both red
+CENTRE   = 100
 TICKET   = 75
 ONE_MOVE = 150
 KISS     = 150
@@ -2249,20 +2555,14 @@ pts_curb:  .word 300, 150, 50, 0, 0
 pts_ang:   .word 200, 100, 40, 0, 0
 pts_space: .word 100, 60, 30, 0, 0
 
-; k_score = base + bonus + this spot so far - penalties, never below 0
+; k_score = the spots banked so far (base + bonus - penalties), never below 0
 update_total:
     A16
     lda k_base
     clc
     adc k_bonus
-    clc
-    adc k_sbase
-    clc
-    adc k_sbonus
     sec
     sbc k_pen
-    sec
-    sbc k_spen
     bpl @p
     lda #$0000
 @p:
@@ -2371,23 +2671,58 @@ ph_anim:
 @next:
     jsr restore_car_pals
     stz k_alarmt
-    jsr clear_box
     stz k_msgt
     lda k_asleep
     bne @done                   ; towed for idling: that's the run
-    inc k_spot
     lda k_spot
-    cmp #3
+    cmp #2
     bcs @done
-    jmp spot_setup
+    jmp next_spot
 @done:
+    jsr clear_box
     lda #PH_DONE
     sta k_phase
 @x:
     rts
+
 @next16:
     A8
     bra @next
+
+; fade down, set up the next spot (HUD and all) in the dark, fade back up.
+; No pausing in the dark: START waits for the picture.
+next_spot:
+    lda #15
+@out:
+    sta inidisp_sh
+    jsl wait_frame
+    lda inidisp_sh
+    sec
+    sbc #3
+    bpl @out
+    stz inidisp_sh
+    jsr clear_box
+    inc k_spot
+    jsr spot_setup
+    jsr pk_draw
+    jsr hud_top
+    jsr hud_lamps
+    jsr hud_msg
+    jsl wait_frame
+    lda #3
+@in:
+    sta inidisp_sh
+    jsl wait_frame
+    lda inidisp_sh
+    clc
+    adc #3
+    cmp #16
+    bcc @in
+    lda #15
+    sta inidisp_sh
+    lda k_psave
+    sta pause_ok
+    rts
 
 ; the bumped car's alarm: flash its body colours, honk
 anim_alarm:
@@ -2509,10 +2844,17 @@ anim_towed:
 ;   NICELY DONE. / PARKED +200 / CURB GREAT +300 / ANGLE GOOD +100 /
 ;   SPACE OK +30 / ONE-MOVE +150 / 21S LEFT +210 / DENT -150 / SPOT +840
 BOX_COL = 0
-BOX_ROW = 7
+BOX_ROW = 6
 BOX_W   = 18
 NUM_COL = BOX_W - 2             ; the numbers end in this column
 result_box:
+    ; no pausing over the box (its rows are spread out; the PAUSED box's
+    ; wouldn't be): START is back with the next spot
+    lda pause_ok
+    beq @np
+    sta k_psave
+    stz pause_ok
+@np:
     ; count the lines, draw the box, then draw them
     stz k_bmode
     stz k_bcount
@@ -2528,6 +2870,7 @@ result_box:
     ldx #(BOX_ROW*32 + BOX_COL)
     lda #$20
     jsl txt_box
+    jsr box_spread
     lda #TXT_WIN
     sta txt_bg
     ; title
@@ -2605,13 +2948,14 @@ box_step:
     jsr bi_minus
 @sum:
     stz txt_bg
+    jsr update_total            ; the HUD score moves by exactly this line
     SFX SFX_COIN
     rts
 
 box_titles: .addr bt0, bt1, bt2, bt3, bt4, bt5
 bt0: .byte "PERFECT PARK!", 0
 bt1: .byte "NICELY DONE.", 0
-bt2: .byte "PARKED.", 0
+bt2: .byte "IT'LL DO.", 0
 bt3: .byte "HALF IN. TICKET!", 0
 bt4: .byte "TOWED!", 0
 bt5: .byte "TIME'S UP.", 0
@@ -2623,7 +2967,11 @@ box_items:
     cmp #O_TICKET
     bne @nh
     ldx #.loword(bl_half)
-    ldy #HALF_IN
+    ldy k_half
+    cpy #HALF_IN
+    beq @hl
+    ldx #.loword(bl_wayoff)
+@hl:
     lda #TP_WHITE
     jsr bi_plus
     jmp @pens
@@ -2677,23 +3025,19 @@ box_items:
     lda k_style
     and #$02
     beq @s3
-    ldx #.loword(bl_left)       ; "nnS LEFT": the seconds go in front
+    ldx #.loword(bl_left)
     ldy k_stime
     lda #TP_GREEN
     jsr bi_plus
-    lda k_bdrew
-    beq @s3
-    dec k_row
-    A16
-    lda k_ssec
-    sta tmp1
-    A8
-    jsr row_cell
-    lda #($20 | (TP_GREEN << 2))
-    ldy #2
-    jsl txt_num
-    inc k_row
 @s3:
+    lda k_style
+    and #$20
+    beq @s3b
+    ldx #.loword(bl_centre)
+    ldy #CENTRE
+    lda #TP_GREEN
+    jsr bi_plus
+@s3b:
     lda k_style
     and #$08
     beq @s4
@@ -2799,11 +3143,13 @@ pen_lbl:  .addr bl_curbhit, bl_walk, bl_hyd, bl_hedge, bl_bike
 
 bl_parked:  .byte "PARKED", 0
 bl_half:    .byte "HALF IN", 0
+bl_wayoff:  .byte "WAY OFF", 0
+bl_centre:  .byte "DEAD CENTRE", 0
 bl_curb:    .byte "CURB", 0
 bl_ang:     .byte "ANGLE", 0
 bl_space:   .byte "SPACE", 0
 bl_one:     .byte "ONE-MOVE", 0
-bl_left:    .byte "  S LEFT", 0
+bl_left:    .byte "TIME LEFT", 0
 bl_kiss:    .byte "CURB KISS", 0
 bl_streak2: .byte "PERFECT X2", 0
 bl_streak3: .byte "PERFECT X3", 0
@@ -3001,12 +3347,153 @@ row_cell:
 clear_box:
     ldx #(BOX_ROW*32 + BOX_COL)
     A16
-    lda #($1500 | BOX_W)        ; rows 7..27
+    lda #($1500 | BOX_W)        ; rows 6..26 (27 is clear of it)
     sta tmp1
     A8
     stz tmp2
     lda #$00
     jsl txt_fill
+    ldx #(STRIP_ROW*32 + BOX_COL)
+    A16
+    lda #($0100 | BOX_W)
+    sta tmp1
+    A8
+    stz tmp2
+    lda #$00
+    jsl txt_fill
+    jmp hud_hdma_on             ; back to the panel's own table
+
+; Open the box's rows up: an HDMA table on BG3VOFS (the panel's entries,
+; then each box row followed by k_bgap lines of STRIP_ROW, a copy of a blank
+; box row) so the box reads at 8 + gap px a row. The gap is 3 px, less for
+; a box too tall to fit above the bottom row.
+STRIP_ROW = 28                  ; off screen; the panel's own strip is 29-31
+BOX_TOP   = 51                  ; screen line of the box's top border
+BOX_BOT   = 216                 ; the box ends above this line
+box_spread:
+    ; a blank row of the box (border, inside, border) for the gaps
+    ldx #$0000
+@cp:
+    lda txt_map+((BOX_ROW+1)*32 + BOX_COL)*2,x
+    sta txt_map+(STRIP_ROW*32 + BOX_COL)*2,x
+    inx
+    cpx #(BOX_W*2)
+    bne @cp
+    ; rows, and the widest gap that fits
+    lda k_bcount
+    clc
+    adc #4
+    sta k_rows                  ; rows R
+    lda #4
+    sta k_bgap
+@g:
+    dec k_bgap
+    beq @tab
+    ; BOX_TOP + 8R + gap (R - 1) <= BOX_BOT ?
+    lda k_rows
+    dec a
+    sta WRMPYA
+    lda k_bgap
+    sta WRMPYB
+    nop
+    nop
+    nop
+    nop
+    A16
+    lda k_rows
+    and #$00FF
+    asl a
+    asl a
+    asl a
+    clc
+    adc RDMPYL
+    cmp #(BOX_BOT - BOX_TOP + 1)
+    A8
+    bcs @g
+@tab:
+    ; the panel's entries, as they are
+    ldx #$0000
+@hc:
+    lda f:hud_vofs,x
+    sta k_hdma,x
+    inx
+    cpx #HUD_ENTRIES*3
+    bne @hc
+    lda #(BOX_TOP - HUD_LINES)  ; the lines down to the box: row 5 (blank)
+    sta k_hdma,x
+    A16
+    lda #((5 * 8 - HUD_LINES - 1) & $3FF)
+    sta k_hdma+1,x
+    A8
+    inx
+    inx
+    inx
+    A16
+    lda #BOX_TOP
+    sta k_line                  ; screen line now
+    A8
+    stz k_rowk                  ; row k
+@row:
+    lda #8
+    sta k_hdma,x
+    A16
+    lda k_rowk
+    and #$00FF
+    asl a
+    asl a
+    asl a
+    clc
+    adc #(BOX_ROW * 8 - 1)
+    sec
+    sbc k_line
+    and #$03FF
+    sta k_hdma+1,x
+    lda k_line
+    clc
+    adc #8
+    sta k_line
+    A8
+    inx
+    inx
+    inx
+    inc k_rowk
+    lda k_rowk
+    cmp k_rows
+    beq @end
+    lda k_bgap
+    beq @row
+    sta k_hdma,x
+    A16
+    lda #(STRIP_ROW * 8 - 1)
+    sec
+    sbc k_line
+    and #$03FF
+    sta k_hdma+1,x
+    lda k_bgap
+    and #$00FF
+    clc
+    adc k_line
+    sta k_line
+    A8
+    inx
+    inx
+    inx
+    bra @row
+@end:
+    ; the rest of the screen as it is
+    lda #1
+    sta k_hdma,x
+    A16
+    stz k_hdma+1,x
+    A8
+    stz k_hdma+3,x
+    lda k_bgap
+    beq @x
+    ldx #.loword(k_hdma)
+    stx $4372
+    lda #^k_hdma
+    sta $4374
+@x:
     rts
 
 ; ------------------------------------------------------------------
@@ -3081,6 +3568,8 @@ hud_vofs:
     .word (GAP_ROW * 8 - 28) & $3FF     ; lines 27-30: the empty strip
     .byte 16
     .word (24 - 32) & $3FF              ; lines 31-46: rows 3 and 4
+HUD_ENTRIES = 5                         ; (box_spread copies these)
+HUD_LINES   = 47
     .byte 1
     .word 0                             ; the rest of the screen
     .byte 0
@@ -3610,14 +4099,14 @@ draw_extras:
     cmp #O_PERFECT
     bne @x
     ; four sparkles circling the car
-    stz k_tmp+20
+    stz k_spark
 @spk:
     jsr car_centre
     lda frame
     asl a
     asl a
     clc
-    adc k_tmp+20
+    adc k_spark
     jsl sin8
     jsr ev_sext6
     clc
@@ -3628,7 +4117,7 @@ draw_extras:
     asl a
     asl a
     clc
-    adc k_tmp+20
+    adc k_spark
     jsl cos8
     jsr ev_sext6
     clc
@@ -3642,10 +4131,10 @@ draw_extras:
     ldx #MS_SPARKLE_BASE
     stx tmp6
     jsl oam_meta
-    lda k_tmp+20
+    lda k_spark
     clc
     adc #64
-    sta k_tmp+20
+    sta k_spark
     bne @spk
 @x:
     rts
@@ -3682,7 +4171,8 @@ car_centre:
     rts
 
 ; ------------------------------------------------------------------
-; ev_score = base + style - penalties: exactly the result boxes added up.
+; ev_score = base + style - penalties: exactly the result boxes added up,
+; never below 0 (the penalty word is always the true cost of every hit).
 ; No spot parked = ev_fail 1; towed for idling = ev_fail 4.
 ; ev_stat: spots parked, curb kisses, tickets, spots towed
 pk_score:
@@ -3690,14 +4180,9 @@ pk_score:
     lda k_base
     clc
     adc k_bonus
-    sta tmp0                    ; base + style
     sec
     sbc k_pen
     bpl @pos
-    ; penalties ate more than the run made: 0, and the penalty line says
-    ; what could actually be taken off
-    lda tmp0
-    sta k_pen
     lda #$0000
 @pos:
     sta ev_score
