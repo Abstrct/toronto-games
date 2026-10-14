@@ -1320,7 +1320,7 @@ sty_tight:  .byte "TIGHT ROUNDING", 0
 sty_ctack:  .byte "CLEAN TACKS", 0
 sty_fsurf:  .byte "FERRY SURF", 0
 sty_lhon:   .byte "LINE HONOURS", 0
-sty_ostyle: .byte "OTHER STYLE", 0
+sty_ostyle: .byte "ROLL TACKS", 0
 
 ; 1 = a failed run forfeits the bonus: the event leaves it in ev_break+2,
 ; keeps it out of ev_score, and the card shows it as a grey FORFEIT row
