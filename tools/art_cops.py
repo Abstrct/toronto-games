@@ -8,7 +8,8 @@ from snes import (TileSet, convert_bg, build_palettes, map_bytes, pal_bytes, hex
 from sprites import Sheet, render
 import people as P
 
-GROUND = 188
+GROUND = 192        # the runner's feet (ev_cops.s GROUND)
+LIFT = 12           # everything above the sidewalk sits this much higher than it used to
 
 
 def rgb(h):
@@ -25,8 +26,8 @@ def far_layer():
     x = 0
     while x < 512:
         w = rnd.choice([24, 32, 40])
-        top = rnd.randrange(56, 84)
-        d.rectangle([x, top, x + w - 1, 140], fill=roof)
+        top = rnd.randrange(56, 84) - LIFT
+        d.rectangle([x, top, x + w - 1, 140 - LIFT], fill=roof)
         d.polygon([(x, top), (x + w // 2, top - 10), (x + w - 1, top)], fill=roof2)
         if rnd.random() < 0.6:
             d.rectangle([x + 4, top + 8, x + 6, top + 11], fill=win)
@@ -36,26 +37,28 @@ def far_layer():
     tower = rgb('#8a7a9a')
     light = rgb('#b8a8c4')
     glass = rgb('#3a3050')
-    for y in range(52, 110):
-        f = (y - 52) / 58.0
+    L = LIFT
+    for y in range(52 - L, 110 - L):
+        f = (y - 52 + L) / 58.0
         half = 1 + 3.5 * f ** 2.6
         d.line([cx - half, y, cx + half, y], fill=tower)
         d.point((cx - int(half), y), fill=light)
-    d.rectangle([cx - 1, 34, cx + 1, 46], fill=tower)
-    d.point((cx - 1, 40), fill=light)
+    d.rectangle([cx - 1, 34 - L, cx + 1, 46 - L], fill=tower)
+    d.point((cx - 1, 40 - L), fill=light)
     for (y, half, col) in ((44, 4, tower), (45, 7, light), (46, 8, glass), (47, 8, light),
                            (48, 7, tower), (49, 3, tower), (50, 2, tower), (51, 2, tower)):
-        d.line([cx - half, y, cx + half, y], fill=col)
-    d.line([cx - 3, 31, cx + 3, 31], fill=tower)
-    d.line([cx - 3, 32, cx + 3, 32], fill=glass)
-    d.line([cx - 2, 33, cx + 2, 33], fill=tower)
-    d.line([cx, 14, cx, 30], fill=light)
-    d.point((cx, 13), fill=rgb('#f86048'))
+        d.line([cx - half, y - L, cx + half, y - L], fill=col)
+    d.line([cx - 3, 31 - L, cx + 3, 31 - L], fill=tower)
+    d.line([cx - 3, 32 - L, cx + 3, 32 - L], fill=glass)
+    d.line([cx - 2, 33 - L, cx + 2, 33 - L], fill=tower)
+    d.line([cx, 24 - L, cx, 30 - L], fill=light)
+    d.point((cx, 23 - L), fill=rgb('#f86048'))
     return img
 
 
 HOUSE = ['#e86888', '#38b0a8', '#f0c040', '#8858c0', '#e88838', '#58a048', '#d84040', '#4878d0']
-BASE = 148          # house fronts end here; the sidewalk (the play lane) runs to the curb at 200
+BASE = 148 - LIFT   # house fronts end here; the sidewalk (the play lane) runs to the curb at CURB
+CURB = 204
 
 # 3x5 sign letters (same micro font as the sponsor badges)
 MICRO = {
@@ -151,7 +154,7 @@ def near_layer():
         x0 = i * 64
         body = rgb(HOUSE[i])
         shade = tuple(max(0, c - 40) for c in body[:3]) + (255,)
-        top = 58 + (i % 3) * 4
+        top = 58 - LIFT + (i % 3) * 4
         d.rectangle([x0, top, x0 + 63, BASE - 1], fill=body)
         d.polygon([(x0, top), (x0 + 32, top - 16), (x0 + 63, top)], fill=shade)
         d.line([x0, top, x0 + 63, top], fill=trim)
@@ -176,14 +179,15 @@ def near_layer():
         micro_text(d, x0 + 32 - (len(name) * 4 - 1) // 2, BASE - 52, name, dark)
     # sidewalk + curb + street
     sw = rgb('#a8a0a0')
-    d.rectangle([0, BASE, 511, 199], fill=sw)
+    d.rectangle([0, BASE, 511, CURB - 1], fill=sw)
     for x in range(0, 512, 24):
-        d.line([x, BASE, x - 12, 199], fill=rgb('#908888'))
+        d.line([x, BASE, x - 17, CURB - 1], fill=rgb('#908888'))
     d.line([0, BASE, 511, BASE], fill=rgb('#c8c0c0'))
-    d.rectangle([0, 200, 511, 203], fill=rgb('#d0d0d0'))
-    d.rectangle([0, 204, 511, 255], fill=rgb('#48444c'))
+    d.rectangle([0, CURB, 511, CURB + 3], fill=rgb('#d0d0d0'))
+    d.rectangle([0, CURB + 4, 511, 255], fill=rgb('#48444c'))
+    # the HUD bar covers 208-215; the road's dashes show under it (lost to overscan on a CRT, and that's fine)
     for x in range(0, 512, 32):
-        d.rectangle([x, 220, x + 15, 221], fill=rgb('#e8d040'))
+        d.rectangle([x, 219, x + 15, 220], fill=rgb('#e8d040'))
     return img
 
 
@@ -422,11 +426,13 @@ def build_sprites():
     draw_cop(sh, 32, 32, 1)
     draw_raccoon(sh, 64, 32, 0)
     draw_raccoon(sh, 80, 32, 1)
-    # green bin 16x32 at (96,32)
-    d.rectangle([98, 42, 109, 63], fill=6)
-    d.rectangle([98, 42, 100, 63], fill=7)
-    d.rectangle([97, 38, 110, 42], fill=7)
-    d.rectangle([101, 48, 106, 52], fill=5)
+    # green bin 16x32 at (96,32): a full-height Toronto green bin (too tall to hop: big jump)
+    d.rectangle([98, 37, 109, 63], fill=6)
+    d.rectangle([98, 37, 100, 63], fill=7)
+    d.rectangle([97, 33, 110, 37], fill=7)
+    d.rectangle([102, 32, 105, 33], fill=7)
+    d.rectangle([101, 44, 106, 48], fill=5)
+    d.line([101, 52, 106, 52], fill=7)
     d.ellipse([99, 61, 102, 63], fill=4)
     d.ellipse([106, 61, 109, 63], fill=4)
     sh.outline(96, 32, 16, 32)
@@ -466,6 +472,23 @@ def build_sprites():
     d.line([(21, 89), (21, 93)], fill=11)
     d.line([(23, 83), (27, 87)], fill=11)
     sh.outline(16, 80, 16, 16)
+    # chalk take-off marks on the pavement (jump when you reach one): a fat
+    # yellow chevron = tap A (hop), two red ones = hold A (big jump)
+    def chevron(x0, y0, fill, edge):
+        for i in range(7):
+            for dy in range(3):
+                d.point((x0 + i, y0 + 7 - i + dy), fill=fill)
+                d.point((x0 + 14 - i, y0 + 7 - i + dy), fill=fill)
+        d.point((x0 + 7, y0), fill=fill)
+        d.point((x0 + 7, y0 + 1), fill=fill)
+        d.point((x0 + 7, y0 + 2), fill=fill)
+        for i in range(7):
+            d.point((x0 + i, y0 + 7 - i), fill=edge)
+            d.point((x0 + 14 - i, y0 + 7 - i), fill=edge)
+        d.point((x0 + 7, y0), fill=edge)
+    chevron(32, 83, 13, 11)
+    chevron(48, 80, 10, 11)
+    chevron(48, 86, 10, 11)
     names = [('run0', 0), ('run1', 16), ('run2', 32), ('run3', 48), ('jump', 64), ('sip', 80), ('stumble', 96)]
     for n, x in names:
         sh.obj(n, x, 0, 16, 32, 8, 31)
@@ -482,6 +505,8 @@ def build_sprites():
     sh.obj('splash', 112, 64, 16, 16, 8, 8)
     sh.obj('warn_lo', 0, 80, 16, 16, 8, 15)
     sh.obj('warn_hi', 16, 80, 16, 16, 8, 15)
+    sh.obj('mark_lo', 32, 80, 16, 16, 8, 8)
+    sh.obj('mark_hi', 48, 80, 16, 16, 8, 8)
     out('cops_spr.bin', sh.tiles())
     run = build_runner()
     base2 = (sh.img.size[1] // 8) * 16          # the runner sheet's first tile
