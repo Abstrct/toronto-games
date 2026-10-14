@@ -614,6 +614,51 @@ class bay_ear(bay_hand):
         return 0
 
 
+class bay_weave(bay_ear):
+    """The title demo: the expert (bay_ear at 0 frames: DOUBLE TIME, PRESTO,
+    CLOSE SHAVEs) who also weaves. While a shave's chain is open (2 s) it
+    steps in behind somebody in the next lane, so the next cut is a shave
+    too: the undocumented chain, shown in play."""
+    weave_px = (44, 120)
+
+    def act(self, t, tel, rng):
+        m = super().act(t, tel, rng)
+        if m or t < self.tap_until or t < self.act_until or t < self.busy_until:
+            return m
+        if t % 3:
+            return 0
+        seen = self.eyes.look()
+        if not seen:
+            return 0
+        me, ents = seen
+        ram = self.eyes.g.core.peek(self.eyes.base + 656, 2)
+        if not ram[1] or me['state'] != 0:          # no chain open
+            return 0
+        nxt = self.queue[0][0] if self.queue else t + 99
+        if t + 5 >= nxt:
+            return 0
+        for e in ents:
+            e['rel'] = _rel(e, me)
+        live = [e for e in ents if not e['flags'] & 0x1C]
+        if any(e['lane'] == me['lane'] and -2 < e['rel'] < 150 and e['type'] != T_JOGGER for e in live):
+            return 0                                # somebody to shave right here
+        lo, hi = self.weave_px
+        for lane in (me['lane'] - 1, me['lane'] + 1):
+            if not 0 <= lane <= 2:
+                continue
+            there = sorted(e['rel'] for e in ents if e['lane'] == lane and not e['flags'] & 0x0C
+                           and e['type'] != T_JOGGER and e['rel'] > -20)
+            jog = any(e['lane'] == lane and e['type'] == T_JOGGER and -150 < e['rel'] < 10 for e in ents)
+            if there and lo <= there[0] <= hi and not jog and there[0] > 30:
+                # a walker to cut past, with room behind them to fall in
+                m = X if lane < me['lane'] else B
+                self.act_mask = m
+                self.act_until = t + TAP
+                self.busy_until = t + 10
+                return m
+        return 0
+
+
 class bay_steady(bay_ear):
     """The steady on-beat walker: a step on every big dot (average human
     timing), moves over a lane whenever a red ! warns, never says EXCUSE ME."""
@@ -637,6 +682,11 @@ class bay_ear_dt(bay_ear):
 
 
 
+class bay_ear_single(bay_ear):
+    """bay_ear on the big dots only: the plain walk DOUBLE TIME must beat."""
+    double = False
+
+
 class bay_walkman(bay_ear):
     """Steps on every big dot like an average human and never looks up: no
     lanes, no EXCUSE ME (Marcus's round-4 run)."""
@@ -644,6 +694,82 @@ class bay_walkman(bay_ear):
     dodges = False
     double = False
     presto_on = False
+
+class bay_prompt(bay_ear):
+    """Does what the screen says and nothing else: steps as the big dots land
+    (the card's first line) and, when a red ! shows, changes lane the way the
+    white arrow beside the walker points (no arrow: stays put). Never reads
+    the street itself. Run at 20-25 f (`pt.py curve bay -p bay_prompt -l
+    20,25`) it is the cue-timing check: obeying must beat ignoring
+    (bay_prompt_deaf, the same feet with the cues ignored)."""
+    double = False
+    presto_on = False
+    obey = True
+    blind_dir = False   # Dana's round-7 script: up or down at random
+
+    def act(self, t, tel, rng):
+        self.rng = rng
+        if self.L is None:
+            self.setup()
+            self.busy_until = 0
+        spr = self.screen()
+        self.look_beat(t, spr)
+        self.plan(t)
+        while self.queue and self.queue[0][0] <= t:
+            _, m = self.queue.pop(0)
+            if self.tap_until > t - 1:
+                continue
+            self.tap_mask = m
+            self.tap_until = t + TAP
+        if t < self.tap_until:
+            return self.tap_mask
+        if t < self.act_until:
+            return self.act_mask
+        if not self.obey or t < self.busy_until:
+            return 0
+        T = self.tiles
+        tiles = set(tile for _, _, tile in spr)
+        if T['WARN'] not in tiles:
+            return 0
+        nxt = self.queue[0][0] if self.queue else t + 99
+        if t + 5 >= nxt:
+            return 0
+        if self.blind_dir:
+            m = rng.choice((UP, DOWN))
+        elif T.get('LANEUP') in tiles:
+            m = UP
+        elif T.get('LANEDN') in tiles:
+            m = DOWN
+        elif T.get('LANEA') in tiles:
+            m = A
+        else:
+            return 0
+        self.act_mask = m
+        self.act_until = t + TAP
+        # a person sees their own move land before moving again
+        self.busy_until = t + self.L + self.L // 4 + 8
+        return m
+
+
+class bay_prompt_deaf(bay_prompt):
+    """bay_prompt's feet, cues ignored: the baseline obeying must beat."""
+    obey = False
+
+
+class bay_prompt_blind(bay_prompt):
+    """Obeys the red ! but picks up or down at random (no arrow reading)."""
+    blind_dir = True
+
+
+class bay_flipper(bay_prompt):
+    """Changes lane every 40 frames whatever is there (farming DODGEs)."""
+    def act(self, t, tel, rng):
+        m = super().act(t, tel, rng)
+        if not m and t % 40 == 0:
+            lane = self.eyes.look()[0]['lane']
+            return UP if lane == 2 or (lane == 1 and (t // 40) % 2) else DOWN
+        return m
+
 
 class bay_casual(bay_hand):
     """A decent rhythm player who doesn't dodge perfectly (Gord, Marcus):
@@ -781,13 +907,14 @@ class bay_mashy(Policy):
         return m
 
 
-POLICIES = {c.__name__: c for c in [bay_beat, bay_hand, bay_ear, bay_steady, bay_ear_raw, bay_ear_dt, bay_walkman, bay_casual, bay_stepper, bay_ace, bay_human, bay_sloppy, bay_rookie, bay_blind,
+POLICIES = {c.__name__: c for c in [bay_beat, bay_hand, bay_ear, bay_prompt, bay_prompt_deaf, bay_prompt_blind, bay_flipper, bay_steady, bay_ear_raw, bay_ear_dt, bay_ear_single, bay_weave, bay_walkman, bay_casual, bay_stepper, bay_ace, bay_human, bay_sloppy, bay_rookie, bay_blind,
                                      bay_spam, bay_steady6, bay_double, bay_halfout, bay_mash,
                                      bay_mash10, bay_mashy]}
 
 DEFAULTS = {'bay': ['idle', 'mash_a', 'random_input', 'bay_mash', 'bay_mash10', 'bay_mashy',
                     'bay_steady6', 'bay_halfout', 'bay_blind', 'bay_spam', 'bay_double', 'bay_rookie',
-                    'bay_human', 'bay_stepper', 'bay_casual', 'bay_sloppy', 'bay_steady', 'bay_hand', 'bay_ear',
+                    'bay_human', 'bay_stepper', 'bay_casual', 'bay_sloppy', 'bay_steady', 'bay_prompt_deaf',
+                    'bay_prompt', 'bay_hand', 'bay_ear', 'bay_weave',
                     'bay_beat', 'bay_ace']}
 
 CURVE = {'bay': 'bay_ear'}
