@@ -32,14 +32,14 @@ final word.
 Press **START** during any event to pause. The music stops and the scene
 goes to mosaic behind a menu:
 - **PLAY ON** (or START again) carries on from the same frame.
-- **CALL IT A DAY** ends your turn at once, scored as a failed run. In a
+- **CALL IT A DAY** ends your turn at once, scored as a failed run; the card is headed GAVE UP!. In a
   multiplayer game it ends only your turn; everyone else still plays.
 
 ## Playing
 
 The main menu has four options:
 - **Compete in all events**: all seven, in order.
-- **Compete in some**: tick the events you want on the picker.
+- **Compete in some**: tick the events you want on the picker. None start ticked; SELECT ticks them all (or none).
 - **Practice one event**: pick one and play it as often as you like.
 - **Toronto Records**: the records board.
 
@@ -76,7 +76,9 @@ wins a medal.
 - **Multiplayer:** each event awards gold, silver and bronze (5, 3 and 1
   medal points). A medal table with a CN Tower ticker follows each event. After
   the last event comes the podium at Nathan Phillips Square, which names gold,
-  silver and bronze, then the final table.
+  silver and bronze, then the final table. Players level on points are split by
+  golds, then silvers; the medal table, ticker, podium and final table say SAME
+  PTS: GOLDS BREAK TIES when that decides a place.
 - **Solo:** you race the Toronto Record. Matching it wins gold, two thirds of
   it wins silver and one third wins bronze. The event card shows all three
   marks.
@@ -102,7 +104,8 @@ On the board screen, ◀ ▶ turn the pages, one event per page.
 **Title screen.** Leave the title alone and it plays an attract loop: a
 HOW TO PLAY panel, the records, then a real gameplay demo of the next event
 in the rotation. The demos are recorded play, showing off the named tricks.
-Any button ends a demo and brings you back to the title.
+When a named trick lands, the demo banner reads WATCH THAT MOVE! Any button
+ends a demo and brings you back to the title.
 
 ## Music
 

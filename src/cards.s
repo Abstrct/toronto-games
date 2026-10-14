@@ -4045,10 +4045,10 @@ eb6: .byte "SURF LINE 1 TO UNION.", $0A, "GRAB A POLE, GET GERMS.", 0
 ec0: .byte "D-PAD STEER    A PEDAL", $0A, "B HOP RAILS AND POTHOLES", $0A, "TOKENS 50, WIPEOUT DROPS 2", 0
 ec1: .byte "ALTERNATE ", TXT_ARROW_L+32, " ", TXT_ARROW_R+32, " ON BIG DOTS", $0A, "SMALL DOTS = DOUBLE TIME", $0A, "UP/DOWN LANE  A EXCUSE ME", 0
 ec2: .byte "D-PAD WALK   A THROW BALL", $0A, "SAFE: B ON ! = 100 A DOG", $0A, "BOLD: B ON RED ! = 200-450", 0
-ec3: .byte "YELLOW CHALK: TAP A", $0A, "RED CHALK: HOLD A", $0A, "B: SIP WHILE COP CAN'T SEE", 0
+ec3: .byte "YELLOW CHALK: TAP A", $0A, "RED CHALK: HOLD A", $0A, "HOLD B: SIP, COP CAN'T SEE", 0
 ec4: .byte "LEFT/RIGHT: TURN  A: HIKE", $0A, "YELLOW ARROW: NEXT MARK", $0A, "GREEN DIAMONDS: ON COURSE", 0
 ec5: .byte "UP: REAR BUMPER TO LINE", $0A, "BACK IN: DOWN+RIGHT, THEN", $0A, "DOWN+LEFT ON NOW! A: PARK", 0
-ec6: .byte "HOLLOW ARROW: GET READY", $0A, "SOLID: D-PAD THAT WAY NOW", $0A, "GOLD DOT STOP TO STOP = X3", 0
+ec6: .byte "HOLLOW ARROW: GET READY", $0A, "SOLID: HOLD D-PAD THAT WAY", $0A, "TAP TO STAY GOLD: SURF X3", 0
 ef0: .byte "WIPED OUT!", 0
 ef1: .byte "MISSED THE TRAIN!", 0
 ef2: .byte "TACKLED!", 0
@@ -4106,10 +4106,10 @@ card_fail_note:
     .addr fn_sail,   fn_sail_t, fn_sail_t, fn_sail_h    ; sail
     .addr fn_pk,     fn_pk,     fn_pk_q,   fn_pk_i      ; parking
     .addr fn_sub,    fn_sub,    fn_sub_q,  fn_sub       ; subway
-fn_bike:   .byte "THIRD WIPEOUT. NOT PAID!", 0
-fn_bike_n: .byte "OUT OF TIME. NOT PAID!", $0A, "SAY THE 501 SHORT-TURNED", 0
-fn_bike_q: .byte "NO DELIVERY: METRES ONLY", 0
-fn_bike_s: .byte "STOPPED 8 S. NOT PAID!", 0
+fn_bike:   .byte "THIRD WIPEOUT. NO DELIVERY", $0A, "PAID FOR THE RIDE ONLY", 0
+fn_bike_n: .byte "OUT OF TIME. NO DELIVERY", $0A, "SAY THE 501 SHORT-TURNED", 0
+fn_bike_q: .byte "NO DELIVERY, NO TOKENS", $0A, "PAID FOR THE RIDE ONLY", 0
+fn_bike_s: .byte "STOPPED 8 S. NO DELIVERY", $0A, "PAID FOR THE RIDE ONLY", 0
 fn_bay:    .byte "THE 5:42 LEFT WITHOUT YOU", $0A, "WALK PAID BY DISTANCE", 0
 fn_park:   .byte "3 HEARTS GONE. NO DOGS!", 0
 fn_park_t: .byte "NO DUNDAS, NO DOGS!", 0
@@ -4136,7 +4136,7 @@ sti1: .byte "STANDING STILL PAYS 0", 0
 sti2: .byte "NOT ONE STEP, NO POINTS", 0
 sti3: .byte "NOT ONE HURDLE, NO POINTS", 0
 sti4: .byte "HANDS OFF THE HELM PAYS 0", 0
-sti6: .byte "NO LEANING, NO POINTS", 0
+sti6: .byte "THE TRAIN DID ALL THE WORK", 0
 
 ; card_rate / card_rate_fail: an optional rate printed in grey after a sum
 ; label ("TIPS 50 A TOKEN"), per event base, bonus, penalty; 0 = none. The
@@ -4169,8 +4169,8 @@ rt_sub_leg: .byte "40 A LEG", 0
 rt_sub_pen: .byte "X40", 0
 rt_park_walk: .byte "500+25/S", 0
 rt_tenth:   .byte "50 A TENTH", 0
-rt_hurdles: .byte "HURDLES+ROAD", 0
-rt_bike_fin: .byte "1562+20/S", 0
+rt_hurdles: .byte "50 A HURDLE", 0
+rt_bike_fin: .byte "1500+20/S", 0
 rt_bike_m:  .byte "1 PER 4 M", 0
 rt_sail:    .byte "1000+15/S", 0   ; ev_sail.s FINISH_MIN + PTS_SEC a second left
 

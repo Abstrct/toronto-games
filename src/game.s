@@ -815,7 +815,7 @@ skins:
 REC_BYTES = 16 * NUM_EVENTS * 5
 ; bump the last character whenever default_records changes: carts with the
 ; old signature are re-seeded (and lose their saved board) on the next boot
-.define REC_SIG "TG11"
+.define REC_SIG "TG12"
 records_load:
     ldx #$0000
 @sig:
@@ -909,10 +909,10 @@ rec_sig: .byte REC_SIG
 
 default_records:
     ; EV_BIKE  Bike Courier
-    REC 6000, "COURIER"
-    REC 5000, "FIXIE"
-    REC 4100, "TTC GUS"
-    REC 3300, "PEDICAB"
+    REC 7500, "COURIER"
+    REC 6200, "FIXIE"
+    REC 5000, "TTC GUS"
+    REC 3800, "PEDICAB"
     REC 2500, "SALMON"
     ; EV_BAY   Bay St Power Walk
     REC 3000, "SUITGUY"
@@ -927,9 +927,9 @@ default_records:
     REC 4100, "HIPSTER"
     REC 3200, "SQUIRREL"
     ; EV_COPS  Tallboy Trot
-    REC 5800, "RACCOON"
-    REC 4600, "BIKE COP"
-    REC 3600, "BANDIT"
+    REC 6300, "RACCOON"
+    REC 4900, "BIKE COP"
+    REC 3700, "BANDIT"
     REC 2600, "BUSKER"
     REC 1600, "NANA"
     ; EV_SAIL  Harbour Regatta
