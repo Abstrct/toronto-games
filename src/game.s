@@ -916,7 +916,7 @@ default_records:
     REC 2600, "BAYBANKR"
     REC 2200, "MEL"
     REC 1800, "INTERN"
-    REC 1400, "DECAF"
+    REC 1400, "TIMBIT"
     ; EV_PARK  Off-Leash Alert
     REC 6000, "DOODLE"
     REC 4700, "GOLDIE"
