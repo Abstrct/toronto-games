@@ -1,0 +1,10 @@
+# pt7 Kenji (art/audio) R2 — overall 6→7, vs CG 5→6. Bike 6→7, Bay 6→7, Park 6→6, Cops 7→7, Sail 4→6
+Fixed: backdrop band; Tallboy cream sky; 0-score gold; PLAYER 1 naming; Bay HUD dark panel; gust darkening (cat's paws); Regatta HUD panel; aground 100s; yellow cop (now blue).
+Better: line spacing (menus/cards/results/records/signup 16px) but two-row HUDs still 8px (Regatta TIME/SPD, Bay clock/PASSED + GO TRAIN/COFFEE) row 1 shadow on row 2 cap (pt7-sail-937473047); sprite priority (cars under bike HUD, park HUD clips, arch covers legs) but NEW: dog over tree canopy it stands behind (pt7-park2-937369920), fireworks in front of City Hall towers (pt7-solo-937678140); Bay facades varied; Tallboy shop signs.
+Audio better not fixed: L≠R, real echo tail 70-150ms, no hum (silent screens decay to 0), no clip, podium peak 31310 (0.4 dB under FS), DC -1.3k..-3.5k during music no clicks; BUT L/R correlation 0.985-0.991, side 21-23 dB under mid = effectively mono on speakers (pt7-snd-937768427); voicing still pulse/triangle.
+Unchanged: tiny sprites 2-frame cycles (courier ~11x25 now has helmet/arms; boat ~11x8; dogs ~12x10); sound test one line, no SFX list, A drops to menu; bike barcode storefronts; Off-Leash snag moved to trees (hold UP glued to trunk 4+s, pt7-park-937358181).
+Regressions: [major] Tallboy "OI! THE COP SAW THAT!" and "BUSTED! $300 FINE" salmon text straight on red/pink roofs — unreadable, only explanation of loss (pt7-cops2-937400689); ceremony "NEXT YEAR" white on white tower; Off-Leash GO frame HUD bars missing a moment; bike bottom 1-2 scanlines show road under SP bar (overscan). Tallboy 90-frame sip at start -> busted for 0.
+Loved: event cards over live gameplay w/ colour-coded 16px text; cat's-paw gusts; Kensington shop signs.
+CG had: big expressive athletes with wipeout gags; moving water (surf wave); ceremony between events — our results = two lines in big empty box with 5px medal dots.
+Toronto: ferry paddle-wake; streetcar pole spark; raccoons raiding Kensington bins in parallax; Leafs blue/white podium bunting.
+Quote: "The menus grew up. Now let the athletes grow up too."

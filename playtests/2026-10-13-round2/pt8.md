@@ -1,0 +1,10 @@
+# pt8 Tasha (completionist/UX) R2 — overall 5.5→7, vs CG 5→6.5. Bike 6→6, Bay 5→6, Park 5→5 (not replayed), Cops 4→5, Sail 3→4
+Fixed: slow replay (RETRY->intro in 3 presses); rematch (REMATCH/NEW GAME); blank-name record; jerseys (live preview, 12 distinct); duplicate sponsors (TAKEN BY); compete-some zero; backdrop band.
+Mostly fixed: solo stakes (medal lines; 0 no medal) — but solo Compete skips medal table between events; after own record, gold = beating yourself.
+Better not fixed: records gameable — Bay record 2331 > 2200 with blind open-loop script (on-beat + excuse-me every 45f, no lane changes) (pt8-menu-937539718, major balance: excuse-me spam costs nothing); pause has no quit/retry, B on intro card does nothing (pt8-menu-937594387); PRESS A on podium between towers but PLAYER 1 / SHOPSY'S / PRESS A clip right tower; podium ignores A ~100f.
+Unchanged: cramped text — Bay intro card 11 lines edge to edge; medal table "PLAYER 1 1 0 0" reads PLAYER 11 (pt8-some-937578762); results don't explain score (Bike DISTANCE 1021 -> 510, no tokens line) (pt8-menu-937606748); one record per event, record silently erases SUITGUY, NEW RECORD just flashing line no fanfare/margin; courses identical.
+Regression [major ux] pt8-menu-937220985: B to clear name overshoots: B on blank name -> Competitors, next B ("B MENU") -> main menu immediately, no confirm, all signed-up players lost.
+Minor: switching Practice events forgets name/sponsor (pt8-menu-937595435); Eaton's navy shirt vanishes on navy bg/pants; Tallboy HUD PTS 32 but BUSTED card SCORE 0 no "forfeited" line; Compete intro card first A silently ignored until PRESS A WHEN READY; telemetry calls sponsor wall "standings" (harness bug).
+Loved: RETRY/REMATCH; sponsor wall live preview + TAKEN BY; solo medal lines.
+Toronto: keep ghost rivals on a top-5 instead of erasing; "We The North" new-record banner; "Transfer at Spadina" = OTHER EVENT option.
+Quote: "I took SUITGUY's record without looking at the screen. Then I hit B one time too many and lost my whole roster."

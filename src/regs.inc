@@ -1,0 +1,125 @@
+; SNES hardware registers
+
+INIDISP  = $2100   ; forced blank / brightness
+OBSEL    = $2101
+OAMADDL  = $2102
+OAMADDH  = $2103
+OAMDATA  = $2104
+BGMODE   = $2105
+MOSAIC   = $2106
+BG1SC    = $2107
+BG2SC    = $2108
+BG3SC    = $2109
+BG4SC    = $210A
+BG12NBA  = $210B
+BG34NBA  = $210C
+BG1HOFS  = $210D
+BG1VOFS  = $210E
+BG2HOFS  = $210F
+BG2VOFS  = $2110
+BG3HOFS  = $2111
+BG3VOFS  = $2112
+BG4HOFS  = $2113
+BG4VOFS  = $2114
+VMAIN    = $2115
+VMADDL   = $2116
+VMADDH   = $2117
+VMDATAL  = $2118
+VMDATAH  = $2119
+M7SEL    = $211A
+CGADD    = $2121
+CGDATA   = $2122
+W12SEL   = $2123
+W34SEL   = $2124
+WOBJSEL  = $2125
+WH0      = $2126
+WH1      = $2127
+WH2      = $2128
+WH3      = $2129
+WBGLOG   = $212A
+WOBJLOG  = $212B
+TM       = $212C
+TS       = $212D
+TMW      = $212E
+TSW      = $212F
+CGWSEL   = $2130
+CGADSUB  = $2131
+COLDATA  = $2132
+SETINI   = $2133
+MPYL     = $2134
+MPYM     = $2135
+MPYH     = $2136
+SLHV     = $2137
+RDNMI_PPU= $213F
+
+APUIO0   = $2140
+APUIO1   = $2141
+APUIO2   = $2142
+APUIO3   = $2143
+
+WMDATA   = $2180
+WMADDL   = $2181
+WMADDM   = $2182
+WMADDH   = $2183
+
+NMITIMEN = $4200
+WRIO     = $4201
+WRMPYA   = $4202
+WRMPYB   = $4203
+WRDIVL   = $4204
+WRDIVH   = $4205
+WRDIVB   = $4206
+HTIMEL   = $4207
+HTIMEH   = $4208
+VTIMEL   = $4209
+VTIMEH   = $420A
+MDMAEN   = $420B
+HDMAEN   = $420C
+MEMSEL   = $420D
+RDNMI    = $4210
+TIMEUP   = $4211
+HVBJOY   = $4212
+RDIO     = $4213
+RDDIVL   = $4214
+RDDIVH   = $4215
+RDMPYL   = $4216
+RDMPYH   = $4217
+JOY1L    = $4218
+JOY1H    = $4219
+JOY2L    = $421A
+JOY2H    = $421B
+
+; DMA channel n registers: $43n0..$43nA
+DMAP0    = $4300
+BBAD0    = $4301
+A1T0L    = $4302
+A1T0H    = $4303
+A1B0     = $4304
+DAS0L    = $4305
+DAS0H    = $4306
+DASB0    = $4307
+A2A0L    = $4308
+A2A0H    = $4309
+NLTR0    = $430A
+
+; joypad bits (16-bit read of JOY1L/JOY1H)
+PAD_B      = $8000
+PAD_Y      = $4000
+PAD_SELECT = $2000
+PAD_START  = $1000
+PAD_UP     = $0800
+PAD_DOWN   = $0400
+PAD_LEFT   = $0200
+PAD_RIGHT  = $0100
+PAD_A      = $0080
+PAD_X      = $0040
+PAD_L      = $0020
+PAD_R      = $0010
+
+; VRAM layout (word addresses)
+VRAM_BGTILES  = $0000   ; BG1 + BG2 4bpp tiles (1024)
+VRAM_TXTTILES = $4000   ; BG3 2bpp font + window tiles
+VRAM_BG3MAP   = $4800   ; 32x32
+VRAM_BG1MAP   = $5000   ; 64x32 (or 64x64 in the regatta)
+VRAM_BG2MAP   = $5800   ; 64x32
+VRAM_OBJTILES = $6000   ; sprites, 4bpp, 512 tiles

@@ -1,0 +1,12 @@
+# pt4 Rob (score attack/TAS) R2 — overall 5→7, vs CG 5→6. Bike 6→7, Bay 6→6, Park 4→6, Cops 3→7, Sail 7→7
+Fixed: Tallboy hold-B (busted ~3.5s, 0; seen sips don't count); DNF>finish (bike DNF dist/2 no tokens, bust 0, park DNF 73-614); RETRY; card closing on next A (A 1 frame after card ignored); solo gold for fail; start-frame-seeded wind/crowd (waiting 10/37/90f on intro = identical event RAM; Compete bike = Practice byte for byte); Bay cadence explained; Park ceiling (2810) and hold-UP (73); Regatta mark 1 open water, aground clears ~1s.
+Better not fixed: score scales ceilings 2649 (Bay) .. 4384 (Bike) ≈1.65x (R1 ~5x); Regatta course ~19s vs 75s clock.
+Unchanged: Regatta bumps -25. Couldn't reproduce Off-Leash MADE IT/TACKLED mismatch.
+New: pt4-sailbump-938329383 [minor] breakwall grounding costs 25 ≈0.6s — fastest line hits wall twice, finishes 1s ahead, 3230 vs 3240 clean: bumping ~break-even; geese/kayaks no threat to expert. pt4-baytas-938504781 [minor] Bay hard ceiling 2649 (7/36 search runs exactly 2649), off-beat taps ignored so double-tapping safe; nothing to chase once you hold the beat.
+Bests (replay-verified): Bike 4384 (33 tokens, 1 near miss, 0 wipes; pt4-biketas2; bot 4090; rec 3000); Bay 2649 (pt4-baytas; bot 2643; rec 2200); Park 2810 (13 dodges, 39s left; pt4-parktas; bot 2575; rec 2000); Tallboy 3660 (41 sips, 26 hurdles; pt4-copstas; bot 3400; rec 3000); Regatta 3240 (56s left, 0 bumps; pt4-sailtas2; bot 3110; rec 2500).
+Formulas: Bike ≈2250 dist + 50/token + ~25/near miss + ~15.6/s left; wipe ≈-290; 37 tokens; bots miss diagonal lines & right line dist ~6357-6401; 4500+ reachable. Bay: ±2f timing bonus ~177; ±3 → 0, 1940; every good run 2649. Park ≈900 + 100/dodge + ~14.5/s left (dodge ≈7s; ~14 dogs; fair). Tallboy flat 1900 finish + 20/sip + 10/hurdle + 40/airborne-sip on hurdle (SIP 'N' HOP +80); cop gap caps sips ~41-43; finish time worth nothing. Regatta ≈1000 + 40/s left - 25/bump; clock ~70% of score.
+Problems: Bay flat ceiling; Regatta bumps cheap, clock dominates; free base points ~half of top score (1900/3660 Tallboy, 2250/4384 Bike); Bike ceiling 1.65x Bay; skill floor vs ceiling far apart (humans can't finish Park/Regatta, TAS/bots clear easily).
+Loved: SIP 'N' HOP combo (style mechanic); fixed seeds; no cheese anywhere.
+CG had: named tricks/combo chains in every event; score breakdown.
+Toronto: Bike track-hop trick over King line; geese steal mark rounding; PRESTO-tap bonus on Bay beat.
+Quote: "You fixed the cheese. Now give Bay and the Regatta a combo worth chasing, like Tallboy's."

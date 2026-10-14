@@ -1,0 +1,8 @@
+# build products and emulator
+build/
+*.sfc
+*.srm
+*.ppm
+.DS_Store
+__pycache__/
+*.pyc
