@@ -34,6 +34,12 @@ IRONS! TAP < ONCE", "ADRIFT SOON! ...".
                   forgets to hike)
     sail_pointer  a first-timer who steers at the yellow arrow (never into the
                   red no-go ticks) and does what the coach line says
+    sail_obey     the sprint-7 prompt test (run it at 20-25 frames): reads only
+                  the panel, taps at her own pace, one order in five 0.7-2.7 s
+                  late, and re-does an order still up after she's done it
+    sail_obey_late1s / sail_obey_slow / sail_obey_ontime: the same with late
+                  orders at most a second late / a slow miscounting thumb /
+                  never late
 """
 import math
 import os
@@ -103,11 +109,11 @@ def _game(pol):
 def read_boat(pol):
     g = _game(pol)
     base = g.sym['ev_ram']
-    m = g.core.peek(base, 600)
+    m = g.core.peek(base, 720)
     w = lambda o: m[o] | m[o + 1] << 8
     sw = lambda o: w(o) - 0x10000 if w(o) & 0x8000 else w(o)
     pad = g.core.peek(g.sym['pad'], 2)
-    return {'x': w(O_X), 'y': w(O_Y), 'head': m[O_HEAD], 'speed': w(O_SPEED), 'wind': m[O_WIND],
+    b = {'x': w(O_X), 'y': w(O_Y), 'head': m[O_HEAD], 'speed': w(O_SPEED), 'wind': m[O_WIND],
             'gust': w(O_GUST), 'state': m[O_STATE], 'mark': m[O_MARK], 'fx': w(O_FX),
             'ferryd': sw(O_FERRYD), 'fwait': w(O_FWAIT), 'irons': m[O_IRONS],
             'brg': m[O_BRG], 'rmark': m[180], 'rmin': w(182), 'hgoal': m[O_HGOAL],
@@ -115,6 +121,16 @@ def read_boat(pol):
             'pad': pad[0] | pad[1] << 8, 'adir': m[O_ADIR],
             'popup': w(O_POPUP), 'green': m[O_GREEN], 'tacks': m[366], 't': w(52), 'coachn': m[O_COACHN] - 256 if m[O_COACHN] & 0x80 else m[O_COACHN],
             'floats': [(w(64 + 2 * i), w(74 + 2 * i)) for i in range(5)]}
+    # a mark that counted over the ring's edge is judged for TIGHT ROUNDING
+    # once she's inside the ring proper (s_rpend): sail it as still to round
+    rp = m[710]
+    if m[180] >= 3 and rp < 3:
+        mx, my = MARKS[rp]
+        if math.hypot(b['x'] - mx, b['y'] - my) < 40:
+            b['rmark'], b['rmin'] = rp, 999
+        else:
+            b['mark'] = rp
+    return b
 
 
 def coach_text(pol):
@@ -658,7 +674,7 @@ def screen_row(g, row):
     return out.strip()
 
 
-COACH_RE = re.compile(r'TAP ([<>]) (?:(\d) TIMES|ONCE|TO BEAR OFF)')
+COACH_RE = re.compile(r'TAP ([<>]) (?:(\d) (?:MORE )?TIMES|ONCE|TO BEAR OFF)')
 
 
 class sail_coach(Policy):
@@ -703,6 +719,110 @@ class sail_coach(Policy):
         if self.gust:
             mask |= A
         return mask
+
+
+class sail_obey(Policy):
+    """The sprint-7 prompt test: a first-timer who only obeys the coach panel,
+    with a human hand (run it at 20-25 frames of latency). Each run has its
+    own thumb: taps 9-13 frames apart with a little jitter. One order in five
+    she taps late on purpose (40-160 frames after it went up: looking at the
+    boat, not the panel), and a literal reader: an order still on the panel
+    40 frames after she finished it reads as "do it again", so she does (pt9's
+    Hal). She never steers on her own. In gusts she holds A while the HUD says
+    GUST/HIKE most of the time."""
+    hike_odds = 0.6
+    late_odds = 0.2
+    late_range = (40, 160)
+    redo = True
+
+    def __init__(self):
+        self.last = ''
+        self.plan = []
+        self.gust = None
+        self.done_at = None      # frame her last tap of the line on screen ended
+        self.redone = False
+        self.period = None
+        self.seen = 0
+
+    def schedule(self, t, line, rng):
+        m = COACH_RE.search(line)
+        if not m:
+            if 'HOLD' in line:
+                self.plan = []  # GOOD! HOLD YOUR COURSE: she stops
+            return              # (news: she keeps tapping what she read)
+        d = RIGHT if m.group(1) == '>' else LEFT
+        n = int(m.group(2)) if m.group(2) else 1
+        start = t
+        if rng.random() < self.late_odds:
+            start += rng.randint(*self.late_range)
+        f = start
+        self.plan = []
+        for i in range(n):
+            self.plan.append((f, d))
+            f += self.period + rng.randint(-2, 2)
+        self.done_at = None
+
+    def act(self, t, tel, rng):
+        g = _game(self)
+        if self.period is None:
+            self.period = rng.randint(9, 13)
+        if g.core.peek(g.sym['ev_ram'] + O_STATE, 1)[0] != 0:
+            return 0
+        line = screen_row(g, CALL_ROW)
+        if line != self.last:
+            self.last = line
+            self.seen = t
+            self.redone = False
+            self.schedule(t, line, rng)
+        elif self.redo and not self.plan and self.done_at is not None and not self.redone \
+                and t - self.done_at > 40 and COACH_RE.search(line):
+            self.redone = True               # still up: "do it again"
+            self.schedule(t, line, rng)
+        mask = 0
+        for (f, d) in self.plan:
+            if f <= t < f + 4:
+                mask = d
+        if self.plan and all(t >= f + 4 for f, _ in self.plan):
+            self.done_at = t
+            self.plan = []
+        hud = screen_row(g, 1)
+        gusting = 'GUST' in hud or 'HIKE' in hud
+        if gusting and self.gust is None:
+            self.gust = rng.random() < self.hike_odds
+        elif not gusting:
+            self.gust = None
+        if self.gust:
+            mask |= A
+        return mask
+
+
+class sail_obey_slow(sail_obey):
+    """sail_obey with a slow, clumsy thumb: taps 12-16 frames apart, one order
+    in three late, and one in six miscounted by a tap"""
+    late_odds = 0.33
+
+    def schedule(self, t, line, rng):
+        if self.period is not None and self.period < 12:
+            self.period = rng.randint(12, 16)
+        super().schedule(t, line, rng)
+        if self.plan and rng.random() < 1 / 6:
+            if len(self.plan) > 1 and rng.random() < 0.5:
+                self.plan.pop()
+            else:
+                f, d = self.plan[-1]
+                self.plan.append((f + self.period, d))
+
+
+class sail_obey_late1s(sail_obey):
+    """sail_obey whose late orders are at most a second late"""
+    late_range = (20, 60)
+
+
+class sail_obey_ontime(sail_obey):
+    """sail_obey without the late taps or the re-reads"""
+    late_odds = 0.0
+    redo = False
+
 
 
 class sail_fumble(sail_coach):
@@ -771,7 +891,8 @@ class sail_flail(Policy):
 
 
 POLICIES = {c.__name__: c for c in (sail_expert, sail_casual, sail_human, sail_pointer, sail_coach, sail_dana, sail_fumble,
+                                    sail_obey, sail_obey_slow, sail_obey_late1s, sail_obey_ontime,
                                     sail_tack, sail_random, sail_flail)}
 DEFAULTS = {'sail': ['idle', 'hold_a', 'hold_right', 'mash_a', 'random_input', 'sail_random', 'sail_tack', 'sail_flail',
-                     'sail_pointer', 'sail_coach', 'sail_dana', 'sail_human', 'sail_casual', 'sail_expert']}
+                     'sail_pointer', 'sail_coach', 'sail_dana', 'sail_obey', 'sail_human', 'sail_casual', 'sail_expert']}
 CURVE = {'sail': 'sail_expert'}
