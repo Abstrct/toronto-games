@@ -812,7 +812,7 @@ skins:
 REC_BYTES = 16 * NUM_EVENTS * 5
 ; bump the last character whenever default_records changes: carts with the
 ; old signature are re-seeded (and lose their saved board) on the next boot
-.define REC_SIG "TG07"
+.define REC_SIG "TG08"
 records_load:
     ldx #$0000
 @sig:
@@ -942,9 +942,9 @@ default_records:
     REC 2200, "LEARNER"
     REC 1300, "TOWTRUCK"
     ; EV_SUBWAY   TTC Surfing
-    REC 5000, "HANDRAIL"
-    REC 4300, "COMMUTER"
-    REC 3600, "TOURIST"
+    REC 5700, "HANDRAIL"
+    REC 4700, "COMMUTER"
+    REC 3800, "TOURIST"
     REC 2900, "STROLLER"
     REC 2200, "LINE 1"
 default_records_end:

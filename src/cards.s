@@ -3512,14 +3512,14 @@ eb2: .byte "QUEEN GATE TO DUNDAS GATE.", $0A, "DODGE DOGS, THEN PAT THEM!", 0
 eb3: .byte "THE BIKE COP SAW THAT", $0A, "TALLBOY. RUN TO SPADINA!", 0
 eb4: .byte "ROUND MARKS 1, 2 AND 3,", $0A, "THEN CROSS THE LINE.", 0
 eb5: .byte "THREE SPOTS ON BRUNSWICK.", $0A, "PARK IT. DON'T DENT A BMW.", 0
-eb6: .byte "RIDE TO UNION HANDS-FREE.", $0A, "GRAB A POLE, GET GERMS.", 0
+eb6: .byte "SURF LINE 1 TO UNION.", $0A, "GRAB A POLE, GET GERMS.", 0
 ec0: .byte "D-PAD STEER    A PEDAL", $0A, "B HOP          DOWN BRAKE", $0A, "HOP RAILS, DODGE LATE: X8", 0
 ec1: .byte "LEFT, RIGHT ON BIG DOTS", $0A, "UP/DOWN LANE  A EXCUSE ME", $0A, "Y ON A GOLD DOT: PRESTO!", 0
 ec2: .byte "D-PAD WALK   A THROW BALL", $0A, "B WHEN ! SHOWS: SIDESTEP", $0A, "B AS HE LUNGES: BONUS!", 0
 ec3: .byte "TAP A AT CHALK. RED: HOLD", $0A, "B: SIP WHILE COP CAN'T SEE", $0A, "B MID-AIR = SIP 'N' HOP", 0
 ec4: .byte "LEFT/RIGHT: TURN  A: HIKE", $0A, "WIND FROM TOP: ZIG-ZAG UP", $0A, "SURF THE FERRY'S WAKE!", 0
 ec5: .byte "UP: REAR BUMPER TO LINE", $0A, "BACK IN: DOWN+RIGHT, THEN", $0A, "DOWN+LEFT. A: PARK IT!", 0
-ec6: .byte "HOLLOW ARROW: GET READY", $0A, "SOLID: D-PAD THAT WAY NOW", $0A, "GOLD DOT STOP-TO-STOP = X3", 0
+ec6: .byte "HOLLOW ARROW: GET READY", $0A, "SOLID: D-PAD THAT WAY NOW", $0A, "GOLD DOT ALL LEG: SURF X3", 0
 ef0: .byte "WIPED OUT!", 0
 ef1: .byte "MISSED THE TRAIN!", 0
 ef2: .byte "TACKLED!", 0
@@ -3589,8 +3589,8 @@ fn_sail_t: .byte "250 PER MARK ROUNDED", 0
 fn_pk:     .byte "HALF IN OR TOWED, ALL 3", 0
 fn_pk_i:   .byte "10 S WITHOUT DRIVING", 0
 fn_pk_q:   .byte "QUITTERS KEEP 450 AT MOST", 0
-fn_sub:    .byte "20 GERMS: STYLE VOID", $0A, "RIDE: 40 A STOP YOU SURFED", 0
-fn_sub_q:  .byte "GAVE UP: STYLE VOID", $0A, "RIDE: 40 A STOP YOU SURFED", 0
+fn_sub:    .byte "20 GERMS: STYLE IS VOID", $0A, "ONLY LEGS YOU LEANED PAY", 0
+fn_sub_q:  .byte "GAVE UP: STYLE IS VOID", $0A, "ONLY LEGS YOU LEANED PAY", 0
 
 ; a failed run whose base is 0 says the event's card_still_ln instead of its
 ; reason line, for the ev_fail codes in card_still (bit n = ev_fail n: $1E all
@@ -3615,7 +3615,7 @@ card_rate:
     .addr 0, 0, 0               ; cops
     .addr 0, 0, 0               ; sail
     .addr 0, 0, 0               ; parking
-    .addr 0, 0, 0               ; subway
+    .addr 0, 0, rt_sub_pen      ; subway
 card_rate_fail:
     .addr 0, 0, 0               ; bike
     .addr 0, 0, 0               ; bay
@@ -3623,7 +3623,9 @@ card_rate_fail:
     .addr 0, 0, 0               ; cops
     .addr 0, 0, 0               ; sail
     .addr 0, 0, 0               ; parking
-    .addr 0, 0, 0               ; subway
+    .addr rt_sub_leg, 0, 0      ; subway
+rt_sub_leg: .byte "40 A LEG", 0
+rt_sub_pen: .byte "X40", 0
 
 ; stat labels: 4 per event (last is padding), 0 = unused
 card_stat_labels:
@@ -3639,7 +3641,7 @@ sl_kisses:   .byte "CURB KISSES", 0
 sl_tickets:  .byte "TICKETS", 0
 sl_towed:    .byte "TOWED", 0
 sl_germs:    .byte "GERMS", 0
-sl_stations: .byte "STATIONS", 0
+sl_stations: .byte "LEGS LEANED", 0
 sl_streak:   .byte "BEST STREAK", 0
 sl_metres: .byte "METRES", 0
 sl_sipnhop: .byte "SIP 'N' HOPS", 0
