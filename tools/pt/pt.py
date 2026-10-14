@@ -831,6 +831,7 @@ def run_bot(event, policy_name, seed, max_frames=60 * 240, film=None, latency=0,
     t = 0
     fails = []
     lag = 0
+    lag_at = []                  # (frame, frames dropped)
     prev = g.last
     hold = 0
     want = 0
@@ -856,11 +857,16 @@ def run_bot(event, policy_name, seed, max_frames=60 * 240, film=None, latency=0,
             fails.append(t)
         # only slowdown during play counts; screen loads drop frames on purpose
         if v['lag'] != prev['lag'] and g.scene().endswith('.play'):
-            lag += (v['lag'] - prev['lag']) & 0xFF
+            lag_at.append((t, (v['lag'] - prev['lag']) & 0xFF))
         prev = v
         t += 1
         if t % 15 == 0 and not g.scene().startswith(event + '.play'):
             break
+    # the last half second of a run (finish popups, scoring, blanking the HUD
+    # under the card) loads a screen as much as the card does: a drop there
+    # is not slowdown in play
+    lag_at = [(f, n) for f, n in lag_at if f < t - 30]
+    lag = sum(n for _, n in lag_at)
     sc = g.scene()
     # let the result settle (score is final once the results card is up)
     if not sc.startswith(event + '.results'):
@@ -874,7 +880,7 @@ def run_bot(event, policy_name, seed, max_frames=60 * 240, film=None, latency=0,
            'latency': latency, 'success': st['ev_fail'] == 0,
            'fails': st['ev_fail'], 'fail_frames': fails, 'frames': t,
            'finished': t < max_frames, 'stats': st['ev_stat'], 'lag': lag,
-           'end_scene': st['scene']}
+           'lag_at': lag_at[:8], 'end_scene': st['scene']}
     if film:
         g.core.shot(film)
     g.core.close()
