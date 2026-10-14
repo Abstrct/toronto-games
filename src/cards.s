@@ -3802,7 +3802,7 @@ eb3: .byte "THE BIKE COP SAW THAT", $0A, "TALLBOY. RUN TO SPADINA!", 0
 eb4: .byte "ROUND MARKS 1, 2 AND 3,", $0A, "THEN CROSS THE LINE.", 0
 eb5: .byte "THREE SPOTS ON BRUNSWICK.", $0A, "PARK IT. DON'T DENT A BMW.", 0
 eb6: .byte "SURF LINE 1 TO UNION.", $0A, "GRAB A POLE, GET GERMS.", 0
-ec0: .byte "D-PAD STEER    A PEDAL", $0A, "B HOP RAILS AND POTHOLES", $0A, "TOKENS PAY 50 ON DELIVERY", 0
+ec0: .byte "D-PAD STEER    A PEDAL", $0A, "B HOP RAILS AND POTHOLES", $0A, "TOKENS 50, WIPEOUT DROPS 2", 0
 ec1: .byte "ALTERNATE ", TXT_ARROW_L+32, " ", TXT_ARROW_R+32, " ON BIG DOTS", $0A, "SMALL DOTS = DOUBLE TIME", $0A, "UP/DOWN LANE  A EXCUSE ME", 0
 ec2: .byte "D-PAD WALK   A THROW BALL", $0A, "SAFE: B WHEN ! SHOWS: 50", $0A, "BOLD: B AS HE LUNGES: 150+", 0
 ec3: .byte "YELLOW CHALK: TAP A", $0A, "RED CHALK: HOLD A", $0A, "B: SIP WHILE COP CAN'T SEE", 0
@@ -3865,10 +3865,10 @@ card_fail_note:
     .addr fn_sail,   fn_sail_t, fn_sail_t, fn_sail_h    ; sail
     .addr fn_pk,     fn_pk,     fn_pk_q,   fn_pk_i      ; parking
     .addr fn_sub,    fn_sub,    fn_sub_q,  fn_sub       ; subway
-fn_bike:   .byte "THIRD WIPEOUT. NO TOKENS!", 0
-fn_bike_n: .byte "NOT DELIVERED. NO TOKENS!", 0
-fn_bike_q: .byte "GAVE UP. NO TOKENS!", 0
-fn_bike_s: .byte "STOPPED 8 S. NO TOKENS!", 0
+fn_bike:   .byte "THIRD WIPEOUT. NOT PAID!", 0
+fn_bike_n: .byte "OUT OF TIME. NOT PAID!", $0A, "SAY THE 501 SHORT-TURNED", 0
+fn_bike_q: .byte "GAVE UP. NOT PAID!", 0
+fn_bike_s: .byte "STOPPED 8 S. NOT PAID!", 0
 fn_bay:    .byte "THE 5:42 LEFT WITHOUT YOU", $0A, "WALK PAID BY DISTANCE", 0
 fn_bay_q:  .byte "GAVE UP: THE 5:42 LEFT", $0A, "WALK PAID BY DISTANCE", 0
 fn_park:   .byte "THIRD TACKLE ENDS THE WALK", $0A, "75 FOR EVERY TENTH WALKED", 0
@@ -3903,7 +3903,7 @@ sti6: .byte "NO LEANING, NO POINTS", 0
 ; first table is for a finished run, the second for a failed one. Label +
 ; space + rate fit in 16 characters.
 card_rate:
-    .addr 0, 0, 0               ; bike
+    .addr rt_bike_fin, 0, 0     ; bike
     .addr rt_bay_walk, 0, rt_40each ; bay
     .addr 0, 0, 0               ; park
     .addr 0, 0, 0               ; cops
@@ -3911,7 +3911,7 @@ card_rate:
     .addr 0, 0, 0               ; parking
     .addr 0, 0, rt_sub_pen      ; subway
 card_rate_fail:
-    .addr 0, 0, 0               ; bike
+    .addr rt_bike_m, 0, 0       ; bike
     .addr rt_bydist, 0, rt_40each ; bay
     .addr 0, 0, 0               ; park
     .addr 0, 0, 0               ; cops
@@ -3927,6 +3927,8 @@ rt_bydist:  .byte "BY DISTANCE", 0
 rt_40each:  .byte "40 EACH", 0
 rt_sub_leg: .byte "40 A LEG", 0
 rt_sub_pen: .byte "X40", 0
+rt_bike_fin: .byte "1562+20/S", 0
+rt_bike_m:  .byte "1 PER 4 M", 0
 rt_sail:    .byte "1000+25/S", 0   ; ev_sail.s FINISH_MIN + PTS_SEC a second left
 
 ; stat labels: 4 per event (last is padding), 0 = unused
@@ -3948,7 +3950,7 @@ sl_streak:   .byte "BEST STREAK", 0
 sl_metres: .byte "METRES", 0
 sl_sipnhop: .byte "SIP 'N' HOPS", 0
 sl_chain:  .byte "SURF CHAIN", 0
-sl_tokens: .byte "TTC TOKENS X50", 0
+sl_tokens: .byte "TOKENS (50 EACH)", 0
 sl_style:  .byte "STYLE", 0
 sl_pat:    .byte "DODGE 'N' PAT", 0
 sl_fine:   .byte "COP'S FINE", 0

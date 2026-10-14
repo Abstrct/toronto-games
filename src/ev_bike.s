@@ -1849,7 +1849,7 @@ str_start:  .byte "QUEEN", 0
 str_end:    .byte "SPADINA", 0
 
 ; ------------------------------------------------------------------
-; Delivered:  RIDE         1000 + distance/16 (562) + time left/3 (20 a s)
+; Delivered:  RIDE         1000 + distance/16 (562) + 20 a whole second left
 ;              TOKENS+STYLE 50 a TTC token + STYLE
 ;              no penalty: a wipeout costs a heart, time, the chain and the
 ;              DROP_TOK tokens it dropped (on screen as it happens)
@@ -1906,13 +1906,23 @@ bike_score:
     bcs @delivered
     jmp @dnf
 @delivered:
-    ; RIDE = 1000 + distance/16 + time/3
+    ; RIDE = 1000 + distance/16 + 20 a whole second left (the HUD's number,
+    ; so the card's "1562+20/S" adds up)
     lda b_time
     sta tmp0
     A8
-    lda #3
+    lda #60
     jsl div16
     A16
+    lda tmp0
+    asl a
+    asl a
+    sta tmp0                    ; x4
+    asl a
+    asl a                       ; x16
+    clc
+    adc tmp0
+    sta tmp0                    ; x20
     lda tmp3
     lsr a
     lsr a
