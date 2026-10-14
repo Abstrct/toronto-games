@@ -22,7 +22,7 @@ controls and the Toronto Record. Read it, then press A.
 | 4 | Tallboy Trot | Kensington Market, side-scroller | Tap A hop · hold A big jump · B sip | The bike cop saw that tallboy: run to Spadina. The first 30 seconds are a warm-up. Jump when you reach the chalk marks: yellow means hop, red means big jump; take off right ON THE CHALK for x3. Clip a hurdle and you can still press A to scramble over it. A spill costs ground on the cop, not points. Sips score only while the cop can't see you, and the BUZZ meter caps them. A sip in mid-air is a SIP 'N' HOP; chain them hurdle after hurdle, and over a raccoon it's a RACCOON RUN. Get busted and the cop fines you a quarter of your score. |
 | 5 | Harbour Regatta | Toronto Harbour, top-down | Tap ◀ ▶ turn one notch (hold to keep turning) · A hike out in gusts | Round marks 1, 2 and 3 in order, then cross the line. The wind blows from the top of the screen. A mark counts as rounded the moment you sail inside its dotted ring, from any side. The diamonds ahead of the bow show where you're pointed. You can't sail into the wind, so zig-zag. Style: TIGHT ROUNDING (in a row: 400, 800, 1200), FERRY SURF (ride the Island ferry's wake) and LINE HONOURS for a finish with no bumps. A run that doesn't finish still scores 250 for each mark rounded; ten seconds going nowhere without touching ◀ ▶ ends the race (ADRIFT). |
 | 6 | Parallel Parking | The Annex, from above | ▲ gas · ▼ reverse · ◀ ▶ steer · A park it | Three spots on Brunswick: roomy, snug (with a cyclist you have to wait for), then tight. Drive up until your rear bumper is on the yellow line, back in with a d-pad roll (▼+▶, then ▼+◀), and press A once you've stopped. The CURB, ANGLE and SPACE lamps show what you'd score right now, and the spot box itemises every point. Style: ONE-MOVE, TIME LEFT, CURB KISS and PERFECT streaks. Dent a car and its alarm goes off (it's a BMW). Half in pays +150 but earns a $75 ticket (−75). Still out of the spot when time runs out, or 10 seconds without driving, and you're towed. |
-| 7 | TTC Surfing | Line 1, Bloor-Yonge to Union | D-pad lean | Ride to Union hands-free. Every lurch is announced: the beeps, squeal or hiss sound and a hollow arrow blinks by the ring to say get ready. When the arrow goes solid the push is on: lean the way it points to keep the dot in the ring (lean too early and you tip yourself over). Leave the ring and you grab something, which means more germs. Ride from one station to the next without grabbing anything for a STANDING SURF; clean legs in a row build the chain, and a GOLD DOT leg surfed clean pays x3. Twenty germs and you're PATIENT ZERO. |
+| 7 | TTC Surfing | Line 1, Bloor-Yonge to Union | D-pad lean | Ride Line 1 to Union hands-free. Every lurch is announced: beeps, a squeal or the brake hiss, and a hollow arrow blinks by the ring: get ready (leaning early is safe, just weaker). When it goes solid, press the D-pad the way it points to keep the dot in the ring. Leave the ring and you grab something: a germ costs 40. Past TMU (it was Dundas) no two rides are alike: ride out the signal-problems E-brake and a swinging backpack for +100 each. A stop-to-stop leg with no grab is a STANDING SURF (75 × the chain); keep the dot gold from the STAND CLEAR chime to the next stop for a GOLD SURF (×3); dead centre during a push scores every frame. Twenty germs and you're PATIENT ZERO: the ride pays 40 a leg you leaned on, no style. |
 
 Controls change as the events are tuned, so the in-game card is always the
 final word.
@@ -61,14 +61,21 @@ players you've signed up. On the event picker, B goes back to the roster
 with everyone still signed up.
 
 **Turns.** Players take turns at each event. An UP NOW card names whose
-turn it is, so a mashed button can't start the next player's turn.
+turn it is and says HAND THE PAD TO the next player, so a mashed button
+can't start their turn. In Practice, B on the event card goes back to the
+event list.
+
+**Scores.** The result card shows how the score adds up. A score never goes
+below 0: if the penalties are bigger than the rest, the card still shows the
+full sum and says SCORES NEVER GO BELOW 0. A failed Bike run forfeits its
+tips and style, and the card shows them in grey.
 
 **Medals.** Equal scores share a place and its medal. A score of 0 never
 wins a medal.
 - **Multiplayer:** each event awards gold, silver and bronze (5, 3 and 1
   medal points). A medal table with a CN Tower ticker follows each event. After
-  the last event comes the final table, then the podium at Nathan Phillips
-  Square.
+  the last event comes the podium at Nathan Phillips Square, then the final
+  table.
 - **Solo:** you race the Toronto Record. Matching it wins gold, two thirds of
   it wins silver and one third wins bronze. The event card shows all three
   marks.
@@ -76,7 +83,7 @@ wins a medal.
 **After an event.**
 - **Practice:** choose **RETRY** (same event, same player), **OTHER EVENT**
   (the picker opens on the next event) or **MENU**.
-- **Competition:** after the final table, choose **REMATCH** (the same
+- **Competition:** after the final table (the cursor starts on it), choose **REMATCH** (the same
   events with the same crew), **1 EVENT** (one more event, as a one-event
   competition; B goes back to the final table) or **TITLE**.
 
