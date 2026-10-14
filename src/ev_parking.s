@@ -53,6 +53,7 @@
 .include "screens.inc"
 
 .import parking_tiles, parking_map, parking_pal, parking_spr, parking_spr_pal
+.import trick_seen          ; boot.s: the attract demo's WATCH THAT MOVE! cue
 
 ; geometry (screen pixels; the car's reference point is its rear axle)
 A_TOP    = 48           ; car ahead occupies y 48..88
@@ -1766,6 +1767,7 @@ bike_shave:
     bcs @x
     lda #1
     sta k_shave+1
+    jsl trick_seen
     SFX SFX_CHEER
     ldx #.loword(str_shave)
     lda #TP_GREEN

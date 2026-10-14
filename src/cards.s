@@ -4047,7 +4047,7 @@ ec1: .byte "ALTERNATE ", TXT_ARROW_L+32, " ", TXT_ARROW_R+32, " ON BIG DOTS", $0
 ec2: .byte "D-PAD WALK   A THROW BALL", $0A, "SAFE: B ON ! = 100 PER DOG", $0A, "BOLD: RED ! 200, LATE 400+", 0
 ec3: .byte "YELLOW CHALK: TAP A", $0A, "RED CHALK: HOLD A", $0A, "HOLD B: SIP, COP CAN'T SEE", 0
 ec4: .byte "LEFT/RIGHT: TURN  A: HIKE", $0A, "YELLOW ARROW: NEXT MARK", $0A, "GREEN DIAMONDS: ON COURSE", 0
-ec5: .byte "UP: REAR BUMPER TO LINE", $0A, "BACK IN: DOWN+RIGHT, THEN", $0A, "DOWN+LEFT ON NOW! A: PARK", 0
+ec5: .byte "UP TO THE LINE, A TO PARK", $0A, "BACK IN: HOLD DOWN+RIGHT,", $0A, "ROLL TO DOWN+LEFT AT NOW!", 0
 ec6: .byte "HOLLOW ARROW: GET READY", $0A, "SOLID: HOLD D-PAD THAT WAY", $0A, "TAP TO STAY GOLD: SURF X3", 0
 ef0: .byte "WIPED OUT!", 0
 ef1: .byte "MISSED THE TRAIN!", 0
@@ -4070,7 +4070,7 @@ card_break_labels:
     .addr bl_walk,  bl_dogs,  bl_tack150    ; park
     .addr bl_run,   bl_style, bl_fine       ; cops
     .addr bl_course, bl_style, bl_bump      ; sail
-    .addr bl_park,  bl_style, bl_dings      ; parking
+    .addr bl_park,  bl_tstyle, bl_dings     ; parking
     .addr bl_ride,  bl_style, bl_germs      ; subway
 bl_tips:   .byte "TOKENS+STYLE", 0
 bl_walk:   .byte "WALK", 0
@@ -4081,6 +4081,7 @@ bl_race:   .byte "RACE", 0
 bl_park:   .byte "PARKING", 0
 bl_ride:   .byte "RIDE", 0
 bl_style:  .byte "STYLE", 0
+bl_tstyle: .byte "TIME+STYLE", 0
 bl_dogs:   .byte "DOGS", 0
 bl_tack150: .byte "TACKLES X150", 0
 bl_pats:   .byte "PATS", 0
