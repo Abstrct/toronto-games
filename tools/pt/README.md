@@ -101,6 +101,11 @@ Caveats:
 `pt.py lint [targets]` samples each scene and flags text in the top/bottom 8 scanlines (hidden by CRT overscan)
 and sprites overlapping text glyphs. These are heuristics; a sprite meant to sit behind a card panel is fine.
 
+## Copy
+
+`python3 tools/pt/copylint.py` lists issues with every `.byte "..."` string in `src/`: lines over the 26-character card
+budget, stale event counts, developer jargon, and gags reused across events. `--md FILE` writes the full inventory.
+
 ## Findings that re-check themselves
 
 `pt.py bug SESSION "title" -c "COND"` stores a repro relative to the session's last `goto` (when it has one),
