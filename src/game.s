@@ -896,11 +896,11 @@ default_records:
     REC 1800, "KAYAKER"
     REC 1300, "SEAGULL"
     ; EV_PARKING  Parallel Parking
-    REC 3400, "GREEN P"
-    REC 2900, "VALET"
+    REC 3600, "GREEN P"
+    REC 3000, "VALET"
     REC 2400, "CABBIE"
-    REC 1900, "LEARNER"
-    REC 1400, "TOWTRUCK"
+    REC 1800, "LEARNER"
+    REC 1000, "TOWTRUCK"
     ; EV_SUBWAY   TTC Surfing
     REC 3300, "HANDRAIL"
     REC 2900, "COMMUTER"

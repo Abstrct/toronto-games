@@ -165,7 +165,7 @@ k_lpen   = ev_ram + 152     ; last spot's penalties
 k_tmp    = ev_ram + 160     ; scratch words (160..175)
 k_md     = ev_ram + 176     ; smul_w operand
 
-.segment "GFX0"
+.segment "EVENTS2"             ; with Off-Leash and Tallboy (GFX0 is full with TTC Surfing)
 .a8
 .i16
 
