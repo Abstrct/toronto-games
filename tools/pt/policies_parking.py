@@ -19,7 +19,10 @@ and judgement:
                   its lag. Only a quick hand (lag <= SHAVE_LAG) tries the
                   close shave. This is the bot `pt.py curve parking` slows.
     park_coach    a first-timer who only follows the coach line in the panel
-                  (reads the message the HUD shows, reacts to it).
+                  (reads the message the HUD shows, reacts to it in 12 f).
+    park_prompt*  the same at 20-25 f (and 40 f), and a 25 f hand the coach
+                  thinks is quick: the proof that every cue leaves a human
+                  time to act.
     park_wiggle   no plan: drives up, backs in at full lock, counter-steers
                   at a random moment, presses A.
 """
@@ -242,6 +245,7 @@ class _Parker(Policy):
         return st['by'] > front - 24 and left < BIKE_X + 16
 
     SHAVE_DY = 8.0
+    STR_PAD = 3         # frames the car still turns after letting go
     try_shave = True
     stuck = 0
     coached = None
@@ -287,7 +291,7 @@ class _Parker(Policy):
             return self.pedal(st, RIGHT)
         if self.stage == 'straight':
             rate = th - prev['th']
-            if not self.let_go and th + rate * (lead + 3) < -self.th_err:
+            if not self.let_go and th + rate * (lead + self.STR_PAD) < -self.th_err:
                 return self.pedal(st, LEFT)
             self.let_go = True          # let go: wait for it to stop
             if v != 0:
@@ -337,6 +341,8 @@ class _Parker(Policy):
 
 class park_expert(_Parker):
     LEAD = 0
+    SWAP_GAP = -0.5     # (the model's -3 px for the wheel's travel is a hair long: a 0 px kiss)
+    STR_PAD = 2         # let go 2 frames early: ZERO ANGLE
 
 
 SHAVE_LAG = 8
@@ -349,11 +355,14 @@ class park_human(_Parker):
     LEAD_MAX = 40
     CREEP_LAG = 30
 
+    STR_PAD = 2
+
     def new_spot(self, st, rng):
+        # (an eye can't judge half a pixel or half a degree: errors have a floor)
         lag = self.lag() or 6
-        self.y_err = rng.gauss(0, 0.4 + 0.07 * lag)
-        self.gap_err = rng.gauss(0, 0.3 + 0.06 * lag)
-        self.th_err = rng.gauss(0, 0.004 + 0.0007 * lag)
+        self.y_err = rng.gauss(0, 0.5 + 0.07 * lag)
+        self.gap_err = rng.gauss(0, 0.5 + 0.06 * lag)
+        self.th_err = rng.gauss(0, 0.007 + 0.0007 * lag)
         self.try_shave = lag <= SHAVE_LAG
         self.CENTRE = lag <= SHAVE_LAG
         self.SHAVE_DY = 8.0 + rng.gauss(0, 1.5)
@@ -363,7 +372,7 @@ class park_human(_Parker):
 
     def plan(self, st, prev, rng):
         # a sure hand aims for the curb kiss; a slower one leaves margin
-        self.SWAP_GAP = 1.0 + 0.12 * self.lag()
+        self.SWAP_GAP = 0.5 + 0.12 * self.lag()
         return super().plan(st, prev, rng)
 
 
@@ -381,54 +390,97 @@ class park_wiggle(_Parker):
         return super().plan(st, prev, rng)
 
 
-class park_coach(Policy):
-    """Follows the coach line it can see in the panel, nothing else."""
+class park_prompt(Policy):
+    """Obeys only the line on screen, with a human hand: each prompt is acted
+    on LAT frames after it shows (+- JIT), and only what it names is held.
+    Nothing else is read: no RAM, no plan, no anticipation. The proof that
+    every cue leaves a 20-25 f human time to act. FAST_CUES: prompts this
+    hand answers quicker than the rest (the coach then thinks it is quicker
+    than it is: it measures its reaction on LET GO OF UP and BACK IN)."""
     every = 1
+    LAT = 22
+    JIT = 2
+    FAST_CUES = {}
+
+    # prompt prefix -> what the hand holds (None: tap A)
+    TABLE = (('GAS ', UP), ('LET GO OF ', 0), ('PAST IT!', DOWN), ('HOLD DOWN+RIGHT: BACK', DOWN | RIGHT),
+             ('HOLD DOWN+RIGHT', DOWN | RIGHT), ('NOW!', DOWN | LEFT),
+             ('HOLD DOWN+LEFT', DOWN | LEFT), ('STRAIGHT! LET', 0), ('A: PARK', None), ('A: ON TO', None),
+             ('A: SEE', None), ('TOO FAR OUT', None), ('OVER THE CURB', None), ('WAIT!', 0),
+             ('HOLD UP+LEFT', UP | LEFT), ('MIND THE BMW', DOWN), ('TOO SOON', DOWN | RIGHT), ('PINNED', DOWN),
+             ('STUCK! HOLD UP', UP), ('STUCK! HOLD DOWN', DOWN), ('TOO LATE!', 0), ('HOLD UP+RIGHT', UP | RIGHT),
+             ('ENOUGH!', 0), ('HOLD DOWN ONLY', DOWN), ('BACK STRAIGHT', DOWN))
 
     def __init__(self):
-        self.prog = []
-        self.last = None
+        self.queue = []
+        self.hold = 0
+        self.want = 0
+        self.txt = None
+        self.taps = []
 
-    def act(self, t, tel, rng):
+    def shown(self):
         g = self.game
         m = g.core.peek(g.sym['ev_ram'], 192)
-        w = lambda o: m[o] | m[o + 1] << 8
-        if m[O_PHASE] == 1:
-            return A if w(O_ANIM) > 100 and t % 20 < 10 else 0
-        if self.prog:
-            return self.prog.pop(0)
-        shown = w(O_SHOWN)
+        a = m[124] | m[125] << 8
+        if a == 0xFFFF:
+            return ''
         bank = g.sym['ev_parking'] >> 16
-        off = (bank - 0x80) * 0x8000 + (shown & 0x7FFF)
-        txt = g.sym.rom[off:off + 32].split(b'\0')[0].decode('latin-1')
-        name = None
-        for pre, k in (('GAS ', 'co_up'), ('LET GO OF ', 'co_brake'), ('PAST IT!', 'co_toofar'),
-                       ('HOLD DOWN+RIGHT', 'co_back'), ('KEEP DOWN+RIGHT', 'co_ready'), ('NOW!', 'co_now'),
-                       ('HOLD DOWN+LEFT', 'co_swing'), ('STRAIGHT! LET', 'co_stop'), ('A: PARK', 'co_park'),
-                       ('TOO FAR OUT', 'co_fix'), ('OVER THE CURB', 'co_fix'), ('WAIT!', 'co_wait'),
-                       ('DING DING', 'co_wait'), ('HOLD UP+LEFT', 'co_nosein'), ('MIND THE BMW', 'co_clear'),
-                       ('TOO SOON', 'co_early'), ('PINNED', 'co_pinned'), ('STUCK! HOLD UP', 'co_pullup'),
-                       ('STUCK! HOLD DOWN', 'co_backup'), ('TOO LATE!', 'co_late'),
-                       ('HOLD UP+RIGHT', 'co_easeout'), ('ENOUGH!', 'co_easestop')):
-            if txt.startswith(pre):
-                name = k
-        if name is None or name == self.last:
-            if name is None:
-                return getattr(self, 'last_hold', 0)
-        self.last = name
-        hold = {'co_up': UP, 'co_brake': 0, 'co_toofar': DOWN, 'co_back': DOWN | RIGHT,
-                'co_ready': DOWN | RIGHT, 'co_now': DOWN | LEFT, 'co_swing': DOWN | LEFT, 'co_stop': 0,
-                'co_fix': 0, 'co_nosein': UP | LEFT, 'co_clear': DOWN, 'co_early': DOWN | RIGHT,
-                'co_pinned': DOWN, 'co_pullup': UP, 'co_backup': DOWN, 'co_late': 0,
-                'co_easeout': UP | RIGHT, 'co_easestop': 0}.get(name, 0)
-        if name in ('co_park', 'co_fix'):
-            self.prog = [A] * 6 + [0] * 30
-            return 0
-        self.last_hold = hold
-        return hold
+        off = (bank - 0x80) * 0x8000 + (a & 0x7FFF)
+        return g.sym.rom[off:off + 40].split(b'\0')[0].decode('latin-1')
+
+    def act(self, t, tel, rng):
+        txt = self.shown()
+        if txt != self.txt:
+            self.txt = txt
+            for pre, mask in self.TABLE:
+                if txt.startswith(pre):
+                    lat = self.FAST_CUES.get(pre, self.LAT)
+                    due = t + max(1, lat + rng.randint(-self.JIT, self.JIT))
+                    if self.queue:
+                        due = max(due, self.queue[-1][0] + 1)
+                    self.queue.append((due, mask, txt))
+                    break
+        while self.queue and self.queue[0][0] <= t:
+            _, mask, _ = self.queue.pop(0)
+            if mask is None:
+                self.taps = [A] * 6 + [0] * 4
+                self.hold = 0
+            else:
+                self.hold = mask
+        if self.taps:
+            return self.taps.pop(0) | self.hold
+        return self.hold
 
 
-POLICIES = {c.__name__: c for c in [park_expert, park_human, park_wiggle, park_coach]}
+class park_coach(park_prompt):
+    """A first-timer who only follows the coach line in the panel, with a
+    quick hand (12 f)"""
+    LAT = 12
+
+
+class park_prompt20(park_prompt):
+    LAT = 20
+
+
+class park_prompt25(park_prompt):
+    LAT = 25
+
+
+class park_prompt40(park_prompt):
+    """slower than the coach's aim allows: exercises TOO LATE and the pull-out"""
+    LAT = 40
+    JIT = 4
+
+
+class park_prompt25q(park_prompt):
+    """a 25 f hand the coach measures as quick (it saw LET GO OF UP and BACK
+    IN coming and answered them in 8 f)"""
+    LAT = 25
+    FAST_CUES = {'LET GO OF ': 8, 'HOLD DOWN+RIGHT: BACK': 8}
+
+
+POLICIES = {c.__name__: c for c in [park_expert, park_human, park_wiggle, park_coach, park_prompt,
+                                        park_prompt20, park_prompt25, park_prompt25q, park_prompt40]}
 DEFAULTS = {'parking': ['idle', 'hold_a', 'mash_a', 'park_wiggle', 'park_coach', 'park_human', 'park_expert',
                         'random_input']}
 CURVE = {'parking': 'park_human'}
