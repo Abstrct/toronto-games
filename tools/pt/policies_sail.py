@@ -3,18 +3,27 @@
 Steering is in notches (16 directions, one per boat frame): a tap turns the
 goal one notch, a hold keeps turning a notch every few frames. The bots steer
 the way a person does with that: they pick the notch they want from what's on
-screen (the boat, the yellow arrow, the marks and anything in the water within
-the camera view), tap or hold for about as many notches as it takes, then
-watch the bow line until it settles before deciding again. They never react
-to anything off screen.
+screen (the boat, the bow diamonds, the yellow arrow, the coach line, the
+marks and anything in the water within the camera view), tap or hold for
+about as many notches as it takes, then watch the bow line until it settles
+before deciding again. They never react to anything off screen.
 
-    sail_expert   tacks on the right notch, rounds the marks close (TIGHT
-                  ROUNDING), steers round geese and kayaks it can see, dips
-                  into the ferry's wake on the last leg when she's coming
+What's on screen: the yellow arrow marks the next mark (a pin over it, or at
+the screen edge pointing at it); the bow diamonds turn green on the course to
+steer (s_adir: straight at the mark, or close-hauled on the right tack); the
+coach line says "TO MARK 2: TAP < 2 TIMES", "TACK NOW! TAP > 4 TIMES", "IN
+IRONS! TAP < ONCE", "ADRIFT SOON! ...".
+
+    sail_expert   tacks on the right notch with quick taps (CLEAN TACK), rounds each mark at its own chosen
+                  distance (graded TIGHT ROUNDING), steers round geese and
+                  kayaks it can see, rides the ferry's wake on the last leg
+                  when she's there. Each run picks its own line (rounding
+                  distance, layline margin), as a real expert's would vary.
     sail_casual   a decent club sailor: rounds wide, tacks late, fumbles a bit
-    sail_human    a first-timer: follows the arrow, zig-zags when it points
-                  into the wind, overshoots taps, forgets to hike
-    sail_pointer  a beginner who just follows the yellow arrow (no tacking)
+    sail_human    a first-timer who keeps the diamonds green (sloppy taps,
+                  forgets to hike)
+    sail_pointer  a first-timer who steers at the yellow arrow (never into the
+                  red no-go ticks) and does what the coach line says
 """
 import math
 import os
@@ -29,9 +38,11 @@ O_FX, O_FERRYD, O_FWAIT, O_IRONS, O_BRG = 44, 46, 60, 56, 250
 O_CAMX, O_CAMY = 34, 36
 O_SURF, O_SURFT, O_SURFOK = 190, 192, 194
 O_HGOAL = 288
-O_ADIR = 320         # the yellow arrow's notch (shows the tack on a beat)
+O_ADIR = 320         # the course to steer (green diamonds)
+O_POPUP, O_GREEN, O_COACHN, O_BUF = 32, 352, 358, 400
 NOGO = 28
 NOTCH = 16
+TOUCH = 6.5          # a pass closer than this touches the buoy (rough distance < 6)
 
 
 def _layout():
@@ -46,6 +57,23 @@ def _layout():
 
 
 MARKS, LINE, LINE_HALF, FERRY_Y, FERRY_X0, FERRY_X1 = _layout()
+
+
+def _solid():
+    here = os.path.dirname(os.path.abspath(__file__))
+    return open(os.path.join(here, '..', '..', 'build', 'sail_solid.bin'), 'rb').read()
+
+
+SOLID = _solid()
+
+
+def land(x, y):
+    """the shore you can see (the game's 8 px land map)"""
+    x, y = int(x), int(y)
+    if not (0 <= x < 512 and 0 <= y < 512):
+        return True
+    tx, ty = x >> 3, y >> 3
+    return bool(SOLID[ty * 8 + (tx >> 3)] & (0x80 >> (tx & 7)))
 
 
 def _game(pol):
@@ -75,7 +103,14 @@ def read_boat(pol):
             'brg': m[O_BRG], 'rmark': m[180], 'rmin': w(182), 'hgoal': m[O_HGOAL],
             'camx': w(O_CAMX), 'camy': w(O_CAMY), 'surf': m[O_SURF], 'surfok': m[O_SURFOK],
             'pad': pad[0] | pad[1] << 8, 'adir': m[O_ADIR],
+            'popup': w(O_POPUP), 'green': m[O_GREEN], 'coachn': m[O_COACHN] - 256 if m[O_COACHN] & 0x80 else m[O_COACHN],
             'floats': [(w(64 + 2 * i), w(74 + 2 * i)) for i in range(5)]}
+
+
+def coach_text(pol):
+    """the built message (coach / tack / irons lines) as on screen"""
+    g = _game(pol)
+    return bytes(g.core.peek(g.sym['ev_ram'] + O_BUF, 32)).split(b'\0')[0].decode('latin1')
 
 
 def bearing(dx, dy):
@@ -108,6 +143,7 @@ class _Sailor(Policy):
     radial_d = 40        # this close, aim at the point offset px out toward us
     settle = 6           # frames to look at the bow line after it moves
     slop = 0             # extra frames a hold runs on (sloppy hands)
+    tap_period = 0       # turn 2+ notches with taps this far apart (0: hold the pad)
 
     def __init__(self):
         self.tack = 0
@@ -118,11 +154,19 @@ class _Sailor(Policy):
         self.stale = 0
         self.kick = 0
         self.rmark_done = -1
+        self.taps = 0            # taps in this turn (0: a hold)
+        self.t0 = 0
+
+    def pressing(self, t):
+        if not self.taps:
+            return self.press
+        i, ph = divmod(t - self.t0, self.tap_period)
+        return self.press if i < self.taps and ph < 3 else 0
 
     # ---------------------------------------------------------- where to go
     def target(self, b):
         k = b['mark']
-        if self.offset and b['rmark'] < 3 and b['rmin'] > self.offset + 3 and self.rmark_done != b['rmark']:
+        if self.offset and b['rmark'] < 3 and b['rmin'] > self.offset + 2 and self.rmark_done != b['rmark']:
             k = b['rmark']                          # finish the rounding close in
         elif self.offset and b['rmark'] < 3:
             self.rmark_done = b['rmark']
@@ -131,13 +175,17 @@ class _Sailor(Policy):
         mx, my = MARKS[k]
         if not self.offset:
             return (mx, my)
-        # pass the buoy close on the side we're already on
+        # pass the buoy `offset` px off, square to our line of approach, on the
+        # side the next leg goes (never straight at it: that's a touch)
         dx, dy = b['x'] - mx, b['y'] - my
         d = math.hypot(dx, dy) or 1
-        if d > self.radial_d:
-            px, py = -dy / d, dx / d
-            return (mx + px * self.offset, my + py * self.offset)
-        return (mx + dx / d * self.offset, my + dy / d * self.offset)
+        if d < self.offset:
+            return (mx + dx / d * (self.offset + 8), my + dy / d * (self.offset + 8))
+        nx, ny = MARKS[k + 1] if k < 2 else LINE
+        px, py = -dy / d, dx / d
+        if px * (nx - mx) + py * (ny - my) < 0:
+            px, py = -px, -py
+        return (mx + px * self.offset, my + py * self.offset)
 
     def beat_notch(self, wind, side):
         """the notch closest to the wind on this tack that still drives"""
@@ -186,9 +234,9 @@ class _Sailor(Policy):
             if goal == self.expect or t >= self.wait_until:
                 self.expect = None
                 self.wait_until = t + self.settle
-            return self.press if t < self.until else 0
+            return self.pressing(t) if t < self.until else 0
         if t < self.until:
-            return self.press
+            return self.pressing(t)
         if t < self.wait_until:
             return 0
         d = sdiff(want, goal)
@@ -201,9 +249,16 @@ class _Sailor(Policy):
             return 0
         self.press = RIGHT if n > 0 else LEFT
         k = abs(n)
-        # a tap for one notch, a hold for more (first repeat at 18, then every 9)
-        dur = 10 if k == 1 else 18 + (k - 2) * 9 + 4
-        dur += self.slop and rng.randint(0, self.slop)
+        self.t0 = t
+        if self.tap_period and k >= 2:
+            # k quick taps (what the coach line asks for)
+            self.taps = k
+            dur = k * self.tap_period
+        else:
+            # a tap for one notch, a hold for more (first repeat at 18, then every 8)
+            self.taps = 0
+            dur = 10 if k == 1 else 18 + (k - 2) * 8 + 4
+            dur += self.slop and rng.randint(0, self.slop)
         self.until = t + dur
         self.expect = (goal + n * NOTCH) & 0xF0
         self.wait_until = t + dur + 60
@@ -252,13 +307,78 @@ class _Sailor(Policy):
 
 
 class sail_expert(_Sailor):
-    """Rounds 10 px off each buoy, steers round geese and kayaks on screen,
-    and rides the ferry's wake to the line when she's coming its way."""
+    """Rounds 8-13 px off each buoy (its own choice each run), steers round
+    geese and kayaks on screen, and rides the ferry's wake to the line when
+    she's there."""
     offset = 10
+    tap_period = 6
+    long_way = False     # tacks through the wind (quick taps), never loops round
+
+    def act(self, t, tel, rng):
+        if t == 0:                                  # today's line
+            self.offset = rng.choice((7, 7, 7.5, 8, 8, 8.5))
+            self.hysteresis = rng.choice((8, 10, 12, 14, 16))
+        return super().act(t, tel, rng)
 
     def target(self, b):
         st = self.surf_target(b)
         return st if st else super().target(b)
+
+    def desired(self, b):
+        """near a mark, pick the notch whose straight line passes the buoy
+        closest to `offset` px without touching it (TIGHT ROUNDING is graded
+        by the closest pass): the turn onto it has to come at the right moment"""
+        k = None
+        if b['rmark'] < 3 and self.rmark_done != b['rmark']:
+            k = b['rmark']
+        elif b['mark'] < 3:
+            mx, my = MARKS[b['mark']]
+            if math.hypot(mx - b['x'], my - b['y']) < 110:
+                k = b['mark']
+        if k is not None:
+            n = self.round_notch(b, k)
+            if n is not None:
+                return n
+            if k == b['rmark']:
+                self.rmark_done = k                 # past it: on to the next leg
+        return super().desired(b)
+
+    def round_notch(self, b, k):
+        """the approach is set up from 40-110 px out; inside 40 the bow is
+        committed (it can't turn in time anyway) unless it would hit"""
+        mx, my = MARKS[k]
+        rx, ry = mx - b['x'], my - b['y']
+        dist = math.hypot(rx, ry)
+
+        def pass_of(n):
+            a = n * math.pi / 128
+            ux, uy = math.sin(a), -math.cos(a)
+            return rx * ux + ry * uy, abs(rx * uy - ry * ux)
+        if dist < 40:
+            along, cross = pass_of(b['hgoal'])
+            if along <= 2:
+                return None                         # past it
+            if cross >= TOUCH:
+                return b['hgoal']
+            c = b['hgoal']
+            opts = [((c + dn * NOTCH) & 0xFF) for dn in (1, -1)]
+            opts = [n for n in opts if abs(sdiff(n, b['wind'])) >= NOGO + 4] or opts
+            return max(opts, key=lambda n: pass_of(n)[1])
+        c = notch_of(bearing(rx, ry))
+        best = None
+        for dn in (0, -1, 1, -2, 2):
+            n = (c + dn * NOTCH) & 0xFF
+            if abs(sdiff(n, b['wind'])) < NOGO + 4:
+                continue
+            along, cross = pass_of(n)
+            if along <= 2:
+                continue
+            cost = abs(cross - self.offset) + (60 if cross < self.offset - 0.5 else 0) + abs(dn) * 0.5
+            if best is None or cost < best[0]:
+                best = (cost, n)
+        if best is None or best[0] > 40:
+            return None
+        return best[1]
 
     def surf_target(self, b):
         """last leg: dip into the westbound ferry's wake if she'll be there"""
@@ -275,12 +395,12 @@ class sail_expert(_Sailor):
         dy = FERRY_Y - b['y']
         if abs(dy) < 12:
             # in the lane: ride her wake west, peel off before her stern
-            return (b['x'] - 60, FERRY_Y) if astern >= 32 else None
+            return (b['x'] - 60, FERRY_Y) if astern >= 34 and b['x'] > LINE[0] + 60 else None
         if dy < 0:
             return None
-        # drop into the lane so the wake slot (40-70 astern) arrives as we do
+        # drop into the lane if her wake (28-192 astern) will still be there
         t_down = dy / 0.8
-        if astern + t_down > 75 or astern + t_down < 20:
+        if astern + t_down > 180 or astern + t_down < 36:
             return None
         return (b['x'] - 16, FERRY_Y)
 
@@ -291,13 +411,14 @@ class sail_expert(_Sailor):
                 obs.append((x, y, 16, 14, 0))
         fx = b['fx']
         astern = (b['x'] - fx) * (-b['ferryd'])
-        if self.surf_target(b) and not b['fwait'] and astern > 32:
+        if self.surf_target(b) and not b['fwait'] and astern > 44:
             return obs                              # dropping into her wake on purpose
         if on_screen(b, fx, FERRY_Y, 32):
             obs.append((fx, FERRY_Y, 32, 16, 0 if b['fwait'] else b['ferryd']))
         return obs
 
     def avoid(self, b, want):
+        want = self.shore(b, want)
         sp = max(b['speed'], 0x80) / 256.0
         surfing = b['mark'] == 3 and abs(b['y'] - FERRY_Y) < 14
         for la in (want, b['head']):
@@ -324,6 +445,21 @@ class sail_expert(_Sailor):
                         return notch_of(cand)
                 cand = (la + 2 * NOTCH if side > 0 else la - 2 * NOTCH) & 0xFF
                 return notch_of(cand)
+        return want
+
+
+    def shore(self, b, want):
+        """don't sail into the shore you can see: the nearest notch that's
+        clear for the next ~40 px and still drives"""
+        def clear(n):
+            a = n * math.pi / 128
+            return not any(land(b['x'] + math.sin(a) * d, b['y'] - math.cos(a) * d) for d in (14, 24, 34, 44))
+        if clear(want):
+            return want
+        for k in (1, -1, 2, -2, 3, -3, 4, -4):
+            n = (want + k * NOTCH) & 0xF0
+            if clear(n) and abs(sdiff(n, b['wind'])) >= NOGO + 4:
+                return n
         return want
 
 
@@ -371,16 +507,71 @@ class sail_human(_Sailor):
 
 
 class sail_pointer(_Sailor):
-    """Follows the yellow arrow and nothing else, never hikes: the panel's honest run."""
+    """A first-timer reading the screen, never hikes: steers at the yellow
+    arrow (but not into the red no-go ticks: as close to it as she'll sail),
+    and when a coach line says TAP < N TIMES she taps N
+    times that way. Green diamonds: leave the helm alone."""
     hike = False
     settle = 12
     long_way = False
+    tap_period = 10      # does as the coach line says: TAP < 4 TIMES
+
+    def __init__(self):
+        super().__init__()
+        self.last_popup = 0
+        self.order = None                           # notch the coach asked for
 
     def desired(self, b):
-        return b['adir']
+        pop = b['popup']
+        if pop > self.last_popup + 1 and 'TAP' in coach_text(self) and b['coachn']:
+            self.order = (b['hgoal'] + b['coachn'] * NOTCH) & 0xF0
+        self.last_popup = pop
+        if b['green']:
+            self.order = None
+            return b['hgoal']
+        if self.order is not None:
+            if b['hgoal'] == self.order:
+                self.order = None
+            else:
+                return self.order
+        tx, ty = (MARKS[b['mark']] if b['mark'] < 3 else LINE)
+        brg = bearing(tx - b['x'], ty - b['y'])
+        return self.free_notch(brg, b['wind'])      # as near the arrow as the red ticks allow
 
 
-POLICIES = {c.__name__: c for c in (sail_expert, sail_casual, sail_human, sail_pointer)}
-DEFAULTS = {'sail': ['idle', 'hold_a', 'hold_right', 'mash_a', 'random_input', 'sail_random', 'sail_tack',
+import policies as _base
+
+
+class sail_tack(_base.sail_tack):
+    """No skill (blind timed tacks, never looks at the course): an exploit
+    detector. Going nowhere for ten seconds ends its race (ADRIFT), early."""
+    trivial = True
+
+
+class sail_random(_base.sail_random):
+    """No skill (random LEFT/RIGHT/A every half second): an exploit detector.
+    It must score more than sitting still, never more than sailing."""
+    trivial = True
+
+
+class sail_flail(Policy):
+    """pt9's flailer: random LEFT or RIGHT taps every 20-60 frames, no plan."""
+    trivial = True
+
+    def __init__(self):
+        self.next = 0
+        self.m = 0
+
+    def act(self, t, tel, rng):
+        if t >= self.next:
+            self.m = rng.choice((LEFT, RIGHT))
+            self.next = t + rng.randint(20, 60)
+            self.until = t + rng.randint(3, 12)
+        return self.m if t < self.until else 0
+
+
+POLICIES = {c.__name__: c for c in (sail_expert, sail_casual, sail_human, sail_pointer,
+                                    sail_tack, sail_random, sail_flail)}
+DEFAULTS = {'sail': ['idle', 'hold_a', 'hold_right', 'mash_a', 'random_input', 'sail_random', 'sail_tack', 'sail_flail',
                      'sail_pointer', 'sail_human', 'sail_casual', 'sail_expert']}
 CURVE = {'sail': 'sail_expert'}

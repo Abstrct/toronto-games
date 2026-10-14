@@ -1,26 +1,36 @@
 ; EVENT 5: HARBOUR REGATTA — top-down sailing in Toronto harbour.
 ; Reach to mark 1, beat up to mark 2 (you can't sail into the wind: zig-zag),
-; run down to mark 3, then reach across the line (or dip south and ride the
-; Island ferry's wake to it). The boat sails from the gun. Steering is in
-; notches: each tap of LEFT/RIGHT turns the bow one of the 16 directions the
-; boat is drawn in (held, it keeps turning a notch at a time), so what you see
-; is exactly where you're going. Hike out with A when a gust hits. The crew
-; pushes off if you run aground, and the game tells you which way to steer
-; when you're in irons. The yellow arrow never points into the wind: on the
-; beat it shows the tack you can sail, and calls TACK NOW at the layline.
+; run down to mark 3, then reach across the line (riding the Island ferry's
+; wake if you're quick: she leaves Ward's when you round mark 2). The boat
+; sails from the gun. Steering is in notches: each tap of LEFT/RIGHT turns
+; the bow one of the 16 directions the boat is drawn in (held, it keeps
+; turning a notch at a time), so what you see is exactly where you're going.
+; Hike out with A when a gust hits. The crew pushes off if you run aground.
+; Where to go and where you're pointed never share a sprite:
+;   - the yellow arrow sits at the next mark (or at the screen edge toward
+;     it) and points at it;
+;   - the two diamonds ahead of the bow show your heading, and turn green
+;     when it's the course to steer (straight at the mark, or close-hauled on
+;     the right tack when it's upwind);
+;   - off course for a while, the coach says how many taps: "TO MARK 2: TAP
+;     < 2 TIMES", "TACK NOW! TAP > 4 TIMES", "IN IRONS! TAP < ONCE".
 ; Rounding = sailing into the dotted ring (it bursts, MARK n ROUNDED!).
 ; Wind and gusts come from a fixed seed: every player gets the same breeze.
 ; The water is BG2 (wave crests drifting downwind under BG1's land).
 ;
-; Score (ev_break = base, bonus, penalty):
-;   finish  base 250 per leg (1000) + 25 per second left, bonus = style
-;           (TIGHT ROUNDINGS in a row 400/800/1200, FERRY SURF 200, not a
-;           single bump 300), penalty 50 per bump, but never below 1000
-;   no finish  base 250 per leg done + up to 249 for progress on the next one
-;           (at most 999, so any finish beats it), penalty 50 per bump (never
-;           below 0); style only pays at the line. Never touched the helm: 0.
-;           Ten seconds going nowhere without steering ends the race (ADRIFT);
-;           sailing hands-off while closing on the mark doesn't count.
+; Score (ev_break = base, bonus, penalty; the penalty is always 0: a bump
+; costs 2 seconds of the clock instead, so it can never put a sailor below
+; one who sat still):
+;   finish  base 250 per leg (1000) + 25 per second left; bonus = style:
+;           ROUNDINGS (graded by how close you pass the buoy, +100 a mark for
+;           a chain), CLEAN TACKS on the beat (up to 3), FERRY SURF (two
+;           stages) and LINE HONOURS (no bumps at all)
+;   no finish  base 250 per mark rounded + up to 249 for the part of the next
+;           leg sailed (at most 999, so any finish beats it); style only pays
+;           at the line. Never touched the helm: 0.
+;   ADRIFT: ten seconds getting no closer to the next mark (aground, in
+;           irons, sailing away) ends the race, whatever you press; ten
+;           seconds without ever touching LEFT/RIGHT ends it too.
 .p816
 .smart -
 .include "globals.inc"
@@ -46,30 +56,42 @@ NOTCH       = 16            ; one steering notch = one boat frame (22.5 degrees)
 TURN_RATE   = 2             ; the bow swings toward the notch this fast (per frame)
 REP_FIRST   = 18            ; held: the next notch after this many frames...
 REP_NEXT    = 8             ; ...then one every this many
-IDLE_WARN   = 300           ; frames going nowhere without steering: "anyone at the helm?"
-IDLE_CUT    = 600           ; ... and the race is over (ADRIFT)
-CLOSE_T     = 40            ; no closer to the mark for this long = going nowhere
+PROG_EVERY  = 64            ; headway is sampled this often (frames, a power of 2)
+PROG_N      = 10            ; ... into a ring this long (~10.7 s)
+PROG_MIN    = 3             ; closing now: this many px closer than the last sample
+PROG_NET    = 8             ; headway: this many px closer than 10 s (or 5 s) ago
+HELM_WARN   = 300           ; never touched LEFT/RIGHT: "HELLO?"
+HELM_CUT    = 600           ; ... and the race is over
+BUMP_T      = 120           ; a bump costs this many frames of the clock (2 s)
+COACH_OFF   = 100           ; off the course to steer this long: the coach says how many taps
+COACH_CD    = 300           ; ... and not again for this long
 ARW_IN      = 40            ; mark this close to dead upwind: the arrow shows the tack
 ARW_OUT     = 46            ; ... until it's this far off the wind (the layline)
-ARW_MIN     = 40            ; the arrow's close-hauled course: the first notch this far off the wind
+ARW_MIN     = 32            ; close-hauled course to steer: the first notch this far off the wind
 ROUND_R     = 30            ; inside this ring round a mark = rounded
-TIGHT_R     = 14            ; ... and this close, clean = TIGHT ROUNDING
+TIGHT_R     = 16            ; ... and this close, clean = TIGHT ROUNDING (graded)
 TOUCH_R     = 6             ; the buoy itself
-GOOSE_R     = 22            ; geese paddle round the marks
+GOOSE_R     = 46            ; geese paddle round the marks, outside the rings
 LOOK_X      = 72            ; camera leads toward the next mark
 LOOK_Y      = 48
 PTS_LEG     = 250           ; per leg sailed (4 legs: 1000 at the line)
 PTS_SEC     = 25            ; per second left (finish)
-PTS_TIGHT   = 400           ; x1, x2, x3 for tight roundings in a row
+; TIGHT ROUNDING: tight_tab by the closest pass, X2 / X3 for a chain in a row
+PTS_TACK    = 100           ; a clean tack on the beat
+TACK_MAX    = 3
+TACK_MINSPD = $0030         ; a tack is clean if she never slows below this...
+TACK_MAXT   = 34            ; ... and the bow crosses the no-go this quickly (frames)
 PTS_CLEAN   = 300           ; finish without a single bump
 PTS_SURF    = 200
-PTS_BUMP    = 50
 FINISH_MIN  = 4*PTS_LEG     ; a finish never scores less (a DNF tops out at 999)
 SURF_MAX    = 2
 FERRY_SPD   = 1             ; px per frame
 FERRY_WAIT  = 205           ; frames at each pier (a 16.5 s round trip)
+FERRY_LEAD  = 45            ; she leaves Ward's this long after you round mark 3
 SURF_SPD    = $0130         ; boat speed riding the wake (a touch faster than her)
-SURF_PAY    = 40            ; frames in the wake before it counts
+SURF_PAY    = 40            ; frames in the wake before it counts...
+SURF_PAY2   = 120           ; ... and a long ride pays again
+WAKE_LEN    = 192           ; the wake runs this far astern of her
 FHALF_X     = 26            ; ferry hull half-length / half-beam (collision)
 FHALF_Y     = 12
 
@@ -144,7 +166,7 @@ s_lookx  = ev_ram + 246      ; camera lead (signed px)
 s_looky  = ev_ram + 248
 s_brg    = ev_ram + 250      ; bearing to the next mark (the yellow arrow)
 s_qhint  = ev_ram + 252      ; leg hint to show when the current popup ends
-s_irmsg  = ev_ram + 254      ; irons message on screen: 0 no, 1 left, 2 right
+s_irmsg  = ev_ram + 254      ; irons message on screen: 0 no, else the taps it asks for
 s_tx     = ev_ram + 258      ; next mark / line centre
 s_ty     = ev_ram + 260
 s_surfing = ev_ram + 264     ; in the ferry wake this frame
@@ -156,14 +178,12 @@ s_wy     = ev_ram + 278
 s_pprio  = ev_ram + 286      ; popup on screen is news (1) or just a hint (0)
 s_hgoal  = ev_ram + 288      ; the notch the bow is swinging to
 s_steer  = ev_ram + 290      ; LEFT/RIGHT touched at all this race
-s_idle   = ev_ram + 292      ; frames since the last steer input
 s_hdir   = ev_ram + 294      ; direction held last frame (pad bits)
-s_adrift = ev_ram + 296      ; race ended for want of a helmsman
+s_adrift = ev_ram + 296      ; race ended adrift: 1 going nowhere, 2 nobody steered
 s_ring   = ev_ram + 298      ; ring dot loop counter
 s_adir   = ev_ram + 320      ; the yellow arrow's notch (a tack notch on a beat)
 s_amode  = ev_ram + 322      ; arrow: 0 straight at the mark, 1 showing the tack
 s_tackcd = ev_ram + 324      ; frames before another TACK NOW
-s_close  = ev_ram + 326      ; frames since the boat last got closer to the mark
 s_burst  = ev_ram + 328      ; frames left on the ROUNDED! ring burst
 s_bmark  = ev_ram + 330      ; ... and which mark (word offset)
 s_chain  = ev_ram + 332      ; tight roundings in a row
@@ -171,9 +191,33 @@ s_wdx    = ev_ram + 334      ; water drift accumulators (8.8) and offsets
 s_wdy    = ev_ram + 336
 s_wox    = ev_ram + 338
 s_woy    = ev_ram + 340
-s_tstyle = ev_ram + 342      ; TIGHT ROUNDING points (the chain pays more)
+s_tstyle = ev_ram + 342      ; TIGHT ROUNDING points (graded, the chain pays more)
 s_tackon = ev_ram + 344      ; the arrow is asking for a tack
 s_col0   = ev_ram + 346      ; backdrop colour to put back afterwards
+s_ringi  = ev_ram + 348      ; headway ring: next slot (x2)
+s_green  = ev_ram + 352      ; the bow is on the course to steer (green diamonds)
+s_offc   = ev_ram + 354      ; frames off the course to steer
+s_coachcd = ev_ram + 356     ; frames before another coach line
+s_coachn = ev_ram + 358      ; the taps the last coach line asked for (signed notches)
+s_gtold  = ev_ram + 359      ; "GREEN DIAMONDS" has been explained
+s_tkin   = ev_ram + 360      ; tack watch: bow in the no-go (1)
+s_tkside = ev_ram + 361      ; ... the side of the wind it came in from
+s_tkmin  = ev_ram + 362      ; ... her lowest speed in there
+s_tkt    = ev_ram + 364      ; ... frames in there
+s_tacks  = ev_ram + 366      ; clean tacks paid
+s_fgo    = ev_ram + 367      ; the ferry has left Ward's
+s_fdel   = ev_ram + 368      ; frames until she does (0 = not called yet)
+s_warned = ev_ram + 370      ; ADRIFT SOON shown on this stretch
+s_lox    = ev_ram + 372      ; pointer: edge search (screen px, signed)
+s_loy    = ev_ram + 374
+s_hix    = ev_ram + 376
+s_hiy    = ev_ram + 378
+s_bufi   = ev_ram + 380      ; ... its length
+s_pend   = ev_ram + 382      ; callout to draw in the HUD's text slot: 4 wait, 1 box, 3 text, 2 clear
+s_ppal   = ev_ram + 383      ; ... its text palette
+s_pptr   = ev_ram + 384      ; ... its message (long pointer)
+s_buf    = ev_ram + 400      ; built messages (32 bytes)
+s_ringd  = ev_ram + 440      ; headway ring: distance to the mark, PROG_N words
 s_ox     = ev_ram + 280      ; spr16/spr8 scratch
 s_oy     = ev_ram + 282
 s_szbit  = ev_ram + 284
@@ -212,12 +256,17 @@ ev_sail:
     SFX SFX_HORN                ; the Island ferry horn is the start gun
     lda #SONG_SAIL
     jsl music_play
-    LDPTR0 str_start
+    lda #4                      ; then: what counts as rounding
+    sta s_qhint
+    jsr taps_to_course          ; one tap right puts her on course for mark 1
+    beq @on
+    jsr coach_leg
     lda #TP_CYAN
     ldx #150
     jsr hint
-    lda #4                      ; then: what counts as rounding
-    sta s_qhint
+    bra @loop
+@on:
+    jsr show_hint
 @loop:
     jsl wait_frame
     ; our own end comes first: once the line is crossed (or time's up, or
@@ -244,6 +293,15 @@ ev_sail:
 @quit:
     jsl music_stop
     jsr sail_score
+    ; an empty HUD panel and no callout behind the card
+    jsr pop_clear
+    ldx #$0000
+    A16
+    lda #$0420                  ; 32 x 4
+    sta tmp1
+    A8
+    lda #HUD_ATTR
+    jsl txt_box
     jsl score_card
     ; back to the usual 64x32 BG1 / BG2 maps and backdrop for the next screens
     lda #((VRAM_BG1MAP >> 8) | 1)
@@ -259,9 +317,9 @@ ev_sail:
     plb
     rtl
 
-str_start: .byte "FOLLOW THE YELLOW ARROW!", 0
-str_nudge: .byte "HELLO? STEER OR GO ADRIFT!", 0
-str_adrift: .byte "ADRIFT! NOBODY STEERING", 0
+str_nudge: .byte "HELLO? TAP ", TXT_ARROW_L + $20, " OR ", TXT_ARROW_R + $20, " TO STEER!", 0
+str_adrift: .byte "ADRIFT! GETTING NOWHERE", 0
+str_adrifth: .byte "ADRIFT! NOBODY STEERING", 0
 
 .include "evcommon.inc"
 
@@ -272,8 +330,11 @@ hint:
     pla
     jmp popup_any
 
-; ptr0 = message, A = text palette, X = frames on screen. Popups sit on the
-; window colour so they read over water, land and sprites alike.
+; ptr0 = message (28 characters at most), A = text palette, X = frames on
+; screen. Callouts sit in a solid 3-row panel (as Tallboy's do), so they read
+; over water, land and sprites alike: just under the HUD, where they hide the
+; least of the course ahead.
+CALL_ROW = 5
 popup:
     pha
     lda #1
@@ -282,12 +343,87 @@ popup:
 popup_any:
     stx s_popup
     stz s_irmsg
-    pha
+    sta s_ppal
+    ldx ptr0
+    stx s_pptr
+    lda ptr0+2
+    sta s_pptr+2
+    lda #4                      ; (the frame that asked has done enough: next one)
+    sta s_pend
+    rts
+
+; the callout (or its removal), drawn in the HUD's text slot so a frame never
+; does both: the panel one frame, the words the next
+pop_draw:
+    ldx s_pptr
+    stx ptr0
+    lda s_pptr+2
+    sta ptr0+2
+    lda s_pend
+    stz s_pend
+    cmp #4
+    bne @b
+    lda #1
+    sta s_pend
+    rts
+@b:
+    cmp #1
+    beq @box
+    cmp #3
+    beq @text
+    jmp pop_clear
+@text:
     lda #TXT_WIN
     sta txt_bg
-    pla
-    jsl event_popup
+    lda s_ppal
+    asl a
+    asl a
+    ora #$20
+    ldx #(CALL_ROW*32)
+    jsl txt_print_centre
     stz txt_bg
+    rts
+@box:
+    lda #3                      ; the words next frame
+    sta s_pend
+    jsr pop_clear
+    ldy #$0000
+@len:
+    lda [ptr0],y
+    beq @got
+    iny
+    bra @len
+@got:
+    tya
+    clc
+    adc #4
+    sta tmp1
+    lda #3
+    sta tmp1+1
+    lda #32
+    sec
+    sbc tmp1
+    lsr a
+    A16
+    and #$00FF
+    clc
+    adc #(CALL_ROW*32 - 32)
+    tax
+    A8
+    lda #$20
+    jsl txt_box
+    rts
+
+; blank the callout panel
+pop_clear:
+    ldx #(CALL_ROW*32 - 32)
+    A16
+    lda #$0320
+    sta tmp1
+    A8
+    stz tmp2
+    lda #$20
+    jsl txt_fill
     rts
 
 sail_init:
@@ -336,12 +472,12 @@ sail_init:
     stx s_fx
     ldx #$FFFF
     stx s_ferryd
-    ldx #30                     ; westbound runs leave Ward's at ~0.5, 17, 33.5, 50 s
+    ldx #1                      ; (docked until mark 2 is rounded)
     stx s_fwait
     ldx #240                    ; let the start hint have the screen
     stx s_hintcd
-    lda #$30                    ; pointing at mark 1 (as the arrow does): a close reach
-    sta s_head
+    lda #$40                    ; due east, a beam reach: one tap right is mark 1. Left
+    sta s_head                  ; alone she passes well north of its ring (no free mark)
     sta s_hgoal
     ldx #$0060
     stx s_speed
@@ -415,7 +551,7 @@ sail_init:
 
 float_init:
     .word 0, 0, 0, 100, 420            ; x (geese: set from the marks)
-    .word 0, 0, 0, 176, 316            ; y (clear of the marks and the line)
+    .word 0, 0, 0, 176, 236            ; y (clear of the marks, the start and the line)
 float_kind:
     .word 0, 0, 0, 1, 2                ; 0 goose, 1/2 kayak east/west
 rip_init:
@@ -464,7 +600,16 @@ leg_start:
 @b:
     sta s_legd
     sta s_bestd
+    lda #$7FFF                  ; a new leg: ten seconds' grace (no history)
+    ldx #(PROG_N*2 - 2)
+@r:
+    sta s_ringd,x
+    dex
+    dex
+    bpl @r
+    stz s_warned
     A8
+    stz s_ringi
     rts
 
 ; A16 = rough distance from the boat to s_tx/s_ty (max + 3/8 min). Returns A16.
@@ -654,9 +799,11 @@ sail_update:
 @sail:
     jsr steer
     jsr aim_arrow
+    jsr coach
     jsr wind_and_gusts
     jsr boat_speed
     jsr irons
+    jsr tack_watch
 @run:
     jsr move_boat
     jsr camera
@@ -673,7 +820,8 @@ sail_update:
     dec s_popup
     bne @p
     A8
-    jsl event_popup_clear
+    lda #2
+    sta s_pend
     stz s_irmsg
     lda s_qhint
     beq @p8
@@ -713,6 +861,11 @@ str_timeup: .byte "OUT OF TIME!", 0
 show_hint:
     lda s_qhint
     stz s_qhint
+    cmp #3                      ; after mark 3: the ferry, then the line
+    bne @h
+    ldx #5
+    stx s_qhint
+@h:
     dec a
     asl a
     TAXB
@@ -726,10 +879,11 @@ show_hint:
     ldx #150
     jmp hint
 
-hint_lo: .addr str_leg2, str_leg3, str_leg4, str_ring
+hint_lo: .addr str_leg2, str_leg3, str_fgo, str_ring, str_leg4
 str_leg2: .byte "MARK 2 IS UPWIND: ZIG-ZAG!", 0
 str_leg3: .byte "RUN DOWNWIND TO MARK 3!", 0
 str_leg4: .byte "ALL 3! NOW CROSS THE LINE!", 0
+str_fgo:  .byte "FERRY'S OFF! SURF HER WAKE!", 0
 str_ring: .byte "SAIL INTO THE DOTTED RING!", 0
 
 ; notched steering: a tap turns the goal one notch (one boat frame); held, it
@@ -744,26 +898,26 @@ steer:
     bne @held
     stz s_hold
     stz s_hdir
+    ; hands off is fine (a good line is held, not steered); only a helm that
+    ; has never been touched at all ends the race
+    lda s_steer
+    bne @turn
     A16
-    ; hands off but closing on the mark: she's sailing fine, nobody's idle
-    lda s_close
-    cmp #CLOSE_T
-    bcc @nw
-    inc s_idle
-    lda s_idle
-    cmp #IDLE_WARN
-    bne @nw
+    lda s_tick
+    cmp #HELM_WARN
+    bne @hc
     A8
     LDPTR0 str_nudge
     lda #TP_YELLOW
-    ldx #120
-    jsr hint
-    A16
-@nw:
-    lda s_idle
-    cmp #IDLE_CUT
+    ldx #150
+    jsr popup
+    bra @turn
+@hc:
+    .a16
+    cmp #HELM_CUT
     A8
     bcc @turn
+    lda #2
     jsr adrift
     bra @turn
 @held:
@@ -775,8 +929,6 @@ steer:
     sta s_cur2                  ; this frame's direction bits (>PAD_LEFT, >PAD_RIGHT)
     lda #1
     sta s_steer
-    ldx #$0000
-    stx s_idle
     lda s_cur2
     cmp s_hdir                  ; changed hands: a fresh press
     beq @same
@@ -848,9 +1000,9 @@ notch:
     sta s_hgoal
     rts
 
-; nobody at the helm for IDLE_CUT frames: the race is over
+; A = 1: ten seconds getting no closer to the mark; 2: nobody ever steered.
+; The race is over.
 adrift:
-    lda #1
     sta s_adrift
     lda #ST_FINISH
     sta s_state
@@ -858,10 +1010,223 @@ adrift:
     stx s_timer
     stz s_qhint
     SFX SFX_HORN
+    lda s_adrift
+    cmp #2
+    beq @h
     LDPTR0 str_adrift
+    bra @p
+@h:
+    LDPTR0 str_adrifth
+@p:
     lda #TP_RED
     ldx #300
     jmp popup
+
+; ------------------------------------------------------------------
+; Coaching. s_adir is the course to steer (aim_arrow); the bow diamonds turn
+; green on it, and off it for a while the coach says how many taps.
+
+; -> A8 = taps from the bow's notch to the course to steer, signed (+ = right),
+; the short way round; Z set if none
+taps_to_course:
+    lda s_adir
+    sec
+    sbc s_hgoal
+    clc
+    adc #(NOTCH / 2)
+    cmp #$80
+    ror a
+    cmp #$80
+    ror a
+    cmp #$80
+    ror a
+    cmp #$80
+    ror a
+    cmp #$00
+    rts
+
+; every frame while racing: green diamonds, and the coach line
+coach:
+    A16
+    lda s_coachcd
+    beq @cd
+    dec s_coachcd
+@cd:
+    A8
+    stz s_green
+    lda s_adir
+    cmp s_hgoal
+    bne @off
+    inc s_green
+    ldx #$0000
+    stx s_offc
+    lda s_gtold                 ; the first time: what green means
+    bne @x
+    lda s_pprio                 ; (news has the screen: tell them later)
+    beq @tell
+    ldx s_popup
+    bne @x
+@tell:
+    inc s_gtold
+    LDPTR0 str_green
+    lda #TP_GREEN
+    ldx #120
+    jmp hint
+@off:
+    A16
+    inc s_offc
+    lda s_offc
+    cmp #COACH_OFF
+    bcc @x16
+    lda s_popup
+    ora s_coachcd
+    bne @x16
+    lda #COACH_CD
+    sta s_coachcd
+    A8
+    lda s_irons                 ; IN IRONS says it already
+    cmp #12
+    bcs @x
+    jsr taps_to_course
+    beq @x
+    jsr coach_leg
+    lda #TP_CYAN
+    ldx #150
+    jmp hint
+@x16:
+    A8
+@x:
+    rts
+
+str_green: .byte "GREEN DIAMONDS: ON COURSE!", 0
+
+; message buffer: s_buf, s_bufi = length
+buf_new:
+    ldx #$0000
+    stx s_bufi
+    stz s_buf
+    rts
+
+; A8 -> appended
+putc:
+    ldx s_bufi
+    sta s_buf,x
+    inx
+    stx s_bufi
+    stz s_buf,x
+    rts
+
+; ptr1 = string -> appended
+cat:
+    ldy #$0000
+@l:
+    lda [ptr1],y
+    beq @x
+    phy
+    jsr putc
+    ply
+    iny
+    bra @l
+@x:
+    rts
+
+; tmp0 = n (< 10000) -> its digits appended
+catnum:
+    lda #$FF
+    pha
+@d:
+    lda #10
+    jsl div16
+    ora #'0'
+    pha
+    ldx tmp0
+    bne @d
+@p:
+    pla
+    cmp #$FF
+    beq @x
+    jsr putc
+    bra @p
+@x:
+    rts
+
+; ptr0 = the buffer
+buf_ptr:
+    A16
+    lda #.loword(s_buf)
+    sta ptr0
+    A8
+    lda #^s_buf
+    sta ptr0+2
+    rts
+
+; A = signed taps (not 0), ptr1 = prefix -> ptr0 = "<prefix>TAP < 2 TIMES"
+coach_pre:
+    pha
+    jsr buf_new
+    jsr cat
+    pla
+    bra taps_text
+
+; A = signed taps (not 0) -> ptr0 = "TO MARK 2: TAP < 2 TIMES" (or TO THE LINE)
+coach_leg:
+    pha
+    jsr buf_new
+    lda s_mark
+    cmp #3
+    bcs @line
+    LDPTR1 str_tomark
+    jsr cat
+    lda s_mark
+    clc
+    adc #'1'
+    jsr putc
+    lda #':'
+    jsr putc
+    lda #' '
+    jsr putc
+    bra @t
+@line:
+    LDPTR1 str_toline
+    jsr cat
+@t:
+    pla
+; A = signed taps (not 0) -> "TAP < 2 TIMES" / "TAP > ONCE" appended, ptr0 = buffer
+taps_text:
+    sta s_coachn
+    LDPTR1 str_tap
+    jsr cat
+    lda s_coachn
+    bmi @l
+    lda #(TXT_ARROW_R + $20)
+    bra @d
+@l:
+    lda #(TXT_ARROW_L + $20)
+@d:
+    jsr putc
+    lda s_coachn
+    jsr abs8
+    cmp #1
+    bne @n
+    LDPTR1 str_once
+    bra @c
+@n:
+    ora #'0'
+    pha
+    lda #' '
+    jsr putc
+    pla
+    jsr putc
+    LDPTR1 str_times
+@c:
+    jsr cat
+    jmp buf_ptr
+
+str_tomark: .byte "TO MARK ", 0
+str_toline: .byte "TO THE LINE: ", 0
+str_tap:    .byte "TAP ", 0
+str_once:   .byte " ONCE", 0
+str_times:  .byte " TIMES", 0
 
 ; The yellow arrow. Off the wind it points at the next mark. When the mark is
 ; (nearly) dead upwind you can't sail at it, so the arrow shows the course
@@ -972,15 +1337,12 @@ aim_arrow:
     lda #120
     sta s_tackcd
     SFX SFX_BLIP
-    lda tmp1
-    bmi @tr
-    LDPTR0 str_tackl
-    bra @tp
-@tr:
-    LDPTR0 str_tackr
-@tp:
+    LDPTR1 str_tack
+    jsr taps_to_course
+    beq @x
+    jsr coach_pre
     lda #TP_YELLOW
-    ldx #90
+    ldx #120
     jsr popup
 @x:
     lda s_tackcd
@@ -989,8 +1351,7 @@ aim_arrow:
 @r:
     rts
 
-str_tackl: .byte TXT_ARROW_L + $20, TXT_ARROW_L + $20, " TACK NOW! STEER LEFT", 0
-str_tackr: .byte "TACK NOW! STEER RIGHT ", TXT_ARROW_R + $20, TXT_ARROW_R + $20, 0
+str_tack:  .byte "TACK NOW! ", 0
 
 ; A8 = signed angle -> |A|
 abs8:
@@ -1175,7 +1536,7 @@ boat_speed:
     rts
 
 polar_tab:
-    .byte 0, 0, 0, 0, 0, 0, 0, 100, 150, 180, 198, 210, 218, 224, 229, 234
+    .byte 0, 0, 0, 0, 0, 0, 0, 100, 170, 192, 204, 212, 218, 224, 229, 234
     .byte 238, 244, 248, 252, 255, 255, 253, 250, 244, 236, 226, 216, 206, 198, 192, 188, 186
 
 ; stalled head-to-wind: say which way to steer and keep saying it until
@@ -1212,7 +1573,10 @@ irons:
     bcc @msg
     lda #12                     ; (keeps the message up)
     sta s_irons
+    jsr taps_to_course          ; toward the course to steer (it may finish a tack)
+    bne @fd
     lda s_tmp
+@fd:
     bmi @fl
     lda s_hgoal
     clc
@@ -1229,13 +1593,8 @@ irons:
     lda s_irons
     cmp #12
     bcc @x
-    lda s_tmp
-    bmi @wl
-    lda #2
-    bra @want
-@wl:
-    lda #1
-@want:
+    jsr taps_to_course
+    beq @x
     cmp s_irmsg
     beq @keep
     sta s_cur2
@@ -1249,14 +1608,9 @@ irons:
     bcs @x
 @say:
     SFX SFX_BLIP
+    LDPTR1 str_irons
     lda s_cur2
-    cmp #1
-    beq @pl
-    LDPTR0 str_ironsr
-    bra @pp
-@pl:
-    LDPTR0 str_ironsl
-@pp:
+    jsr coach_pre
     lda #TP_RED
     ldx #20
     jsr popup
@@ -1271,8 +1625,71 @@ irons:
     stz s_irons
     rts
 
-str_ironsr: .byte "IN IRONS! STEER RIGHT ", TXT_ARROW_R + $20, TXT_ARROW_R + $20, 0
-str_ironsl: .byte TXT_ARROW_L + $20, TXT_ARROW_L + $20, " STEER LEFT! IN IRONS!", 0
+str_irons: .byte "IN IRONS! ", 0
+
+; CLEAN TACK: on the beat to mark 2, the bow crosses the no-go from one side
+; of the wind to the other quickly and she never stalls. The first 3 pay.
+tack_watch:
+    lda s_head
+    sec
+    sbc s_wind
+    sta tmp0                    ; signed angle off the wind
+    jsr abs8
+    cmp #NOGO
+    bcs @out
+    lda s_tkin
+    bne @in
+    inc s_tkin
+    lda tmp0
+    sta s_tkside
+    ldx s_speed
+    stx s_tkmin
+    ldx #$0000
+    stx s_tkt
+    rts
+@in:
+    A16
+    inc s_tkt
+    lda s_speed
+    cmp s_tkmin
+    bcs @m
+    sta s_tkmin
+@m:
+    A8
+    rts
+@out:
+    lda s_tkin
+    beq @x
+    stz s_tkin
+    lda tmp0
+    eor s_tkside
+    bpl @x                      ; out the side it went in: no tack
+    lda s_mark
+    cmp #1
+    bne @x
+    lda s_tacks
+    cmp #TACK_MAX
+    bcs @x
+    A16
+    lda s_tkt
+    cmp #TACK_MAXT
+    bcs @x16
+    lda s_tkmin
+    cmp #TACK_MINSPD
+    bcc @x16
+    A8
+    inc s_tacks
+    SFX SFX_COIN
+    LDPTR0 str_ctack
+    lda #TP_GREEN
+    ldx #60
+    jmp popup
+@x16:
+    A8
+@x:
+    rts
+
+str_ctack: .byte "CLEAN TACK! +100", 0
 
 ; position += heading * speed. Land stops you: slide along it if you can,
 ; otherwise you're aground, and the crew pushes off after a moment. The
@@ -1461,14 +1878,24 @@ move_boat:
 @q:
     rts
 
-str_aground: .byte "AGROUND!", 0
+str_aground: .byte "AGROUND! -2 S", 0
 str_pushoff: .byte "PUSHED OFF! SAIL ON!", 0
 
-; a bump: counts against the score and spoils a rounding in progress
+; a bump: 2 seconds off the clock (said on every bump popup), and it
+; spoils a rounding in progress
 bump:
     inc s_bumps
     lda #1
     sta s_rbad
+    A16
+    lda s_time
+    sec
+    sbc #BUMP_T
+    bcs @t
+    lda #$0000
+@t:
+    sta s_time
+    A8
     rts
 
 ; A16: carry set if the boat at tmp6/tmp7 (middle) or its bow is on land
@@ -1863,6 +2290,28 @@ bit_mask: .byte $80, $40, $20, $10, $08, $04, $02, $01
 ; the Island ferry runs crosswind along the Islands, Ward's <-> Hanlan's, and
 ; waits at each pier
 ferry:
+    lda s_fgo
+    bne @sched
+    ; she waits at Ward's until the race comes round mark 3 (just up the
+    ; harbour from her), then leaves on the horn: dip south into her wake
+    lda s_mark
+    cmp #3
+    bcc @held
+    A16
+    inc s_fdel
+    lda s_fdel
+    cmp #FERRY_LEAD
+    A8
+    bcc @held
+    lda #1
+    sta s_fgo
+    ldx #$0000
+    stx s_fwait
+    SFX SFX_HORN
+@held:
+    A16
+    bra @hit
+@sched:
     A16
     lda s_fwait
     beq @move
@@ -1951,7 +2400,7 @@ ferry:
     A8
     rts
 
-str_ferry: .byte "WATCH THE FERRY!", 0
+str_ferry: .byte "WATCH THE FERRY! -2 S", 0
 
 ; FERRY SURF: steer into the wake astern of the moving ferry and ride it her
 ; way under sail (not stalled, not stuck) for SURF_PAY frames. Pays once per
@@ -1984,7 +2433,7 @@ surf:
 @w:
     cmp #(FHALF_X + 2)
     bmi @off
-    cmp #84
+    cmp #WAKE_LEN
     bpl @off
     A8
     ; heading within 32 of hers (64 east, 192 west)
@@ -2009,18 +2458,24 @@ surf:
     inc s_surft
     lda s_surft
     cmp #SURF_PAY
+    beq @pay
+    cmp #SURF_PAY2
     A8
     bne @x
-    lda s_surfok
+    lda s_surf                  ; a long ride pays again
+    cmp #1
     bne @x
-    lda s_surf
-    cmp #SURF_MAX
-    bcs @x
-    inc s_surf
-    lda #1
-    sta s_surfok
+    SFX SFX_COIN
+    LDPTR0 str_surf2
+    bra @p
+@pay:
+    A8
+    lda s_surf                  ; (she crosses once while you race: one ride pays)
+    bne @x
     SFX SFX_COIN
     LDPTR0 str_surf
+@p:
+    inc s_surf
     lda #TP_GREEN
     ldx #70
     jsr popup
@@ -2033,7 +2488,8 @@ surf:
     stx s_surft
     rts
 
-str_surf: .byte "FERRY SURF! +200", 0
+str_surf:  .byte "FERRY SURF! +200", 0
+str_surf2: .byte "LONG SURF! +200 MORE", 0
 
 floats:
     ; geese paddle slow circles round the marks
@@ -2171,8 +2627,8 @@ floats:
     jne @f
     rts
 
-str_honk:  .byte "HONK! HONK! GOOSED!", 0
-str_sorry: .byte "EASY! IT'S A RENTAL!", 0
+str_honk:  .byte "HONK! HONK! GOOSED! -2 S", 0
+str_sorry: .byte "EASY! IT'S A RENTAL! -2 S", 0
 
 ; flecks drift downwind (twice as fast in a gust, when they become dark
 ; cat's-paw ripples); they live in world space and wrap around the view
@@ -2292,19 +2748,94 @@ marks:
     cmp s_bestd
     bcs @far
     sta s_bestd
-    stz s_close
-    bra @near
 @far:
-    lda s_close
-    cmp #$00FF
-    bcs @near
-    inc s_close
+    ; headway, sampled every PROG_EVERY frames into a 10-sample ring (~10 s).
+    ; ADRIFT = no closer than ten seconds ago AND not closing right now,
+    ; whatever the hands are doing; five seconds of that is the warning
+    lda s_tick
+    and #(PROG_EVERY - 1)
+    jne @near
+    lda s_ringi
+    and #$00FF
+    tax                         ; the oldest sample (10 back)
+    sec
+    sbc #2
+    bpl @pv
+    lda #(PROG_N*2 - 2)
+@pv:
+    tay                         ; the last one
+    lda s_tmp
+    clc
+    adc #PROG_MIN
+    cmp s_ringd,y
+    bcc @fine                   ; closing now
+    beq @fine
+    lda s_tmp
+    clc
+    adc #PROG_NET
+    cmp s_ringd,x
+    bcs @nonet
+    ; net headway over ten seconds; over the last five?
+    txa
+    clc
+    adc #PROG_N
+    cmp #(PROG_N*2)
+    bcc @md
+    sbc #(PROG_N*2)
+@md:
+    tay
+    lda s_tmp
+    clc
+    adc #PROG_NET
+    cmp s_ringd,y
+    bcc @fine
+    bra @warn
+@nonet:
+    lda s_tmp                   ; ten seconds, no closer, not closing: over
+    sta s_ringd,x
+    A8
+    lda #1
+    jmp adrift
+@fine:
+    .a16
+    stz s_warned
+    bra @store
+@warn:
+    .a16
+    lda s_tmp
+    sta s_ringd,x
+    jsr ring_next
+    A8
+    lda s_warned
+    bne @near8
+    inc s_warned
+    jsr taps_to_course
+    beq @w0
+    pha
+    LDPTR1 str_soon
+    pla
+    jsr coach_pre
+    bra @wp
+@w0:
+    LDPTR0 str_soon0
+@wp:
+    lda #TP_YELLOW
+    ldx #150
+    jmp popup
+@store:
+    lda s_tmp
+    sta s_ringd,x
+    jsr ring_next
 @near:
     A8
+@near8:
     lda s_mark
     cmp #3
     jcs @line
-    ; inside the ring drawn round the mark: rounded
+    ; inside the ring drawn round the mark: rounded (by a boat somebody's
+    ; steering: a drifting one goes through)
+    lda s_steer
+    jeq @x8
     A16
     lda s_tmp
     cmp #ROUND_R
@@ -2379,14 +2910,35 @@ marks:
     rts
 @x16:
     A8
+@x8:
     rts
+
+; (A16) the ring's next slot
+ring_next:
+    .a16
+    lda s_ringi
+    and #$00FF
+    inc a
+    inc a
+    cmp #(PROG_N*2)
+    bcc @s
+    lda #$0000
+@s:
+    A8
+    sta s_ringi
+    A16
+    rts
+.a8
+
+str_soon:  .byte "ADRIFT SOON! ", 0
+str_soon0: .byte "NO HEADWAY! ADRIFT SOON!", 0
 
 round_lo: .addr str_round1, str_round2, str_round3
 str_round1: .byte "MARK 1 ROUNDED!", 0
 str_round2: .byte "MARK 2 ROUNDED!", 0
 str_round3: .byte "MARK 3 ROUNDED!", 0
-str_finish:  .byte "LINE HONOURS!", 0
-str_clean:   .byte "LINE HONOURS! CLEAN! +300", 0
+str_finish:  .byte "ACROSS THE LINE!", 0
+str_clean:   .byte "LINE HONOURS! NO BUMPS +300", 0
 
 ; TIGHT ROUNDING: after you enter a mark's zone, watch how close you pass;
 ; touch the buoy (or anything else) and it doesn't count
@@ -2414,11 +2966,28 @@ judge:
     eor #$FFFF
     inc a
 @b:
+    ; rough distance (max + 3/8 min): the same any way you pass it
     cmp tmp0
-    bcs @mx
+    bcs @ymax
+    pha
     lda tmp0
-@mx:
-    sta tmp1                    ; box distance to the buoy
+    sta tmp1
+    pla
+    sta tmp0
+    bra @r
+@ymax:
+    sta tmp1                    ; tmp1 = the larger, tmp0 = the smaller
+@r:
+    lda tmp0
+    lsr a
+    lsr a
+    sta tmp0
+    lsr a
+    clc
+    adc tmp0
+    clc
+    adc tmp1
+    sta tmp1                    ; distance to the buoy
     cmp s_rmin
     bcs @nm
     sta s_rmin
@@ -2468,29 +3037,57 @@ judge:
     stz s_chain                 ; a wide (or messy) rounding breaks the chain
     rts
 @tight:
-    ; tight roundings in a row pay 400, 800, 1200
+    ; graded by how close you passed (10 at TIGHT_R .. 500 brushing the
+    ; buoy), times the number in a row (X2, X3)
     inc s_tight
     inc s_chain
-    lda s_chain
-    ldx #(PTS_TIGHT / 2)        ; (mulc takes k < 256)
-    jsr mulc
-    .a16
+    lda s_rmin
+    sec
+    sbc #TOUCH_R
     asl a
+    TAXB
+    A16
+    lda f:tight_tab,x
+    sta tmp2
+    stz tmp0
+    A8
+    lda s_chain
+    TAXB
+@mul:
+    A16
+    lda tmp0
+    clc
+    adc tmp2
+    sta tmp0
+    A8
+    dex
+    bne @mul
+    A16
+    lda tmp0
     clc
     adc s_tstyle
     sta s_tstyle
     A8
     SFX SFX_COIN
+    jsr buf_new
     lda s_chain
-    dec a
-    asl a
-    TAXB
-    A16
-    lda f:tight_lo,x
-    sta ptr0
-    A8
-    lda #^str_tight
-    sta ptr0+2
+    cmp #2
+    bcc @t1
+    ora #'0'
+    pha
+    jsr putc
+    LDPTR1 str_tight2
+    jsr cat
+    pla
+    jsr putc
+    LDPTR1 str_plus
+    bra @tc
+@t1:
+    LDPTR1 str_tight
+@tc:
+    jsr cat
+    jsr catnum
+    jsr buf_ptr
     lda #TP_GREEN
     ldx #70
     jsr popup
@@ -2501,11 +3098,12 @@ judge:
 @x:
     rts
 
-tight_lo:  .addr str_tight, str_tight2, str_tight3
-str_tight: .byte "TIGHT ROUNDING! +400", 0
-str_tight2: .byte "2 TIGHT IN A ROW! +800", 0
-str_tight3: .byte "3 TIGHT IN A ROW! +1200", 0
-str_touch: .byte "TOUCHED THE MARK!", 0
+str_tight:  .byte "TIGHT ROUNDING! +", 0
+str_tight2: .byte " TIGHT IN A ROW! X", 0
+str_plus:   .byte " +", 0
+; TIGHT ROUNDING points by the closest pass, TOUCH_R .. TIGHT_R px
+tight_tab:  .word 500, 400, 310, 240, 180, 130, 90, 60, 40, 20, 10
+str_touch: .byte "TOUCHED THE MARK! -2 S", 0
 
 ; foam puffs dropped off the stern, fading where they fell
 wake_update:
@@ -2930,6 +3528,10 @@ draw_bowline:
     jsr polar
     jsr boat_rel
     ldx #MS_HDOT_BASE
+    lda s_green                 ; on the course to steer: green
+    beq @w
+    ldx #MS_HDOTG_BASE
+@w:
     stx tmp6
     lda #$22
     sta tmp5
@@ -2937,14 +3539,165 @@ draw_bowline:
 @x:
     rts
 
-; the yellow arrow round the boat (16 directions; aim_arrow picks it)
+; WHERE TO GO: the yellow arrow marks the next mark (or the middle of the
+; line). On screen it bobs straight above it, pointing down at it, like a map
+; pin; off screen it sits at the screen edge, pointing the way. It is never
+; drawn by the bow (that's where the heading diamonds are).
+PT_X0 = 12                  ; it stays inside this box on screen
+PT_X1 = 244
+PT_Y0 = 66                  ; (clear of the HUD and the callout panel under it)
+PT_Y1 = 212
 draw_pointer:
     lda s_state
     cmp #ST_SAIL
     beq @go
     rts
 @go:
-    lda s_adir
+    A16
+    lda s_tx
+    sec
+    sbc s_x
+    sta tmp2
+    lda s_ty
+    sec
+    sbc s_y
+    sta tmp3
+    A8
+    jsr bearing
+    sta s_pang
+    ; the mark on screen, and the boat
+    A16
+    lda s_tx
+    sec
+    sbc s_camx
+    sta s_hix
+    lda s_ty
+    sec
+    sbc s_camy
+    sta s_hiy
+    lda s_x
+    sec
+    sbc s_camx
+    sta s_lox
+    lda s_y
+    sec
+    sbc s_camy
+    sta s_loy
+    ; the mark in view: a pin over it (under it, pointing up, when the
+    ; panels at the top would hide it)
+    A16
+    lda s_hix
+    cmp #8
+    bcc @edge16
+    cmp #248
+    bcs @edge16
+    lda s_hiy
+    cmp #36
+    bcc @edge16
+    cmp #216
+    bcs @edge16
+    lda s_hix
+    sta spr_x
+    A8
+    lda s_tick
+    lsr a
+    lsr a
+    lsr a
+    and #$03
+    A16
+    and #$00FF
+    sta tmp0
+    lda s_hiy
+    sec
+    sbc #30
+    sec
+    sbc tmp0
+    cmp #PT_Y0
+    bcc @under
+    sta spr_y
+    A8
+    lda #$80                    ; (pointing down)
+    sta s_pang
+    jmp @draw
+@under:
+    .a16
+    lda s_hiy
+    clc
+    adc #22
+    clc
+    adc tmp0
+    sta spr_y
+    A8
+    stz s_pang                  ; (pointing up)
+    bra @draw
+@edge16:
+    A8
+@edge:
+    ; off screen: walk the line from the boat (inside) to the mark (outside)
+    ; to the box's edge
+    ldx #7
+@bs:
+    phx
+    A16
+    lda s_lox
+    clc
+    adc s_hix
+    cmp #$8000
+    ror a
+    sta spr_x
+    lda s_loy
+    clc
+    adc s_hiy
+    cmp #$8000
+    ror a
+    sta spr_y
+    A8
+    lda #0
+    jsr pt_inside
+    A16
+    bcc @out
+    lda spr_x
+    sta s_lox
+    lda spr_y
+    sta s_loy
+    bra @nx
+@out:
+    lda spr_x
+    sta s_hix
+    lda spr_y
+    sta s_hiy
+@nx:
+    A8
+    plx
+    dex
+    bne @bs
+    A16
+    lda s_lox
+    sta spr_x
+    lda s_loy
+    sta spr_y
+    A8
+    ; bob toward the mark, 0-3 px
+    lda s_tick
+    lsr a
+    lsr a
+    lsr a
+    and #$03
+    sta s_rad
+    lda s_pang
+    jsr polar
+    A16
+    lda spr_x
+    clc
+    adc s_px
+    sta spr_x
+    lda spr_y
+    clc
+    adc s_py
+    sta spr_y
+    A8
+@draw:
+    lda s_pang
     clc
     adc #8
     lsr a
@@ -2957,14 +3710,40 @@ draw_pointer:
     lda f:arrow_base,x
     sta tmp6
     A8
-    lda #36
-    sta s_rad
-    lda s_adir
-    jsr polar
-    jsr boat_rel
     lda #$28
     sta tmp5
     jmp spr16
+
+; A = 1: is the mark (s_hix/s_hiy) inside the box? 0: is spr_x/spr_y?
+; Carry set = yes.
+pt_inside:
+    A16
+    beq @spr
+    ldx s_hiy
+    lda s_hix
+    bra @t
+@spr:
+    ldx spr_y
+    lda spr_x
+@t:
+    bmi @no
+    cmp #PT_X0
+    bcc @no
+    cmp #PT_X1
+    bcs @no
+    txa
+    bmi @no
+    cmp #PT_Y0
+    bcc @no
+    cmp #PT_Y1
+    bcs @no
+    A8
+    sec
+    rts
+@no:
+    A8
+    clc
+    rts
 
 arrow_base: .word MS_ARROW0_BASE, MS_ARROW1_BASE, MS_ARROW2_BASE, MS_ARROW3_BASE
             .word MS_ARROW4_BASE, MS_ARROW5_BASE, MS_ARROW6_BASE, MS_ARROW7_BASE
@@ -3203,7 +3982,7 @@ draw_ferry:
     sta tmp1
     jsr to_screen
     A8
-    bcs @x
+    jcs @x
     lda #$24
     sta tmp5
     stz tmp5+1
@@ -3214,7 +3993,7 @@ draw_ferry:
     A16
     lda s_fwait
     A8
-    bne @x
+    jne @x
     A16
     lda s_ferryd
     bmi @west
@@ -3246,6 +4025,58 @@ draw_ferry:
 @wd:
     stx tmp6
     jsl oam_meta
+    ; and the long wake you can surf: foam astern of her, WAKE_LEN deep
+    ldx #56
+@fm:
+    stx s_cur
+    A16
+    lda s_ferryd
+    bmi @fe
+    lda s_fx
+    sec
+    sbc s_cur
+    bra @fs
+@fe:
+    lda s_fx
+    clc
+    adc s_cur
+@fs:
+    sta tmp0
+    lda s_cur
+    and #$0020
+    beq @fu
+    lda #(FERRY_Y + 3)
+    bra @fy
+@fu:
+    lda #(FERRY_Y - 3)
+@fy:
+    sta tmp1
+    jsr to_screen
+    A8
+    bcs @fn
+    lda s_tick
+    clc
+    adc s_cur
+    and #$10
+    beq @f0
+    ldx #MS_FOAM1_BASE
+    bra @fd
+@f0:
+    ldx #MS_FOAM0_BASE
+@fd:
+    stx tmp6
+    lda #$22
+    sta tmp5
+    jsr spr16
+@fn:
+    A16
+    lda s_cur
+    clc
+    adc #32
+    tax
+    A8
+    cpx #WAKE_LEN
+    bcc @fm
 @x:
     rts
 
@@ -3429,9 +4260,11 @@ hi_tab:
 
 ; ------------------------------------------------------------------
 ; HUD on a window panel across the top (rows 0-3), one line of text:
-;   TIME 75  MARK 1/3  SPD [meter]  (wind vane, 2x2)
+;   TIME 75  TO MARK 2  SPD [meter]  (wind vane, 2x2)
 ; BG3 is on top in mode 1, so the panel also hides any sprite under it.
 sail_hud:
+    lda s_pend                  ; a callout takes this frame's text time
+    jne pop_draw
     lda s_tick
     and #$03
     beq hud_draw
@@ -3482,7 +4315,7 @@ hud_draw:
     inc a
     sta tmp1
     stz tmp1+1
-    ldx #(1*32 + 14)
+    ldx #(1*32 + 17)
     ldy #1
     lda #(HUD_ATTR | (TP_GREEN << 2))
     jsl txt_num
@@ -3497,7 +4330,7 @@ hud_draw:
     ; the meter's label says what's driving you: SPD, GUST (hold A!), HIKE, SURF
     lda s_surfing
     beq @nsurf
-    PRINT 18, 1, TP_GREEN, str_surfl
+    PRINT 19, 1, TP_GREEN, str_surfl
     bra @meter
 @nsurf:
     A16
@@ -3509,13 +4342,13 @@ hud_draw:
     lda s_tick
     and #$10
     beq @calm
-    PRINT 18, 1, TP_CYAN, str_gustl
+    PRINT 19, 1, TP_CYAN, str_gustl
     bra @meter
 @hiking:
-    PRINT 18, 1, TP_GREEN, str_hikel
+    PRINT 19, 1, TP_GREEN, str_hikel
     bra @meter
 @calm:
-    PRINT 18, 1, TP_WHITE, str_spd
+    PRINT 19, 1, TP_WHITE, str_spd
 @meter:
     stz txt_bg
     rts
@@ -3552,14 +4385,14 @@ hud_meter:
     A16
     txa
     clc
-    adc #(1*32 + 22)
+    adc #(1*32 + 23)
     tax
     A8
     lda #(HUD_ATTR | (TP_CYAN << 2))
     jsl txt_char
     plx
     inx
-    cpx #5
+    cpx #4
     bne @cell
     ; wind vane (points where the wind blows), redrawn when it turns
     lda s_wind
@@ -3598,9 +4431,9 @@ hud_meter:
     rts
 
 str_time:   .byte "TIME", 0
-str_mark:   .byte "MARK  /3", 0
-str_line:   .byte "TO LINE!", 0
-str_done:   .byte "FINISHED", 0
+str_mark:   .byte "TO MARK", 0
+str_line:   .byte "TO LINE! ", 0
+str_done:   .byte "FINISHED ", 0
 str_spd:    .byte "SPD ", 0
 str_gustl:  .byte "GUST", 0
 str_hikel:  .byte "HIKE", 0
@@ -3608,13 +4441,13 @@ str_surfl:  .byte "SURF", 0
 str_windl:  .byte "WIND", 0
 
 ; ------------------------------------------------------------------
-; finish: base = 250 per leg (1000) + 25 per second left, bonus = style
-; (tight roundings in a row 400/800/1200, 200 per ferry surf, 300 for not a
-; single bump), penalty = 50 per bump, but never below 1000. Didn't finish
-; (out of time, adrift, gave up): base = 250 per leg done + up to 249 for
-; progress on the next one, at most 999, so any finish beats any DNF; style
-; only pays at the line; penalty = 50 per bump, never below 0. Never
-; steered: 0.
+; finish: base = 250 per leg (1000) + 25 per second left (bumps took 2 s
+; each off the clock), bonus = style (graded tight roundings, clean tacks,
+; ferry surf, 300 for not a single bump). Didn't finish (out of time, adrift,
+; gave up): base = 250 per mark rounded + up to 249 for the part of the next
+; leg sailed, at most 999, so any finish beats any DNF; style only pays at
+; the line. Never steered: 0. The penalty word is always 0 (nothing is taken
+; off: bumps cost time, so trying never scores below sitting still).
 ; ev_stat: time left, marks rounded, bumps, style points
 ; ev_break: base, bonus, penalty (base + bonus - penalty = ev_score)
 sail_score:
@@ -3648,9 +4481,13 @@ sail_score:
     lda s_mark
     cmp #4
     jcc @dnf
-    ; style
-    A16
-    lda s_tstyle
+    ; style: roundings, tacks, surf, a clean race
+    lda s_tacks
+    ldx #PTS_TACK
+    jsr mulc
+    .a16
+    clc
+    adc s_tstyle
     sta ev_stat+6
     A8
     lda s_surf
@@ -3675,27 +4512,8 @@ sail_score:
     clc
     adc #FINISH_MIN
     sta ev_break
-    ; penalty: bumps, capped so the score stays at FINISH_MIN or more
     clc
     adc ev_break+2
-    sec
-    sbc #FINISH_MIN
-    sta tmp4                    ; most the bumps may take
-    A8
-    lda ev_stat+4
-    ldx #PTS_BUMP
-    jsr mulc
-    .a16
-    cmp tmp4
-    bcc @pen
-    lda tmp4
-@pen:
-    sta ev_break+4
-    lda ev_break
-    clc
-    adc ev_break+2
-    sec
-    sbc ev_break+4
     sta ev_score
     A8
     stz ev_fail
@@ -3781,21 +4599,6 @@ sail_score:
     clc
     adc tmp4
     sta ev_break
-    sta tmp4
-    ; bumps cost the same as on a finish (never below 0)
-    A8
-    lda ev_stat+4
-    ldx #PTS_BUMP
-    jsr mulc
-    .a16
-    cmp tmp4
-    bcc @dpen
-    lda tmp4
-@dpen:
-    sta ev_break+4
-    lda tmp4
-    sec
-    sbc ev_break+4
     sta ev_score
     A8
 @fail:
@@ -3806,7 +4609,12 @@ sail_score:
 @t:
     lda s_adrift
     beq @tt
-    lda #$01                    ; adrift: nobody steering
+    cmp #2
+    beq @nh
+    lda #$01                    ; adrift: ten seconds getting no closer
+    bra @s
+@nh:
+    lda #$04                    ; adrift: nobody ever steered
     bra @s
 @tt:
     lda #$02                    ; out of time
