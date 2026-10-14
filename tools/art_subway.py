@@ -125,6 +125,13 @@ def platform():
 # misc palette (sprite palette 5): ring, dots, arrows, germs
 MISC = ['#000000', '#101018', '#f8f8f8', '#a8b8c8', '#48e048', '#208820', '#f8e040', '#f04838',
         '#f89838', '#88d8f8', '#c8f8a0', '#1c2444', '#34427a', '#6a2034', '#c8d0e8', '#283058']
+# sprite palette 6: the same, with the ring's white outline and its sweet spot
+# gone gold. The ring pulses in it when the brake eases into a stop (the tell
+# for the undocumented trick), and stays in it while you glide hands-free.
+MISC_GOLD = list(MISC)
+MISC_GOLD[2] = '#f8e040'
+MISC_GOLD[12] = '#c89820'
+MISC_GOLD[15] = '#f8b828'
 
 RW, RH = 32, 40
 
@@ -325,7 +332,8 @@ def build_sprites():
     for p in P.CROWD:
         data += pal_bytes(p, 16)
     data += pal_bytes([hexrgb(c) for c in MISC], 16)
-    out('subway_spr_pal.bin', data)      # sprite palettes 1..5
+    data += pal_bytes([hexrgb(c) for c in MISC_GOLD], 16)
+    out('subway_spr_pal.bin', data)      # sprite palettes 1..6
     return sh
 
 
