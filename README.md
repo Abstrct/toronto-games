@@ -177,7 +177,10 @@ make run        # the ROM in the macOS player app (build/Toronto Games.app)
   branchable play sessions with game telemetry (scene, score, fails,
   slowdown) and films. It also runs bots, balance flags, the reaction-time
   curve, fuzzing, golden-scene checks, and bug filing with verified repros.
-  See `tools/pt/README.md`.
+  See `tools/pt/README.md`. `make qa` runs the automated checks: golden
+  scenes, fuzzing, bot balance, presentation lint and human reaction curves.
+- `python3 tools/pt/copylint.py` lints every player-facing string: line
+  length, stale text, jargon and reused gags.
 - `python3 tools/gallery.py` captures showcase screenshots into `build/gallery/`.
 - `python3 tools/jukebox.py [seconds] [song ...]` records songs from the
   ROM's sound test into `build/music/NN.wav`. `JUKEBOX=--gram` adds a
