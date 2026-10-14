@@ -481,7 +481,7 @@ demo_banner:
 
 str_demo:  .byte " DEMO - PRESS START ", 0
 ; per event: the banner row (BIKE BAY PARK COPS SAIL PARKING SUBWAY)
-demo_rows: .byte 4, 4, 4, 4, 5, 25, 26
+demo_rows: .byte 4, 4, 4, 4, 26, 25, 26
 .assert * - demo_rows = NUM_EVENTS, error, "demo_rows: one banner row per event"
 
 ; ------------------------------------------------------------------
