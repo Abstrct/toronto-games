@@ -4,6 +4,8 @@
 .include "globals.inc"
 
 .export reset_stub, nmi_stub, irq_stub
+.export trick_seen              ; events: jsl when a named trick callout fires
+.export d_trick                 ; game.s demo_play clears it
 .import game_main
 .import __ZP_START__
 .import demo_abort, demo_blob
@@ -11,6 +13,7 @@
 .segment "HIBSS"                ; bank $7E: long addressing only
 p_txt:      .res 7*64           ; text rows under the PAUSED box
 p_zp:       .res 25
+d_trick:    .res 1              ; attract demo: frames WATCH THAT MOVE! stays up
 
 .segment "BSS"
 p_bg:       .res 1
@@ -428,16 +431,45 @@ demo_pads:
     txs
     jml demo_abort
 
+; trick_seen (jsl, any bank, keeps A X Y and the flags' width): an event's
+; named trick callout just fired. In the attract demo the banner reads
+; WATCH THAT MOVE! for a while (never the trick's name: the demo shows the
+; move, the player works out how); in a real game it does nothing.
+DEMO_TRICK_FR = 120
+trick_seen:
+    php
+    sep #$20
+    .a8
+    pha
+    lda demo_on
+    beq @x
+    lda #DEMO_TRICK_FR
+    sta f:d_trick
+@x:
+    pla
+    plp
+    rtl
+
 ; " DEMO - PRESS START " on a solid strip (window tiles, so traffic passes
 ; under it) on a text row the running event leaves alone, rewritten every 16
 ; frames in case the event cleared the layer; only in play (pause_ok), so
-; the intro and score cards stay clean
+; the intro and score cards stay clean. After trick_seen it reads
+; WATCH THAT MOVE! for DEMO_TRICK_FR frames (redrawn as it starts and ends).
 demo_banner:
-    lda pause_ok
-    beq @x
+    lda f:d_trick
+    beq @plain
+    dec a
+    sta f:d_trick
+    beq @now                    ; back to DEMO - PRESS START now
+    cmp #(DEMO_TRICK_FR - 1)
+    beq @now                    ; just fired
+@plain:
     lda frame
     and #$0F
     bne @x
+@now:
+    lda pause_ok
+    beq @x
     phy
     lda event_idx
     A16
@@ -458,6 +490,9 @@ demo_banner:
     tay
     A8
     ldx #$0000
+    lda f:d_trick
+    beq @l
+    ldx #(str_trick - str_demo)
 @l:
     lda f:str_demo,x
     beq @d
@@ -480,6 +515,7 @@ demo_banner:
     rts
 
 str_demo:  .byte " DEMO - PRESS START ", 0
+str_trick: .byte "  WATCH THAT MOVE!  ", 0
 ; per event: the banner row (BIKE BAY PARK COPS SAIL PARKING SUBWAY)
 demo_rows: .byte 4, 4, 4, 4, 26, 25, 26
 .assert * - demo_rows = NUM_EVENTS, error, "demo_rows: one banner row per event"

@@ -11,6 +11,7 @@
 
 .export rank_place, g_choice, par_calc, par_g, par_s, par_b
 .import records_board, pick_one, demo_start
+.import d_trick                 ; boot.s: WATCH THAT MOVE! frames
 .export demo_abort, practice_back
 
 .segment "BSS"
@@ -251,6 +252,8 @@ demo_play:
     bne @pick
     rtl                         ; nothing recorded at all
 @have:
+    lda #$00
+    sta f:d_trick               ; no caption left over from the last demo
     lda #$01
     sta num_players
     stz cur_player

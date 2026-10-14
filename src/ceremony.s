@@ -5,7 +5,7 @@
 .include "globals.inc"
 .include "screens.inc"
 
-.import c_order, c_place, c_champs, champ_names, why_line, podium_line
+.import c_order, c_place, c_champs, champ_names, why_line, podium_line, split_line
 
 NUM_FW  = 8
 FW_LIFE = 56                    ; frames: rocket, small burst, big burst, sparkle
@@ -114,6 +114,7 @@ podium_scene:
 @co:
     lda #9                      ; whoever took bronze under them
     jsr podium_rows
+    jsr split_row
     jmp @titled
 @one:
     LDPTR0 str_champ
@@ -128,6 +129,7 @@ podium_scene:
 @sb:
     lda #11                     ; silver and bronze by name
     jsr podium_rows
+    jsr split_row
     jmp @titled
 @solo:
     ; going solo: no "champion" over nobody, just the haul
@@ -277,6 +279,28 @@ podium_rows:
     bcs @x
     lda #11                     ; PRESS A never higher than it always was
     sta cer_prow
+@x:
+    rts
+
+; level on points with someone above them but placed lower: "SAME PTS:
+; GOLDS BREAK TIES" on cer_prow (cyan), PRESS A under it
+split_row:
+    jsl split_line
+    bcc @x
+    lda cer_prow
+    A16
+    and #$00FF
+    asl a
+    asl a
+    asl a
+    asl a
+    asl a
+    tax
+    A8
+    lda #($20 | (TP_CYAN << 2))
+    jsr strip_line
+    inc cer_prow
+    inc cer_prow
 @x:
     rts
 
