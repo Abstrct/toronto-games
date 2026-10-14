@@ -922,6 +922,18 @@ name_entry:
     iny
     cpy #9
     bne @copy
+    ; a blank name went in as PLAYER n: the field itself stays blank, so B
+    ; back from the sponsors finds it really empty (typing DAVE over a
+    ; hidden PLAYER 1 once gave DAVEER 1)
+    lda r_len
+    bne @kept_name
+    ldx #$0000
+@wipe:
+    stz r_name,x
+    inx
+    cpx #10
+    bne @wipe
+@kept_name:
     stz r_qn
     SFX SFX_SELECT
     jsl fade_out

@@ -283,7 +283,7 @@ podium_rows:
     rts
 
 ; level on points with someone above them but placed lower: "SAME PTS:
-; GOLDS BREAK TIES" on cer_prow (cyan), PRESS A under it
+; GOLDS, NOT SCORE" on cer_prow (cyan), PRESS A under it
 split_row:
     jsl split_line
     bcc @x

@@ -194,6 +194,13 @@ turn_reset:
     stz ev_break
     stz ev_break+2
     stz ev_break+4
+    ldx #$0000
+@sty:
+    stz ev_style,x              ; no style sources (cards.s ITEMISED STYLE)
+    inx
+    inx
+    cpx #10
+    bne @sty
     A8
     rts
 
