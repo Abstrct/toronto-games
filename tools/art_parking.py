@@ -233,12 +233,25 @@ def build_sprites():
     d.rectangle([107, 185, 108, 188], fill=14)
     d.point((107, 190), fill=14)
 
+    # road paint (officer palette): a Green P stencil in the empty spot, and
+    # the yellow stop line in the lane where your rear bumper should stop
+    d.rounded_rectangle([81, 193, 94, 206], radius=3, fill=12, outline=1)
+    d.rectangle([85, 196, 86, 203], fill=14)                                # P stem
+    d.rectangle([87, 196, 89, 197], fill=14)                                # bowl
+    d.rectangle([87, 200, 89, 201], fill=14)
+    d.rectangle([90, 197, 90, 200], fill=14)
+    d.rectangle([49, 226, 70, 229], fill=1)
+    d.rectangle([50, 227, 69, 228], fill=7)
+    for x in range(52, 69, 6):                                              # hatching
+        d.point((x, 227), fill=1)
     # cyclist seen from above, riding north (officer palette): 2 pedal frames
     for k in range(2):
         draw_cyclist(sh, 48 + k * 16, 192, k)
     for k in range(9):
         band, col = k // 2, k % 2
         sh.obj('pcar%d' % k, col * 48, band * 48, 48, 48)
+    sh.obj('spotp', 80, 192, 16, 16)
+    sh.obj('stopline', 48, 224, 24, 8, 12, 4)
     sh.obj('cyc0', 48, 192, 16, 32, 8, 16)
     sh.obj('cyc1', 64, 192, 16, 32, 8, 16)
     sh.obj('parked', 96, 0, 32, 48)
