@@ -856,7 +856,7 @@ strlen:
 ; one kept when there is room for only one
 card_stat_pick:
     .byte 1, 3                  ; bike: TTC TOKENS, STYLE
-    .byte 0, 1                  ; bay: TIME LEFT, PASSED
+    .byte 0, 2                  ; bay: TIME LEFT, SPILLS
     .byte 1, 2                  ; park: DOGS DODGED, TACKLES
     .byte 0, 2                  ; cops: SIP 'N' HOPS, HURDLES
     .byte 1, 2                  ; sail: MARKS ROUNDED, BUMPS
@@ -3241,7 +3241,7 @@ eb4: .byte "ROUND MARKS 1, 2 AND 3,", $0A, "THEN CROSS THE LINE.", 0
 eb5: .byte "THREE SPOTS ON BRUNSWICK.", $0A, "PARK IT. DON'T DENT A BMW.", 0
 eb6: .byte "RIDE TO UNION HANDS-FREE.", $0A, "GRAB A POLE, GET GERMS.", 0
 ec0: .byte "D-PAD STEER    A PEDAL", $0A, "B HOP          DOWN BRAKE", $0A, "HOP RAILS, DODGE LATE: X8", 0
-ec1: .byte "LEFT, RIGHT AS DOTS LAND", $0A, "UP/DOWN LANE  A EXCUSE ME", $0A, "Y ON A GOLD DOT: PRESTO!", 0
+ec1: .byte "LEFT, RIGHT ON BIG DOTS", $0A, "UP/DOWN LANE  A EXCUSE ME", $0A, "Y ON A GOLD DOT: PRESTO!", 0
 ec2: .byte "D-PAD WALK   A THROW BALL", $0A, "B WHEN ! SHOWS: SIDESTEP", $0A, "B AS HE LUNGES: BONUS!", 0
 ec3: .byte "TAP A AT CHALK. RED: HOLD", $0A, "B: SIP WHILE COP CAN'T SEE", $0A, "B MID-AIR = SIP 'N' HOP", 0
 ec4: .byte "LEFT/RIGHT: TURN  A: HIKE", $0A, "WIND FROM TOP: ZIG-ZAG UP", $0A, "SURF THE FERRY'S WAKE!", 0
@@ -3295,7 +3295,7 @@ bl_germs:  .byte "GERMS", 0
 ; 0 = none. A base of 0 in a card_still event shows str_still instead.
 card_fail_note:
     .addr fn_bike,   fn_bike_n, fn_bike_n, fn_bike_s    ; bike
-    .addr fn_bay,    fn_bay,    fn_bay,    fn_bay       ; bay
+    .addr fn_bay,    fn_bay,    fn_bay_q,  fn_bay       ; bay
     .addr fn_park,   fn_park_t, fn_park_q, fn_park      ; park
     .addr fn_cops,   fn_cops,   fn_cops_q, fn_cops      ; cops
     .addr fn_sail,   fn_sail_t, fn_sail_t, fn_sail      ; sail
@@ -3304,7 +3304,8 @@ card_fail_note:
 fn_bike:   .byte "THIRD WIPEOUT. NO TIPS!", 0
 fn_bike_n: .byte "NOT DELIVERED. NO TIPS!", 0
 fn_bike_s: .byte "STOPPED 8 SECONDS. NO TIPS", 0
-fn_bay:    .byte "NO TRAIN: NO 1000 OR STYLE", 0
+fn_bay:    .byte "THE 5:42 LEFT WITHOUT YOU", 0
+fn_bay_q:  .byte "GAVE UP: THE 5:42 LEFT", 0
 fn_park:   .byte "THIRD TACKLE ENDS THE WALK", $0A, "CROSSING PAID BY DISTANCE", 0
 fn_park_t: .byte "CROSSING PAID BY DISTANCE", 0
 fn_park_q: .byte "GAVE UP: PAID BY DISTANCE", 0
