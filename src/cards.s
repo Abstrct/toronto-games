@@ -3514,7 +3514,7 @@ eb4: .byte "ROUND MARKS 1, 2 AND 3,", $0A, "THEN CROSS THE LINE.", 0
 eb5: .byte "THREE SPOTS ON BRUNSWICK.", $0A, "PARK IT. DON'T DENT A BMW.", 0
 eb6: .byte "SURF LINE 1 TO UNION.", $0A, "GRAB A POLE, GET GERMS.", 0
 ec0: .byte "D-PAD STEER    A PEDAL", $0A, "B HOP          DOWN BRAKE", $0A, "HOP RAILS, DODGE LATE: X8", 0
-ec1: .byte "LEFT, RIGHT ON BIG DOTS", $0A, "UP/DOWN LANE  A EXCUSE ME", $0A, "Y ON A GOLD DOT: PRESTO!", 0
+ec1: .byte "ALTERNATE ", TXT_ARROW_L+32, " ", TXT_ARROW_R+32, " ON BIG DOTS", $0A, "SMALL DOTS = DOUBLE TIME", $0A, "UP/DOWN LANE  A EXCUSE ME", 0
 ec2: .byte "D-PAD WALK   A THROW BALL", $0A, "SAFE: B WHEN ! SHOWS: 50", $0A, "BOLD: B AS HE LUNGES: 150+", 0
 ec3: .byte "TAP A AT CHALK. RED: HOLD", $0A, "B: SIP WHILE COP CAN'T SEE", $0A, "B MID-AIR = SIP 'N' HOP", 0
 ec4: .byte "LEFT/RIGHT: TURN  A: HIKE", $0A, "WIND FROM TOP: ZIG-ZAG UP", $0A, "SURF THE FERRY'S WAKE!", 0
@@ -3578,8 +3578,8 @@ card_fail_note:
 fn_bike:   .byte "THIRD WIPEOUT. NO TIPS!", 0
 fn_bike_n: .byte "NOT DELIVERED. NO TIPS!", 0
 fn_bike_s: .byte "STOPPED 8 SECONDS. NO TIPS", 0
-fn_bay:    .byte "THE 5:42 LEFT WITHOUT YOU", 0
-fn_bay_q:  .byte "GAVE UP: THE 5:42 LEFT", 0
+fn_bay:    .byte "THE 5:42 LEFT WITHOUT YOU", $0A, "WALK PAID BY DISTANCE", 0
+fn_bay_q:  .byte "GAVE UP: THE 5:42 LEFT", $0A, "WALK PAID BY DISTANCE", 0
 fn_park:   .byte "THIRD TACKLE ENDS THE WALK", $0A, "75 FOR EVERY TENTH WALKED", 0
 fn_park_t: .byte "75 FOR EVERY TENTH WALKED", 0
 fn_park_q: .byte "GAVE UP: 75 A TENTH WALKED", 0
@@ -3597,7 +3597,7 @@ fn_sub_q:  .byte "GAVE UP: STYLE IS VOID", $0A, "ONLY LEGS YOU LEANED PAY", 0
 ; reason line, for the ev_fail codes in card_still (bit n = ev_fail n: $1E all
 ; four, $02 the event's own fail only, 0 never). For events where only not
 ; playing earns a base of 0.
-card_still:    .byte $1E, $1E, $1E, 0, $02, 0, $1E   ; bike bay park cops sail parking subway
+card_still:    .byte $1E, $0A, $1E, 0, $02, 0, $1E   ; bike bay park cops sail parking subway
 card_still_ln: .addr sti0, sti1, sti2, 0, sti4, 0, sti6
 sti0: .byte "STANDING STILL PAYS 0", 0
 sti1: .byte "STANDING STILL PAYS 0", 0
@@ -3611,7 +3611,7 @@ sti6: .byte "NO LEANING, NO POINTS", 0
 ; space + rate fit in 16 characters.
 card_rate:
     .addr 0, 0, 0               ; bike
-    .addr 0, 0, 0               ; bay
+    .addr rt_bay_walk, 0, rt_40each ; bay
     .addr 0, 0, 0               ; park
     .addr 0, 0, 0               ; cops
     .addr 0, 0, 0               ; sail
@@ -3619,7 +3619,10 @@ card_rate:
     .addr 0, 0, rt_sub_pen      ; subway
 card_rate_fail:
     .addr 0, 0, 0               ; bike
-    .addr 0, 0, 0               ; bay
+    .addr rt_bydist, 0, rt_40each ; bay
+rt_bay_walk: .byte "1000+40/S", 0
+rt_bydist:  .byte "BY DISTANCE", 0
+rt_40each:  .byte "40 EACH", 0
     .addr 0, 0, 0               ; park
     .addr 0, 0, 0               ; cops
     .addr 0, 0, 0               ; sail
