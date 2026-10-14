@@ -3,9 +3,14 @@
 ; The ride is a fixed course of lurches (course table below): each leg pulls
 ; out of a station, takes a curve or two and brakes into the next one. Every
 ; lurch is TELEGRAPHED 40 frames before it pushes: a sound (three departure
-; beeps, a wheel squeal for curves, the brake hiss), a status line and a big
-; yellow arrow by the ring showing which way to lean (it blinks while it's a
-; warning and goes solid when the push starts). The push then ramps in.
+; beeps, a wheel squeal for curves, the brake hiss), a status line ("CURVE
+; AHEAD") and a HOLLOW blinking arrow by the ring: get ready, don't lean yet.
+; When the push starts the arrow goes SOLID and the status names the lean
+; ("CURVE! LEAN ^"): lean now. The push then ramps in.
+; Between lurches (doors open, cruising) nothing pushes: the rider finds
+; their feet and the dot settles back to the middle on its own, so nothing
+; ever tips you out unannounced. Track joints are little kicks you can see
+; (the car jumps) and hear (a clack).
 ;
 ; The balance ring sits over the rider's head on a dark disc of its own.
 ; The dot is the rider's balance: LEFT/RIGHT is the train's go/brake axis,
@@ -17,10 +22,12 @@
 ;
 ; Scoring (ev_break = base, bonus, penalty):
 ;   finished at Union: RIDE 1000 + STYLE - GERMS x40
-;     STYLE: STANDING SURF, a leg ridden with no grab, pays 75 x the chain
-;            of clean legs (75, 150, ... 450); and DEAD CENTRE, a point per
-;            2 frames with the dot in the sweet spot while a lurch is pushing
-;            and you're working the pad (never for standing still).
+;     STYLE: STANDING SURF, a stop-to-stop leg you rode (D-pad) with no grab,
+;            pays 75 x the chain of clean legs (75, 150, ... 450); GOLD DOT
+;            SURF, a clean leg where the dot never left the gold middle,
+;            pays that x3 (the expert's layer: 225 ... 1350); and a point
+;            per 2 frames with the dot gold while a lurch is pushing and
+;            you're working the pad (never for standing still).
 ;   PATIENT ZERO (20 germs) or CALL IT A DAY: 40 per station reached on a
 ;   leg where you used the pad (standing still earns nothing), no style
 ;   (any finish beats any failed run: 1000 - 19x40 = 240 > 5x40).
@@ -46,7 +53,7 @@ SIGN_ROW  = 7               ; station sign box rows 7-9, over the windows
 POP_ROW   = 10              ; popups, between the sign and the ring
 RADIUS2   = 400             ; grab when bx^2 + by^2 > 20^2
 DANGER2   = 256             ; dot turns red past 16 px
-SWEET2    = 25              ; sweet spot: inside 5 px
+SWEET2    = 36              ; sweet spot (the dot turns gold): inside 6 px
 NUM_SEG   = 6
 LEAN      = $0013           ; D-pad lean, 8.8 px/frame^2
 VMAX      = $0090           ; dot speed cap, 8.8 px/frame
@@ -124,18 +131,24 @@ E_TYPE   = ev_ram + 144     ; (evcommon's ev_alloc is unused here)
 NUM_ENT  = 1
 w_touch  = ev_ram + 150     ; 1 = the D-pad was used this leg
 w_earn   = ev_ram + 152     ; stations reached on legs you actually rode
+w_gold   = ev_ram + 154     ; 1 = the dot has stayed gold all this leg
+w_hide   = ev_ram + 156     ; 1 = no ring yet (the countdown sits there)
+w_startle = ev_ram + 158    ; frames the passengers jump after a grab
+w_hollow = ev_ram + 160     ; draw_arrow: 1 = the hollow (warning) arrow
 COLBUF   = ev_ram + 256     ; two 28-word column buffers (256, 320)
 EV_SEED  = ev_ram + 510
 
 ST_NONE   = 0
-ST_CLEAR  = 1
-ST_GO     = 2
-ST_CRUISE = 3
-ST_LEFT   = 4
-ST_RIGHT  = 5
-ST_BRAKE  = 6
-ST_DOORS  = 7
-ST_UNION  = 8
+ST_CLEAR  = 1               ; warnings: what's coming, no lean yet
+ST_CURVE  = 2
+ST_BRAKE  = 3
+ST_GO     = 4               ; pushes: name the lean, the way the arrow points
+ST_LEANU  = 5
+ST_LEAND  = 6
+ST_LEANL  = 7
+ST_CRUISE = 8
+ST_DOORS  = 9
+ST_UNION  = 10
 
 ; code + tables live in a graphics bank with room to spare (bank $85)
 .segment "GFX0"
@@ -150,9 +163,10 @@ ev_subway:
     jsr sb_draw
     jsl event_card
     jsr sb_hud_full
+    jsl event_countdown         ; (no ring or sign yet: the big digits sit there)
+    stz w_hide
     lda #0
     jsr station_sign
-    jsl event_countdown
     lda #SONG_SUBWAY
     jsl music_play
 @loop:
@@ -228,6 +242,8 @@ sb_init:
     lda #1
     sta w_src
     sta w_clean
+    sta w_gold
+    sta w_hide
     lda #3
     sta w_pal
     ldx #232
@@ -276,7 +292,7 @@ sb_update:
 ; the course: kind, gap (frames before the warning), strength (8.8 push), length
 course:
     ; Bloor-Yonge -> Wellesley: pull out, pull in. Gentle.
-    .byte K_DEP, 20, 7, 90
+    .byte K_DEP, 40, 7, 90
     .byte K_BRK, 60, 7, 100
     ; -> College
     .byte K_DEP, 70, 8, 90
@@ -374,7 +390,8 @@ tr_gap:
     SFX SFX_READY               ; please stand clear of the doors: beep...
     rts
 
-warn_status: .byte ST_CLEAR, ST_GO, ST_LEFT, ST_LEFT, ST_RIGHT, ST_RIGHT, ST_BRAKE, ST_BRAKE
+; per kind: (warning, push) status
+warn_status: .byte ST_CLEAR, ST_GO, ST_CURVE, ST_LEANU, ST_CURVE, ST_LEAND, ST_BRAKE, ST_LEANL
 
 tr_warn:
     jsr jolts
@@ -458,6 +475,12 @@ tr_act:
 @nd:
     cmp #K_BRK
     bne @cruise
+    lda frame                   ; the brakes bite: the car judders
+    and #$07
+    bne @nj
+    lda #1
+    sta w_shake
+@nj:
     A16
     lda w_speed
     sec
@@ -522,16 +545,7 @@ tr_end:
 arrive:
     ldx #$0000
     stx w_speed
-    lda w_grab
-    bne @ns
-    A16
-    lda w_vx                    ; the classic snap back as it stops
-    sec
-    sbc #$0050
-    sta w_vx
-    A8
-@ns:
-    lda #1
+    lda #2                      ; the stop: a big bump (the car only)
     sta w_shake
     SFX SFX_BELL
     lda w_seg
@@ -548,7 +562,9 @@ arrive:
     sta w_pal
     ldx #280
     stx w_walk
-    ; STANDING SURF: a whole leg without touching anything
+    ; STANDING SURF: a whole leg you rode without grabbing anything
+    lda w_touch
+    beq @broke
     lda w_clean
     beq @broke
     inc w_chain
@@ -569,6 +585,7 @@ arrive:
     stz w_touch
     lda #1
     sta w_clean
+    sta w_gold
     lda w_seg
     cmp #NUM_SEG
     bcc @x
@@ -579,7 +596,8 @@ arrive:
 @x:
     rts
 
-; +75 x chain, and say so
+; +75 x chain (x3 if the dot stayed gold all leg), and say so:
+;   "STANDING SURF X3  +225"  /  "GOLD DOT SURF X3  +675"
 surf_popup:
     A16
     lda w_chain
@@ -600,6 +618,13 @@ surf_popup:
     clc
     adc tmp1                    ; 75c
     sta tmp3
+    ldx w_gold
+    beq @one
+    asl a
+    clc
+    adc tmp3                    ; 225c
+    sta tmp3
+@one:
     clc
     adc w_style
     sta w_style
@@ -607,9 +632,9 @@ surf_popup:
     jsr popup_clear
     lda #TXT_WIN
     sta txt_bg
-    ldx #(POP_ROW*32 + 6)
+    ldx #(POP_ROW*32 + 4)
     A16
-    lda #$0117                  ; 23 x 1
+    lda #$0118                  ; 24 x 1
     sta tmp1
     A8
     lda #128
@@ -617,33 +642,55 @@ surf_popup:
     lda #($20 | (TP_YELLOW << 2))
     jsl txt_fill
     LDPTR0 str_surf
-    ldx #(POP_ROW*32 + 7)
+    lda w_gold
+    beq @lab
+    LDPTR0 str_gsurf
+@lab:
+    ldx #(POP_ROW*32 + 5)
     lda #($20 | (TP_YELLOW << 2))
     jsl txt_print
     ldx w_chain
     stx tmp1
-    ldx #(POP_ROW*32 + 22)
+    ldx #(POP_ROW*32 + 20)
     ldy #1
     lda #($20 | (TP_WHITE << 2))
     jsl txt_num
+    ; "+675" or "+1350", no gap after the plus
     LDPTR0 str_plus
-    ldx #(POP_ROW*32 + 24)
+    ldx #(POP_ROW*32 + 23)
+    ldy tmp3
+    cpy #1000
+    bcc @p3
+    dex
+@p3:
+    phx
     lda #($20 | (TP_GREEN << 2))
     jsl txt_print
-    ldx tmp3
-    stx tmp1
-    ldx #(POP_ROW*32 + 25)
+    plx
+    inx
+    ldy tmp3
+    sty tmp1
     ldy #3
+    cpx #(POP_ROW*32 + 24)
+    beq @n3
+    iny
+@n3:
     lda #($20 | (TP_GREEN << 2))
     jsl txt_num
     stz txt_bg
     ldx #90
     stx w_popup
+    lda w_gold
+    beq @c
+    SFX SFX_CHEER
+    rts
+@c:
     SFX SFX_COIN
     rts
 
-str_surf: .byte "STANDING SURF X", 0
-str_plus: .byte "+", 0
+str_surf:  .byte "STANDING SURF X", 0
+str_gsurf: .byte "GOLD DOT SURF X", 0
+str_plus:  .byte "+", 0
 
 ; track joints: little random kicks while cruising, from the third leg on
 jolts:
@@ -780,9 +827,12 @@ balance:
     adc #LEAN
     sta w_vy
 @nd:
-    ; v += force + offset/256 (an upright body tips further once it leans)
+    ; v += force + offset/256: while a lurch is warned or pushing, an upright
+    ; body tips further once it leans; between lurches nothing pushes and
+    ; the rider finds their feet (the same term, the other way)
     lda w_bx
     jsr int_part
+    jsr tip
     clc
     adc w_fx
     clc
@@ -794,6 +844,7 @@ balance:
     sta w_bx
     lda w_by
     jsr int_part
+    jsr tip
     clc
     adc w_fy
     clc
@@ -820,9 +871,15 @@ balance:
     jmp grab
 @in:
     .a16
-    ; DEAD CENTRE: in the sweet spot while a lurch pushes and you're working it
+    ; the dot left the gold middle: no GOLD DOT SURF this leg
     cmp #SWEET2
-    bcs @x
+    bcc @gold
+    A8
+    stz w_gold
+    A16
+    bra @x
+@gold:
+    ; DEAD CENTRE: in the sweet spot while a lurch pushes and you're working it
     lda w_fx
     ora w_fy
     beq @x
@@ -836,6 +893,17 @@ balance:
     inc w_style
 @x:
     A8
+    rts
+
+; A16: the tip-over term (offset px / 256), negated between lurches
+tip:
+    .a16
+    ldx w_ls
+    cpx #LS_GAP
+    bne @x
+    eor #$FFFF
+    inc a
+@x:
     rts
 
 ; A16: v -> v - v/8, clamped to +-VMAX
@@ -959,6 +1027,9 @@ grab:
 @set:
     sta w_gkind
     stz w_clean
+    stz w_gold
+    ldx #24
+    stx w_startle
     A16
     tya
     clc
@@ -1220,7 +1291,8 @@ sb_draw:
     ; the car body sways with the push: back/forward on go/brake, a tilt on curves
     A16
     lda w_fx
-    jsr asr2
+    cmp #$8000
+    ror a                       ; go/brake: up to 5 px
     sta bg1x
     lda w_fy
     jsr asr2
@@ -1235,12 +1307,15 @@ sb_draw:
     inc tmp1
 @still:
     A8
-    lda w_shake
+    lda w_shake                 ; a bump: 2 px (track joint, brakes), 4 (the stop)
     beq @ns
     stz w_shake
+    asl a
     A16
-    inc tmp1
-    inc tmp1
+    and #$00FF
+    clc
+    adc tmp1
+    sta tmp1
     A8
 @ns:
     A16
@@ -1374,6 +1449,10 @@ put_col:
     rts
 
 draw_ring:
+    lda w_hide
+    beq @on
+    rts
+@on:
     ; arrow first (in front), then the dot, then the disc
     jsr draw_arrow
     A16
@@ -1432,19 +1511,25 @@ draw_ring:
     jsl oam_meta
     rts
 
-; the lean arrow: blinks through the warning (faster as it nears), solid
-; while the push is on. Points the way to press.
+; the lean arrow, pointing the way to press. Warning: a HOLLOW arrow that
+; blinks (faster as it nears) = get ready. Push: SOLID = lean now.
 draw_arrow:
+    stz w_hollow                    ; 0 solid, 1 hollow
     lda w_ls
     cmp #LS_ACT
     beq @show
     cmp #LS_WARN
-    bne @x
+    jne @x
+    inc w_hollow
     lda w_lt
-    cmp #12
-    bcc @show
+    cmp #16
+    bcc @fast
+    and #$08
+    jeq @x
+    bra @show
+@fast:
     and #$04
-    beq @x
+    jeq @x
 @show:
     lda w_kind
     asl a
@@ -1470,20 +1555,52 @@ draw_arrow:
     beq @r
     cpx #K_BRK
     beq @r
+    lda w_hollow
+    bne @uo
     LDPTR1 ms_arrow_u
     ldx #MS_ARROW_U_BASE
     bra @d
+@uo:
+    LDPTR1 ms_arrow_uo
+    ldx #MS_ARROW_UO_BASE
+    bra @d
 @r:
+    lda w_hollow
+    bne @ro
     LDPTR1 ms_arrow_r
     ldx #MS_ARROW_R_BASE
+    bra @d
+@ro:
+    LDPTR1 ms_arrow_ro
+    ldx #MS_ARROW_RO_BASE
 @d:
     stx tmp6
+    jsl oam_meta
+    lda w_hollow
+    bne @x
+    ; solid: a second arrow further out, so "lean now" reads as a double
+    ; chevron, never as the hollow warning
+    lda w_kind
+    asl a
+    asl a
+    TAXB
+    A16
+    lda f:arrow_step,x
+    clc
+    adc spr_x
+    sta spr_x
+    lda f:arrow_step+2,x
+    clc
+    adc spr_y
+    sta spr_y
+    A8
     jsl oam_meta
 @x:
     rts
 
 ; per kind: x, y offsets; flips (bit 6 h, bit 7 v)
 arrow_tab:  .word ARROW_D, 0,  0, $10000 - ARROW_D,  0, ARROW_D,  $10000 - ARROW_D, 0
+arrow_step: .word 11, 0,  0, $10000 - 11,  0, 11,  $10000 - 11, 0
 arrow_flip: .byte 0, 0, $80, $40
 
 draw_rider:
@@ -1610,6 +1727,12 @@ rider_base: .word MS_UP_BASE, MS_LB1_BASE, MS_LB2_BASE, MS_LF1_BASE, MS_LF2_BASE
 ; ones nod along to the rattle)
 NUM_PP = 6
 draw_people:
+    A16
+    lda w_startle
+    beq @s0
+    dec w_startle
+@s0:
+    A8
     ldx #$0000
 @p:
     stx w_cur
@@ -1618,12 +1741,19 @@ draw_people:
     sta spr_x
     lda f:pp_y,x
     sta spr_y
+    ; a grab makes everyone jump (two hops)
+    lda w_startle
+    and #$0008
+    beq @calm
+    dec spr_y
+    dec spr_y
+@calm:
     lda f:pp_kind,x
     cmp #2
     bcc @seated
-    ; standing: lurch
+    ; standing: lurch with the push (the car goes the other way)
     lda w_fx
-    jsr asr3
+    jsr asr2
     clc
     adc spr_x
     sta spr_x
@@ -1855,19 +1985,24 @@ hud_status:
 str_germs: .byte "GERMS", 0
 str_next:  .byte "NEXT:", 0
 str_style: .byte "STYLE", 0
-status_msgs: .addr ss0, ss1, ss2, ss3, ss4, ss5, ss6, ss7, ss8
-status_tp:   .byte ($20 | (TP_WHITE << 2)), ($20 | (TP_ORANGE << 2)), ($20 | (TP_ORANGE << 2))
-             .byte ($20 | (TP_WHITE << 2)), ($20 | (TP_CYAN << 2)), ($20 | (TP_CYAN << 2))
-             .byte ($20 | (TP_RED << 2)), ($20 | (TP_YELLOW << 2)), ($20 | (TP_YELLOW << 2))
-ss0: .byte " ", 0
-ss1: .byte "STAND CLEAR!", 0
-ss2: .byte "GO! GO! GO!", 0
-ss3: .byte "CRUISING", 0
-ss4: .byte "CURVE LEFT!", 0
-ss5: .byte "CURVE RIGHT!", 0
-ss6: .byte "BRAKING!", 0
-ss7: .byte "DOORS OPEN", 0
-ss8: .byte "ALL OUT!", 0
+status_msgs: .addr ss0, ss1, ss2, ss3, ss4, ss5, ss6, ss7, ss8, ss9, ss10
+; warnings orange (get ready), pushes yellow like the solid arrow (lean now)
+status_tp:   .byte ($20 | (TP_WHITE << 2))
+             .byte ($20 | (TP_ORANGE << 2)), ($20 | (TP_ORANGE << 2)), ($20 | (TP_ORANGE << 2))
+             .byte ($20 | (TP_YELLOW << 2)), ($20 | (TP_YELLOW << 2)), ($20 | (TP_YELLOW << 2))
+             .byte ($20 | (TP_YELLOW << 2))
+             .byte ($20 | (TP_WHITE << 2)), ($20 | (TP_WHITE << 2)), ($20 | (TP_GREEN << 2))
+ss0:  .byte " ", 0
+ss1:  .byte "STAND CLEAR!", 0
+ss2:  .byte "CURVE AHEAD", 0
+ss3:  .byte "STATION AHEAD", 0
+ss4:  .byte "GO! LEAN ", TXT_ARROW_R + $20, 0
+ss5:  .byte "CURVE! LEAN ", TXT_ARROW_U + $20, 0
+ss6:  .byte "CURVE! LEAN ", TXT_ARROW_D + $20, 0
+ss7:  .byte "BRAKES! LEAN ", TXT_ARROW_L + $20, 0
+ss8:  .byte "CRUISING", 0
+ss9:  .byte "DOORS OPEN", 0
+ss10: .byte "ALL OUT!", 0
 
 ; ------------------------------------------------------------------
 ; score. Finished at Union: RIDE 1000 + STYLE - 40 per germ.

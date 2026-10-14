@@ -238,6 +238,15 @@ def build_sprites():
     d.polygon([(117, AY + 15), (117, AY + 8), (113, AY + 8), (119, AY + 1), (120, AY + 1), (126, AY + 8),
                (122, AY + 8), (122, AY + 15)], fill=6, outline=1)
     d.line([121, AY + 9, 121, AY + 14], fill=8)
+    # the same arrows HOLLOW (warning: get ready) at (48,160) right, (64,160) up:
+    # a yellow rim round a dark middle, so solid (lean now) reads as different
+    HY = 160
+    right = [(1, 5), (8, 5), (8, 1), (15, 7), (15, 8), (8, 14), (8, 10), (1, 10)]
+    up = [(5, 15), (5, 8), (1, 8), (7, 1), (8, 1), (14, 8), (10, 8), (10, 15)]
+    for x0, pts, inner in ((48, right, [(3, 7), (10, 7), (10, 4), (13, 7), (13, 8), (10, 11), (10, 8), (3, 8)]),
+                           (64, up, [(7, 13), (7, 6), (4, 6), (7, 3), (8, 3), (11, 6), (8, 6), (8, 13)])):
+        d.polygon([(x0 + x, HY + y) for x, y in pts], fill=6, outline=1)
+        d.polygon([(x0 + x, HY + y) for x, y in inner], fill=11, outline=11)
     # dots 8x8 at y=144: ok (white/cyan), sweet (gold), danger (red), parked (grey)
     for k, (fc, sc) in enumerate(((2, 9), (6, 8), (7, 13), (3, 15))):
         x0 = 96 + k * 8
@@ -277,6 +286,8 @@ def build_sprites():
         sh.obj(n, x, PY, 16, 32, 8, 31)
     sh.obj('arrow_r', 96, 128, 16, 16)
     sh.obj('arrow_u', 112, 128, 16, 16)
+    sh.obj('arrow_ro', 48, 160, 16, 16)
+    sh.obj('arrow_uo', 64, 160, 16, 16)
     for k, n in enumerate(('dot_ok', 'dot_sweet', 'dot_bad', 'dot_off')):
         sh.obj(n, 96 + k * 8, 144, 8, 8, 3, 3)
     sh.obj('germ0', 96, 152, 8, 8, 4, 4)

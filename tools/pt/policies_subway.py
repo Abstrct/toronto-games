@@ -9,12 +9,14 @@ ceiling (0 germs, the full STANDING SURF chain, lots of DEAD CENTRE).
 
 subway_surfer is the human yardstick (the CURVE bot): it plans only from
 what's on screen. It sees the dot (and judges its drift from the last few
-frames of motion, not from RAM velocity) and the lurch cue: the yellow
-arrow by the ring that blinks through the 40-frame warning (faster near
-the end, with the beeps/squeal/hiss) and goes solid when the push starts.
-It leans the way the arrow points once the cue is about to fire, and
+frames of motion, not from RAM velocity) and the lurch cue: a HOLLOW arrow
+that blinks through the 40-frame warning (get ready) and turns into a SOLID
+double arrow when the push starts (lean now), with the status line naming
+the lean. Like the card tells it, it waits for the solid arrow (lead 0) and
 otherwise steers the dot back toward the middle with a dead zone, the way a
 person nudges. `pt.py curve subway` delays all of that by a human reaction.
+The top end comes from GOLD DOT SURF (the dot never left the gold middle
+all leg: the stop's STANDING SURF pays x3), which needs quick, small hands.
 
 subway_human is subway_surfer with a built-in 15-frame (250 ms) hand, so a
 plain `balance` run shows where an average player lands.
@@ -95,10 +97,10 @@ class subway_expert(_Reader):
 class subway_surfer(_Reader):
     """Human-like: the dot's position, its drift judged from motion, and the
     on-screen cue. lead = how many frames before the push the cue makes it
-    lean (the third beep / the solid arrow)."""
+    lean (0: on the solid arrow, as the card says)."""
     look = 10
     dz = 2.5
-    lead = 6
+    lead = 0
 
     def act(self, t, tel, rng):
         s = self.read()
