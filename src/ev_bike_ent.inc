@@ -522,6 +522,8 @@ seg_stopped:
     jsr tram_n_close
     bcs @no
     jsr pass_lane_busy
+    bcs @no
+    jsr holes_by_stop
     bcc @go
 @no:
     jmp seg_parked
@@ -543,6 +545,39 @@ seg_stopped:
     jsr rand_car_pal
     sta E_PAL,x
 @x:
+    rts
+
+; carry set if a pothole in the bike lane or the lane you'd pass in (x >=
+; 140) is within 160 px of world y tmp2. Keeps X.
+holes_by_stop:
+    ldy #$0000
+@l:
+    lda E_TYPE,y
+    cmp #T_POTHOLE
+    bne @n
+    lda E_X+1,y
+    cmp #140
+    bcc @n
+    A16
+    lda E_WY,y
+    sec
+    sbc tmp2
+    bpl @p
+    eor #$FFFF
+    inc a
+@p:
+    cmp #160
+    A8
+    bcc @yes
+@n:
+    iny
+    iny
+    cpy #(NUM_ENT*2)
+    bne @l
+    clc
+    rts
+@yes:
+    sec
     rts
 
 ; carry set if a northbound car would be beside a car stopped at world y
@@ -806,7 +841,7 @@ punish_camper:
     cmp #185
     bcs @curb
     jsr tram_behind
-    bcc @x
+    jcc @x
     bra @hole
 @curb:
     ; the bike lane: a pothole, but never beside a door or with the 501
@@ -827,6 +862,10 @@ punish_camper:
     ldx #(CAMP_T_BL - 30)
     stx b_camp
     rts
+@later2:
+    ldx #(CAMP_T - 30)
+    stx b_camp
+    rts
 @notn:
     cmp #74
     bcc @hole
@@ -835,8 +874,6 @@ punish_camper:
     jsr tram_ahead
     bcc @x
 @hole:
-    jsr alloc_ent
-    bcs @x
     lda b_px+1
     cmp #30
     bcs @lo
@@ -846,6 +883,19 @@ punish_camper:
     bcc @hi
     lda #226
 @hi:
+    sta tmp3
+    jsr hole_spot_busy          ; (a pothole hidden under a car: no)
+    bcs @later2
+    A16
+    lda b_dist
+    clc
+    adc #250
+    jsr near_xing               ; (nor just before the tracks across)
+    A8
+    bcs @later2
+    jsr alloc_ent
+    bcs @x
+    lda tmp3
     xba
     lda #$00
     A16
@@ -858,6 +908,60 @@ punish_camper:
     sta E_WY,x
     A8
 @x:
+    rts
+
+; carry set if a camper's pothole at x tmp3 (byte), world y dist + 250
+; would sit under or right by a car in that column when the rider gets
+; there (a parked or stopped car where it is; a northbound car ~90 px on)
+hole_spot_busy:
+    ldy #$0000
+@l:
+    lda E_TYPE,y
+    beq @n
+    cmp #(T_CAR_N + 1)
+    bcs @n
+    lda E_X+1,y
+    sec
+    sbc tmp3
+    bcs @p
+    eor #$FF
+    inc a
+@p:
+    cmp #(15 + 11 + 4)          ; car + pothole half widths, and a bit
+    bcs @n
+    A16
+    lda b_dist
+    clc
+    adc #250
+    sta tmp2
+    lda E_TYPE,y
+    and #$00FF
+    cmp #T_CAR_N
+    bne @st
+    lda tmp2
+    sec
+    sbc #90
+    sta tmp2
+@st:
+    lda E_WY,y
+    sec
+    sbc tmp2
+    bpl @q
+    eor #$FFFF
+    inc a
+@q:
+    cmp #(29 + 14 + 40)         ; car + pothole half lengths, and room to see both
+    A8
+    bcc @yes
+@n:
+    iny
+    iny
+    cpy #(NUM_ENT*2)
+    bne @l
+    clc
+    rts
+@yes:
+    sec
     rts
 
 ; the 501 up the northbound tracks behind you; carry set if it can't come
@@ -959,9 +1063,44 @@ seg_hole:
     sta E_TYPE,x
     lda b_nextsp
     sta E_WY,x
+    jsr near_xing
+    bcc @x16
+    stz E_TYPE,x                ; (no: two HOP orders a second apart)
+@x16:
     A8
 @x:
     rts
+
+; carry set if world y A (A16) is within XING_CLEAR px before (or
+; XING_AFTER after) one of the tracks across Queen: a pothole there would
+; need a hop while the last one's still cooling down. A16 in/out, keeps X, Y.
+XING_CLEAR = 240
+XING_AFTER = 150
+near_xing:
+    .a16
+    phx
+    sta tmp2
+    ldx #$0000
+@l:
+    lda f:xing_at,x
+    sec
+    sbc tmp2
+    clc
+    adc #XING_AFTER
+    cmp #(XING_CLEAR + XING_AFTER)
+    bcc @yes
+    inx
+    inx
+    cpx #(xing_end - xing_at)
+    bne @l
+    plx
+    clc
+    rts
+@yes:
+    plx
+    sec
+    rts
+    .a8
 
 ; never the bike lane: the only potholes there are a camper's (above)
 hole_lanes: .byte 134, 160, 160, 122, 88, 60        ; - 6 .. + 6
@@ -1030,6 +1169,10 @@ seg_ped:
     clc
     adc #30
     sta E_WY,x
+    jsr near_xing               ; (not walking out as you hop the tracks)
+    bcc @ok
+    stz E_TYPE,x
+@ok:
     A8
     lda #2
     jsr brange
@@ -1151,6 +1294,8 @@ ents_update:
     rts
 
 STOP_SEEN = 230                 ; rel: just before it comes on screen
+STOP_LATE = 140                 ; ...and no later than this (a 25-frame hand + the steer)
+STOP_COL  = 15                  ; in its path: within this of its middle (hw_tab)
 str_stopped: .byte "CAR IN BIKE LANE. AGAIN.", 0
 str_stopped2: .byte "STEER ", TXT_ARROW_L + $20, " ROUND IT", 0
 
@@ -1165,8 +1310,25 @@ ent_logic:
     jne @tram
     lda E_X+1,x
     cmp #(STOP_X + 1)
-    bcs @door
-    ; stopped in the bike lane: say so as it comes on screen
+    jcs @door
+    ; stopped in the bike lane: say so as it comes on screen, but only to a
+    ; rider in its path (their column), with time to steer round it, and
+    ; nothing else in that path first. A rider who leaves its path and
+    ; comes back (with time still to act) is told again.
+    lda E_X+1,x
+    sec
+    sbc b_px+1
+    bcs @sp
+    eor #$FF
+    inc a
+@sp:
+    cmp #STOP_COL
+    bcc @incol
+    lda E_FLAGS,x               ; out of its path: it may say so again
+    and #$BF
+    sta E_FLAGS,x
+    rts
+@incol:
     lda E_FLAGS,x
     and #$40
     jne @x
@@ -1175,12 +1337,22 @@ ent_logic:
     cmp #STOP_SEEN
     A8
     jcs @x
+    A16
+    lda tmp0
+    cmp #STOP_LATE
+    A8
+    jcc @x                      ; too late to be any use: the SPLAT says it
     lda b_state
     jne @x
-    lda b_popup+1               ; a style or crash callout keeps the panel
-    jne @x                      ; (it says so as soon as that one goes)
-    lda b_popup
-    cmp #20
+    lda b_xhint                 ; a HOP order for something nearer keeps the panel
+    jne @x
+    A16
+    lda tmp0
+    sec
+    sbc #29                     ; (its near end)
+    sta tmp1
+    A8
+    jsr path_blocked
     jcs @x
     lda E_FLAGS,x
     ora #$40
@@ -1301,8 +1473,35 @@ hint_px:
     rts
     .a8
 
+; ...and for the tracks across the road, RHINT_F frames off: B any time
+; from the order going up till the frame you reach them clears them (in
+; the air, or landed LAND_T or fewer frames before): the manual's "any
+; time in the next half second", with a few frames to spare
+RHINT_F = 34
+.assert RHINT_F = 34, error, "hint_rails multiplies by 34"
+.assert RHINT_F <= HOP_T + LAND_T, error, "B the moment the order shows must still count"
+hint_rails:
+    .a16
+    lda b_speed
+    asl a
+    sta tmp2                    ; x2
+    asl a
+    asl a
+    asl a
+    asl a                       ; x32
+    clc
+    adc tmp2
+    xba
+    and #$00FF
+    cmp #XHINT_MIN
+    bcs @x
+    lda #XHINT_MIN
+@x:
+    rts
+    .a8
+
 ; the tracks across the road (X = it, tmp0 = rel): HOP THE RAILS: B! goes
-; up on rows 5-7 when they're XHINT_F frames off (on screen, below the
+; up on rows 5-7 when they're RHINT_F frames off (on screen, below the
 ; panel) and stays till you're over them; then crossing them is a rail
 ; crossing like any other (TRACK HOP in the air, RAIL WOBBLE if not)
 str_xhint: .byte "HOP THE RAILS: B!", 0
@@ -1315,7 +1514,7 @@ xing_logic:
     A16
     lda tmp0
     bmi @cross16
-    jsr hint_px
+    jsr hint_rails
     cmp tmp0
     bcc @cross16
     A8
@@ -1331,6 +1530,7 @@ xing_logic:
     jsr pop_top
     lda #$01
     sta b_xhint
+    stz b_xent                  ; (the rails' order, not a pothole's)
     ldx #120
     stx b_popup
     A16
@@ -1379,10 +1579,15 @@ xing_logic:
 str_hhint: .byte "POTHOLE! HOP IT: B", 0
 hole_logic:
     lda b_state
-    bne @x
+    jne @x
+    lda b_xhint                 ; the rails' order is up: it stays
+    beq @free
+    lda b_xent
+    jeq @x
+@free:
     lda E_FLAGS,x
     and #$44                    ; (said so, or already hit)
-    bne @x
+    jne @x
     lda E_X+1,x
     sec
     sbc b_px+1
@@ -1390,7 +1595,27 @@ hole_logic:
     eor #$FF
     inc a
 @dp:
-    cmp #13
+    cmp #11                     ; (hw_tab: in its path)
+    jcs @x
+    ; and still in it in 16 frames at the way you're sliding (not
+    ; steering out of its way already)
+    A16
+    lda b_vx
+    asl a
+    asl a
+    asl a
+    asl a
+    clc
+    adc b_px
+    xba
+    A8
+    sec
+    sbc E_X+1,x
+    bcs @dq
+    eor #$FF
+    inc a
+@dq:
+    cmp #11
     bcs @x
     A16
     lda b_speed
@@ -1408,6 +1633,8 @@ hole_logic:
     cmp tmp1
     bcs @x16                    ; too late to be any use
     A8
+    jsr path_blocked            ; (a car first, or one parked over it: not this order)
+    bcs @x
     lda E_FLAGS,x
     ora #$40
     sta E_FLAGS,x
@@ -1420,6 +1647,9 @@ hole_logic:
     jsr pop_top
     lda #$01
     sta b_xhint
+    lda b_cur
+    inc a
+    sta b_xent
     ldx #44
     stx b_popup
     A16
@@ -1461,10 +1691,25 @@ tram_warn:
     lda tmp0
     pha
     A8
+    ; the way out: the way you're already sliding, if you are (say
+    ; < to someone crossing the tracks to the right and they'd turn back
+    ; into it), else the nearer side
     ldy #.loword(str_501r)
+    A16
+    lda b_vx
+    cmp #$0080
+    bmi @nr
+    A8
+    bra @r
+@nr:
+    .a16
+    cmp #($10000 - $80 + 1)
+    A8
+    bcc @l
     lda b_px+1
     cmp #TRAM_X
     bcs @r
+@l:
     ldy #.loword(str_501l)
 @r:
     sty b_line2
@@ -1623,6 +1868,111 @@ tram_follow:
     sta E_FLAGS,x
     rts
 
+; carry set if something other than entity X (b_cur) in the rider's
+; column - a car, an open or opening door, the 501 or a southbound car,
+; a person, a pothole not yet hit - has its near end within tmp1 px of the
+; rider (signed: the order for X would name the wrong thing). Things wholly
+; behind the rider don't count. A8 in/out; keeps X, tmp0, tmp1. Uses tmp2.
+path_blocked:
+    phx
+    ldy #$0000
+@l:
+    A16
+    tya
+    cmp b_cur
+    A8
+    jeq @n
+    lda E_TYPE,y
+    jeq @n
+    cmp #T_TOKEN
+    jeq @n
+    cmp #T_FINISH
+    jcs @n                      ; (the finish line, the tracks across)
+    cmp #T_POTHOLE
+    bne @col
+    lda E_FLAGS,y
+    and #$04
+    bne @n
+@col:
+    lda E_TYPE,y
+    TAXB
+    lda hh_tab,x
+    sta tmp2
+    stz tmp2+1
+    lda E_X+1,y
+    sec
+    sbc b_px+1
+    bcs @p
+    eor #$FF
+    inc a
+@p:
+    cmp hw_tab,x
+    bcc @edge8
+    cpx #T_PARKED               ; a door sticks out to the car's left
+    bne @n
+    lda E_X+1,y
+    cmp #(STOP_X + 1)
+    bcc @n
+    lda E_FLAGS,y
+    and #$02
+    bne @door
+    A16
+    lda E_TIMER,y
+    A8
+    beq @n
+@door:
+    lda E_X+1,y
+    sec
+    sbc #20
+    sec
+    sbc b_px+1
+    bcs @dp
+    eor #$FF
+    inc a
+@dp:
+    cmp #10
+    bcs @n
+    lda #13
+    sta tmp2
+    A16
+    lda E_WY,y
+    clc
+    adc #6
+    bra @edge
+@edge8:
+    A16
+    lda E_WY,y
+@edge:
+    .a16
+    sec
+    sbc b_dist                  ; rel
+    clc
+    adc tmp2
+    bmi @n16                    ; all of it behind us
+    beq @n16
+    sec
+    sbc tmp2
+    sec
+    sbc tmp2                    ; its near end
+    sec
+    sbc tmp1
+    bmi @yes
+@n16:
+    A8
+@n:
+    iny
+    iny
+    cpy #(NUM_ENT*2)
+    jne @l
+    plx
+    clc
+    rts
+@yes:
+    A8
+    plx
+    sec
+    rts
+
 ; hw+4, hh+10, kind (1 car, 2 tram, 3 hole, 4 token, 5 ped), near-miss
 hw_tab:   .byte 0, 15, 15, 15, 15, 19, 19, 11,  9,  8, 0, 0
 hh_tab:   .byte 0, 29, 29, 29, 29, 55, 55, 14, 15, 14, 0, 0
@@ -1766,6 +2116,18 @@ ent_collide:
     lda E_FLAGS,x
     ora #$04
     sta E_FLAGS,x
+    lda b_xhint                 ; its HOP order is done with, hop or not
+    beq @hord
+    lda b_cur
+    inc a
+    cmp b_xent
+    bne @hord
+    phx
+    jsr pop_clear_m
+    ldx #$0000
+    stx b_popup
+    plx
+@hord:
     lda b_hop
     beq @ground                 ; hopped clean over it: POTHOLE HOP
     lda tmp0
