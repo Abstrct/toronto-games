@@ -362,8 +362,9 @@ def brother_downwind():
     groove2 = 'k . h . s . h k h . k . s . h .'
     beat4 = groove + ' ' + groove2 + ' ' + groove + ' ' + groove2
     dcgg = fill([dm, c, g, g], strum)
-    intro = sec('intro', rest(4), '@12 ' + dcgg, rest(2) + ' ' + bg + ' ' + bg,
-                rep('. . h . . . h . . . h . . . h .', 3) + ' k . h . s . h k s . s . s s s s')
+    # a two-bar count-in on G (a race is ~25 s, so the band comes in early)
+    intro = sec('intro', rest(2), '@12 ' + fill([g, g], strum), bg + ' ' + bg,
+                '. . h . . . h . . . h . . . h . k . h . s . h k s . s . s s s s')
     verse = sec('verse',
                 'A4 A4 A4 A4 C5:2 A4:2 D5 C5 A4:2 G4:4 A4 A4 A4 A4 C5:2 D5:2 E5:4 D5:4 '
                 'D5 D5 D5 D5 C5:2 A4:2 G4:8 -:16 '
@@ -389,7 +390,7 @@ def brother_downwind():
                rep(' '.join([bd, bc, bg, bg]), 2),
                'x . h . s . h k k . h . s . h . ' + groove2 + ' ' + beat4 + ' ' +
                groove + ' k . h . s . h k s . s . s s s s')
-    return song(9, [SAIL_LEAD, SAIL_STRUM, BASS, DRUMS], join(intro, verse, chorus, lick), loop=64)
+    return song(9, [SAIL_LEAD, SAIL_STRUM, BASS, DRUMS], join(intro, verse, chorus, lick), loop=32)
 
 
 
