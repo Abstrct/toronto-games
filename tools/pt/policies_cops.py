@@ -142,7 +142,8 @@ class _Runner(Policy):
     margin = 3          # px of cop gap kept on top of COP_SEEN
     noise = 0           # +- frames of jump timing error
     miss = 0.0          # chance to fluff a hurdle entirely
-    ground_buzz = 120   # BUZZ below this: room for a ground sip (save the rest for SIP 'N' HOPs)
+    ground_buzz = 60    # BUZZ below this: room for a ground sip (save the rest for SIP 'N' HOPs)
+    air_buzz = 120      # ...for a SIP 'N' HOP (176+ is TIPSY: the cop closes in)
 
     def __init__(self):
         self.g = None
@@ -191,7 +192,7 @@ class _Runner(Policy):
         return m
 
     def plan_jump(self, t, s, rng, err=0, fluff=False):
-        want_b = self.air_sip and self.gap_ok(s, (60 - s.prog + 2) // 3 + 4) and s.buzz < 220
+        want_b = self.air_sip and self.gap_ok(s, (60 - s.prog + 2) // 3 + 4) and s.buzz < self.air_buzz
         options = [(20, want_b), (20, False), (4, False)] if want_b else [(4, False), (20, False)]
         for hold_a, air_b in options:
             ok = [k for k in range(0, 24) if simulate(s, k, hold_a, air_b)]
@@ -371,8 +372,9 @@ class cops_eyes(Policy):
     BIAS = 0                    # habitually early (+) or late (-), frames
     ground_q = 3                # HUD cop meter at or below this: a ground gulp is safe
     air_q = 5                   # ...at or below this (and he's off screen): sip through the jump
-    ground_buzz = 7             # HUD buzz meter (16 steps) at or below this: room for a ground gulp
-    air_buzz = 13               # ...for a sip over a hurdle
+    ground_buzz = 2             # HUD buzz meter (16 steps) at or below this: room for a ground gulp
+    air_buzz = 5                # ...for a sip over crates or a bench (10+ is TIPSY: the cop gains)
+    air_buzz_big = 7            # ...over a bin or a raccoon (they pay double)
     careless = 0.1
     miss = 0.0                  # chance to freeze on a hurdle and not jump at all
     sips = True
@@ -432,7 +434,8 @@ class cops_eyes(Policy):
                 hold = self.HOLD if e['t'] == T_BIN else self.TAP
                 self.a_until = t + hold + rng.randint(-2, 2)
                 m |= A
-                if self.sips and q <= self.air_q and not cop_on_screen and s.buzz >> 4 <= self.air_buzz:
+                room = self.air_buzz_big if e['t'] in (T_BIN, T_COON) else self.air_buzz
+                if self.sips and q <= self.air_q and not cop_on_screen and s.buzz >> 4 <= room:
                     # let go of both together for a big jump, well after A for a hop: two
                     # releases a frame or two apart can land in either order on a late hand
                     self.b_until = self.a_until if e['t'] == T_BIN else t + self.GULP
@@ -461,7 +464,14 @@ class cops_noob(cops_eyes):
     miss = 0.25
     careless = 0.5
     ground_q, air_q = 2, 4
-    ground_buzz, air_buzz = 15, 15
+    ground_buzz, air_buzz, air_buzz_big = 15, 15, 15
+
+    def act(self, t, tel, rng):
+        # sips without minding the BUZZ until the meter first goes red (and
+        # TIPSY! / SLOSHED! comes up): from then on, only while it's pink
+        if self.g is not None and self.ground_buzz > 10 and self.g.core.peek(self.g.sym['ev_ram'] + 20, 1)[0] >= 176:
+            self.ground_buzz, self.air_buzz, self.air_buzz_big = 6, 8, 9
+        return super().act(t, tel, rng)
 
 
 class cops_pro(cops_eyes):
@@ -469,7 +479,7 @@ class cops_pro(cops_eyes):
     the cop (sips the moment he's out of sight) and the buzz."""
     ERR = 0
     ground_q, air_q = 4, 6
-    ground_buzz, air_buzz = 9, 14
+    ground_buzz, air_buzz, air_buzz_big = 2, 6, 9
 
 
 POLICIES = {c.__name__: c for c in [cops_safe, cops_pro, cops_pro_rt, cops_human, cops_rookie, cops_human15, cops_eyes, cops_noob,
