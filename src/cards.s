@@ -859,7 +859,7 @@ card_stat_pick:
     .byte 0, 1                  ; bay: TIME LEFT, PASSED
     .byte 1, 2                  ; park: DOGS DODGED, TACKLES
     .byte 0, 2                  ; cops: SIP 'N' HOPS, HURDLES
-    .byte 1, 0                  ; sail: BUOYS, TIME LEFT
+    .byte 1, 2                  ; sail: MARKS ROUNDED, BUMPS
     .byte 0, 1                  ; parking: SPOTS PARKED, CURB KISSES
     .byte 1, 0                  ; subway: STATIONS, GERMS
 
@@ -3237,14 +3237,14 @@ eb0: .byte "DELIVER THE PACKAGE TO", $0A, "SPADINA. PREFERABLY ALIVE.", 0
 eb1: .byte "MAKE THE 5:42 GO TRAIN.", $0A, "RED ! AHEAD? CHANGE LANES.", 0
 eb2: .byte "QUEEN GATE TO DUNDAS GATE.", $0A, "DODGE DOGS, THEN PAT THEM!", 0
 eb3: .byte "THE BIKE COP SAW THAT", $0A, "TALLBOY. RUN TO SPADINA!", 0
-eb4: .byte "ROUND BUOYS 1, 2 AND 3,", $0A, "THEN CROSS THE LINE.", 0
+eb4: .byte "ROUND MARKS 1, 2 AND 3,", $0A, "THEN CROSS THE LINE.", 0
 eb5: .byte "THREE SPOTS ON BRUNSWICK.", $0A, "PARK IT. DON'T DENT A BMW.", 0
 eb6: .byte "RIDE TO UNION HANDS-FREE.", $0A, "GRAB A POLE, GET GERMS.", 0
 ec0: .byte "D-PAD STEER    A PEDAL", $0A, "B HOP          DOWN BRAKE", $0A, "HOP RAILS, DODGE LATE: X8", 0
 ec1: .byte "LEFT, RIGHT AS DOTS LAND", $0A, "UP/DOWN LANE  A EXCUSE ME", $0A, "Y ON A GOLD DOT: PRESTO!", 0
 ec2: .byte "D-PAD WALK   A THROW BALL", $0A, "B WHEN ! SHOWS: SIDESTEP", $0A, "B AS HE LUNGES: BONUS!", 0
 ec3: .byte "TAP A AT CHALK. RED: HOLD", $0A, "B: SIP WHILE COP CAN'T SEE", $0A, "B MID-AIR = SIP 'N' HOP", 0
-ec4: .byte "LEFT/RIGHT TAP: TURN", $0A, "INTO THE WIND? ZIG-ZAG!", $0A, "A HIKE OUT  SURF THE WAKE", 0
+ec4: .byte "LEFT/RIGHT: TURN  A: HIKE", $0A, "WIND FROM TOP: ZIG-ZAG UP", $0A, "SURF THE FERRY'S WAKE!", 0
 ec5: .byte "UP GAS  DOWN REVERSE", $0A, "BACK IN: DOWN+RIGHT, THEN", $0A, "DOWN+LEFT. A: PARK IT!", 0
 ec6: .byte "HOLLOW ARROW: GET READY", $0A, "SOLID: D-PAD THAT WAY NOW", $0A, "GOLD DOT STOP-TO-STOP = X3", 0
 ef0: .byte "WIPED OUT!", 0
@@ -3297,7 +3297,7 @@ card_fail_note:
     .addr fn_bay,    fn_bay,    fn_bay,    fn_bay       ; bay
     .addr fn_park,   fn_park_t, fn_park_q, fn_park      ; park
     .addr fn_cops,   fn_cops,   fn_cops_q, fn_cops      ; cops
-    .addr fn_sail,   fn_sail,   fn_sail,   fn_sail      ; sail
+    .addr fn_sail,   fn_sail_t, fn_sail_t, fn_sail      ; sail
     .addr fn_pk,     fn_pk,     fn_pk_q,   fn_pk        ; parking
     .addr fn_sub,    fn_sub,    fn_sub_q,  fn_sub       ; subway
 fn_bike:   .byte "THIRD WIPEOUT. NO TIPS!", 0
@@ -3309,7 +3309,8 @@ fn_park_t: .byte "CROSSING PAID BY DISTANCE", 0
 fn_park_q: .byte "GAVE UP: PAID BY DISTANCE", 0
 fn_cops:   .byte "COP CAUGHT YOU: FINED 1/4", 0
 fn_cops_q: .byte "GAVE UP: THE COP FINES 1/4", 0
-fn_sail:   .byte "NO FINISH, NO STYLE PAID", 0
+fn_sail:   .byte "NOBODY STEERED FOR 10 S", 0
+fn_sail_t: .byte "250 PER MARK ROUNDED", 0
 fn_pk:     .byte "PARK ONE SPOT TO FINISH", 0
 fn_pk_q:   .byte "QUITTERS KEEP 450 AT MOST", 0
 fn_sub:    .byte "PATIENT ZERO! STYLE VOID", $0A, "RIDE: 40 A STOP YOU SURFED", 0
@@ -3372,7 +3373,7 @@ sl_dodge:  .byte "DOGS DODGED", 0
 sl_tackle: .byte "TACKLES", 0
 sl_lucky:  .byte "LUCKY SIPS", 0
 sl_hurdles: .byte "HURDLES", 0
-sl_buoys:  .byte "BUOYS", 0
+sl_buoys:  .byte "MARKS ROUNDED", 0
 sl_bump:   .byte "BUMPS", 0
 
 ; ------------------------------------------------------------------
