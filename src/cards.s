@@ -500,7 +500,7 @@ score_card:
 @stat:
     lda tmp7
     cmp c_nst
-    bcs @stats_done
+    jcs @stats_done
     lda event_idx
     asl a
     clc
@@ -527,6 +527,21 @@ score_card:
     beq @nostat
     sta ptr0
     A8
+    jsr sail_style_stat         ; Regatta's style stat names its biggest source
+    bcc @lab
+    A16
+    lda ev_stat+6               ; source in the top 4 bits
+    xba
+    and #$00FF
+    lsr a
+    lsr a
+    lsr a
+    and #$001E
+    tax
+    lda f:sail_style_lab,x
+    sta ptr0
+    A8
+@lab:
     lda #^card_stat_labels
     sta ptr0+2
     lda #COL_L
@@ -540,6 +555,12 @@ score_card:
     lda ev_stat,y
     sta tmp1
     A8
+    jsr sail_style_stat
+    bcc @sv
+    lda tmp1+1                  ; the points are the low 12 bits
+    and #$0F
+    sta tmp1+1
+@sv:
     lda #COL_V
     jsr cy_cell
     ldy #5
@@ -549,7 +570,7 @@ score_card:
 @nostat:
     A8
     inc tmp7
-    bra @stat
+    jmp @stat
 @stats_done:
     lda c_brk
     beq @plain
@@ -1084,9 +1105,31 @@ card_stat_pick:
     .byte 0, 2                  ; bay: TIME LEFT, SPILLS
     .byte 1, 2                  ; park: DOGS DODGED, TACKLES
     .byte 0, 2                  ; cops: SIP 'N' HOPS, HURDLES
-    .byte 0, 2                  ; sail: TIME LEFT, BUMPS (a finish rounded all 3; COURSE = 1000+15/S)
+    .byte 0, 3                  ; sail: TIME LEFT, the biggest style source (sail_style_stat)
     .byte 0, 2                  ; parking: SPOTS PARKED, TICKETS
     .byte 1, 0                  ; subway: STATIONS, GERMS
+; carry set = this stat line is Regatta's style stat (ev_stat 3 on a finish):
+; ev_stat+6 carries its biggest style source in the top 4 bits
+; (ev_sail.s: 0 none, 1 tight rounding, 2 clean tacks, 3 ferry surf, 4 line
+; honours) and the points in the low 12, so a follower who earned none still
+; sees that style exists. A8.
+sail_style_stat:
+    lda event_idx
+    cmp #4
+    bne @no
+    lda c_si
+    cmp #3
+    bne @no
+    sec
+    rts
+@no:
+    clc
+    rts
+sail_style_lab: .addr sl_style, sl_tight, sl_ctack, sl_fsurf, sl_lhon, sl_style, sl_style, sl_style
+sl_tight: .byte "TIGHT ROUNDING", 0
+sl_ctack: .byte "CLEAN TACKS", 0
+sl_fsurf: .byte "FERRY SURF", 0
+sl_lhon:  .byte "LINE HONOURS", 0
 ; the same for a failed run (ev_fail 1-4): only stats that still count
 card_stat_pick_fail:
     .byte 0, 2                  ; bike: METRES, WIPEOUTS (tokens and style are forfeit)
