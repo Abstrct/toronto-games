@@ -20,7 +20,7 @@
 .global oam_buf, oam_hi, txt_map, pal_buf, dmaq
 .global players, num_players, cur_player, game_mode
 ; the turn's result: see vars.s for ev_fail / ev_giveup / ev_break rules
-.global event_on, event_idx, ev_score, ev_fail, ev_stat, ev_giveup, ev_break
+.global event_on, event_idx, ev_score, ev_fail, ev_stat, ev_giveup, ev_break, ev_style
 .global records, ev_ram, pause_ok
 ; attract demo (game.s demo_play, boot.s demo_pads)
 .global demo_on, demo_off, demo_left, demo_mask, demo_real, demo_sp, demo_ev, demo_force

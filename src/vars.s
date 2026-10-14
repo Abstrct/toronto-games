@@ -71,6 +71,7 @@ ev_score:   .res 2
 ; second-guesses it.
 ev_fail:    .res 1
 ev_stat:    .res 8              ; up to 4 words of per-event stats for the result card
+ev_style:   .res 10             ; up to 5 style sources, points each (0 = none), summing to ev_break+2 on a finish; labels in cards.s
 ev_break:   .res 6              ; result card arithmetic: base, bonus, penalty words (base + bonus - penalty = ev_score)
 ; ev_giveup: set by the pause menu (CALL IT A DAY). Every event loop checks
 ; it each frame and ends with ev_fail 3, scored exactly like a failed run
