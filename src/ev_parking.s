@@ -16,22 +16,28 @@
 ;
 ; Each spot is graded when you park; the result box lists every line:
 ;   base:  PARKED 200 + CURB 300/150/50 + ANGLE 200/100/40 + SPACE 100/60/30
-;          (half in / crooked: HALF IN 150)
+;          (half in / crooked: HALF IN 150 plus the lamps that aren't red)
 ;   style: ONE-MOVE +150 (never drove forward after backing in),
 ;          TIME LEFT +10 a second, to the tenth the HUD clock shows,
-;          DEAD CENTRE +100, CURB KISS +150 (gap <= 2 px without touching
-;          the curb), PERFECT x2 +400 / x3 +800 (all-GREAT spots in a row),
+;          DEAD CENTRE +100, ZERO ANGLE +150 (straight to half a degree),
+;          CURB KISS by the pixel without touching the curb: KISSED IT
+;          (0 px) +300, CLOSE KISS (1) +200, CURB KISS (2) +100,
+;          PERFECT x2 +400 / x3 +800 (all-GREAT spots in a row),
 ;          CLOSE SHAVE +200 (backing in right behind the cyclist, 1-3 px
 ;          from her line: the coach never mentions it, it says WAIT)
 ;   penalties: each bump into a parked car 150, curb 50, sidewalk 100,
 ;          hydrant 200, hedge 100, clipping a cyclist 150, the $75 TICKET 75
 ;   not in the spot when time runs out: TOWED, 0.
 ; The coach line is a driving instructor timed to your hand: it measures how
-; long you take to answer LET GO OF UP and BACK IN, says LET GO early enough
-; that you stop on the line or a little short of it (which counts), says NOW!
-; when the swing you'd get once your hand gets there ends NOW_AIM px out,
-; and STRAIGHT! LET GO in time to stop straight. Too late, it says so and
-; pulls you out a bit to try again. It aims safe: GREAT grades need you to
+; long you take to answer LET GO OF UP and BACK IN (the pedal cues), and
+; separately NOW! and STRAIGHT! (the steering cues: until it has seen one,
+; it assumes at least RS_MIN and aims wider). It says LET GO early enough
+; that you stop on the line or a little short of it (which counts), NOW!
+; when the swing you'd get once your hand gets there ends NOW_AIM px out
+; (and clears the BMW from where you'll be then), and STRAIGHT! LET GO in
+; time to stop straight. Callouts wait under those timed lines. Too late,
+; it says so and has you stop, pull out a bit and stop again, one line at
+; a time. It aims safe: GREAT grades need you to
 ; anticipate. The car sprite's tilt steps match the ANGLE lamp's grades.
 ; Spots: 1 roomy, 2 snug with a cyclist coming up the lane (bell + callout
 ; once you've pulled up: wait for her before backing in), 3 tight with less
@@ -90,6 +96,9 @@ O_OK      = 2
 O_TICKET  = 3
 O_TOWED   = 4
 O_LATE    = 5           ; time ran out, but it was parked well enough
+O_OKC     = 6           ; parked, one lamp short of NICELY DONE: the curb
+O_OKA     = 7           ;   ... the angle
+O_OKS     = 8           ;   ... the space
 
 ; per-spot flags (k_flags)
 F_REV    = $01          ; has backed up
@@ -166,7 +175,8 @@ k_onemv  = ev_ram + 118
 k_dents  = ev_ram + 120
 k_curbx  = ev_ram + 122     ; rightmost corner - curb (signed)
 k_shown  = ev_ram + 124     ; message line as last drawn (address)
-k_style  = ev_ram + 126     ; style earned this spot: 1 one-move 2 quick 4 quick2 8 kiss
+k_style  = ev_ram + 126     ; style earned this spot: 1 one-move 2 time left 4 zero angle 8 kiss
+                            ; $10 streak $20 centre $40 shave
 k_bx     = ev_ram + 128     ; cyclist
 k_by     = ev_ram + 130     ; 8.8
 k_bst    = ev_ram + 132     ; 0 none, 1 waiting, 2 riding, 3 gone
@@ -227,13 +237,19 @@ k_saycoach = ev_ram + 276   ; the coach line when the callout went up
 k_lgo    = ev_ram + 278     ; timing an answer to LET GO OF UP: 0 not yet, 1 timing, 2 done
 k_lgot   = ev_ram + 280
 k_drove  = ev_ram + 282     ; 1 = the d-pad has driven the car this spot
-k_late   = ev_ram + 284     ; 1 = swung in too late: easing out to try again
+k_late   = ev_ram + 284     ; swung in too late: 1 stop, 2 pull out a bit, 3 stop, 0 swing again
 k_shave  = ev_ram + 286     ; cyclist: closest the car came to her (px), $FF none
 k_short  = ev_ram + 288     ; how far short of the line still counts as on it
 k_t0     = ev_ram + 290     ; scratch for the coach's predictions
 k_t1     = ev_ram + 292
 k_bspd   = ev_ram + 294     ; the cyclist's speed this spot (8.8 px a frame)
 k_lgpad  = ev_ram + 296     ; LET GO OF UP: frames of margin on top of your reaction
+k_reacts = ev_ram + 300     ; your reaction to the steering cues (NOW!, STRAIGHT!): 0 = not seen yet
+k_nst    = ev_ram + 302     ; timing an answer to NOW! (1) or STRAIGHT! (2), 0 not timing
+k_ntm    = ev_ram + 304
+k_over   = ev_ram + 306     ; this far past the line still counts as on it (px)
+k_lead   = ev_ram + 308     ; frames ahead the coach is judging (scratch)
+k_skiss  = ev_ram + 310     ; this spot's CURB KISS: px from the curb (0-2)
 k_hdma   = ev_ram + 512     ; result box: BG3VOFS HDMA table (<= 160 bytes)
 
 .segment "EVENTS2"             ; with Off-Leash and Tallboy (GFX0 is full with TTC Surfing)
@@ -325,6 +341,8 @@ pk_init:
     bne @c
     lda #REACT0                 ; 0.4 s until it knows you (a first-timer)
     sta k_react
+    stz k_reacts                ; (the steering cues: from your pedal answers till then)
+    stz k_nst
     rts
 
 REACT0 = 24
@@ -337,6 +355,8 @@ spot_bike: .word 0, 1, 1
 spot_tgt:  .word TGT_Y, TGT_Y, TGT_Y - 3
 spot_short: .word 12, 10, 8     ; stopped this far short of the line is still on it
 spot_lgpad: .word 12, 12, 12    ; LET GO margin (frames): short of the line beats past it
+spot_over: .word 4, 4, 2        ; past the line by more than this: back to it first (the swing
+                                ; in from further up would clip the BMW)
 spot_msg:  .addr str_spot1, str_spot2, str_spot3
 
 spot_setup:
@@ -366,6 +386,9 @@ spot_setup:
     sta k_short
     lda spot_lgpad,x
     sta k_lgpad
+    lda spot_over,x
+    sta k_over
+    stz k_nst
     stz k_lgo
     stz k_drove
     stz k_late
@@ -455,7 +478,6 @@ str_spot3: .byte "SPOT 3: TIGHT, 25 S, BIKES", 0
 ; one that was up when it went up replaces it). Clobbers X.
 MSG_T   = 100
 MSG_MIN = 40
-MSG_URGENT = 16
 say:
     stx k_msg
     sta k_msgcol
@@ -476,11 +498,42 @@ add_pen:
     A8
     rts
 
+; carry set = the coach's line shows, not the callout: while driving, the
+; timed lines (LET GO, NOW!, STRAIGHT!, TOO LATE) are up and your hand needs
+; them now. A callout that has had its moment (MSG_SEEN frames) ends; a
+; newer one waits under the line (a curb scrape is told once you've let go)
+MSG_SEEN = 20
+msg_held:
+    lda k_phase
+    bne @no
+    ldx k_coach
+    cpx #.loword(co_brake)
+    beq @yes
+    cpx #.loword(co_now)
+    beq @yes
+    cpx #.loword(co_stop)
+    beq @yes
+    cpx #.loword(co_late)
+    beq @yes
+@no:
+    clc
+    rts
+@yes:
+    lda k_msgt
+    cmp #(MSG_T - MSG_SEEN + 1)
+    bcs @w
+    stz k_msgt
+@w:
+    sec
+    rts
+
 ; ------------------------------------------------------------------
 pk_update:
-    ; timers that run in every phase
+    ; timers that run in every phase (a callout waits under an urgent line)
     lda k_msgt
     beq @m
+    jsr msg_held
+    bcs @m
     dec k_msgt
 @m:
     lda k_jig
@@ -1721,7 +1774,7 @@ bike_shave:
     rts
 
 str_shave: .byte "CLOSE SHAVE! SHE DIDN'T BLINK", 0
-str_bell: .byte "DING DING! BIKE! WAIT FOR IT", 0
+str_bell: .byte "DING DING! BIKE COMING UP!", 0
 str_bike: .byte "HEY! WATCH THE BIKE LANE -150", 0
 
 ; the meter maid walks down the sidewalk in the last 10 seconds
@@ -1859,7 +1912,7 @@ spot_eval:
     A8
     lda #1
     sta k_inspot
-    ; curb: 0-2 great, 3-5 good, 6-12 ok, more = ticket; over by 1-6 ok, 7+ ticket
+    ; curb: 0-2 great, 3-5 good, 6-15 ok, more = ticket; over by 1-6 ok, 7+ ticket
     A16
     lda k_gap
     bmi @over
@@ -1870,7 +1923,7 @@ spot_eval:
     cmp #6
     bcc @gc
     iny
-    cmp #13
+    cmp #16
     bcc @gc
     iny
     bra @gc
@@ -1881,7 +1934,7 @@ spot_eval:
     ldy #3
 @gc:
     sty k_gc
-    ; angle (1/256 turn): 0-1 great, 2-3 good, 4-6 ok, 7+ crooked
+    ; angle (1/256 turn): 0-1 great, 2-3 good, 4-8 ok, 9+ crooked (13 degrees)
     lda k_ang
     ldy #0
     cmp #2
@@ -1890,7 +1943,7 @@ spot_eval:
     cmp #4
     bcc @ga
     iny
-    cmp #7
+    cmp #9
     bcc @ga
     iny
 @ga:
@@ -1964,6 +2017,11 @@ coach:
     sbc k_tgt
     bmi @bk16
     cmp #9
+    bcc @bk16
+    ldx k_v                     ; stopped short of it, but near enough that
+    bne @nob16                  ; the coach would say BACK IN: wait too
+    cmp k_short
+    beq @bk16
     bcs @nob16
 @bk16:
     A8
@@ -2000,39 +2058,56 @@ coach:
 @set1:
     jmp @set
 @inlane:
-    ; too late to swing in: stop, pull out a bit, and only then swing again
-    ; (no flipping back to SWING IN on the way)
+    ; too late to swing in: stop (k_late 1), pull out a bit (2), stop (3),
+    ; and only then swing again. Each line stays up till it's done: no
+    ; flipping back to SWING IN on the way
     lda k_late
     beq @nolate
     lda k_ang
     cmp #4
     bcs @lf1
+@lfclr:
     stz k_late                  ; straight anyway: the usual lines
     bra @nolate
 @lf1:
-    jsr room_ahead              ; no room to pull out: swing in and take the curb
-    bcs @lfr
-    stz k_late
-    bra @nolate
-@lfr:
     A16
     lda k_v
     A8
-    beq @lfstop
+    tay                         ; (Y: the speed's sign, for the branches below)
+    lda k_late
+    cmp #2
+    beq @lf2
+    bcs @lf3
+    ; 1: TOO LATE! LET GO OF THE PAD, till it stops
+    cpy #$0000
     bmi @lfrev
+    lda #2
+    sta k_late
+@lf2:
+    ; 2: HOLD UP+RIGHT: PULL OUT A BIT, till what you'll still roll puts the
+    ; swing EASE_AIM out (then 3)
+    jsr room_ahead              ; no room to pull out: swing in and take the curb
+    bcc @lfclr
+    cpy #$0000
+    beq @lfstop
+    bmi @lfout
     jmp @easing
-@lfrev:
-    ldx #.loword(co_late)
-    jmp @set
 @lfstop:
     jsr gap_pred
     eor #$80
     cmp #($80 + EASE_AIM - 3)
-    bcc @lfout
-    stz k_late                  ; pulled out: NOW! from here
-    bra @nolate
+    bcs @lfclr                  ; out far enough already: NOW! from here
 @lfout:
     ldx #.loword(co_easeout)
+    jmp @set
+@lf3:
+    ; 3: ENOUGH! LET GO OF THE PAD, till it stops
+    cpy #$0000
+    beq @lfclr
+    ldx #.loword(co_easestop)
+    jmp @set
+@lfrev:
+    ldx #.loword(co_late)
     jmp @set
 @nolate:
     ; swung past straight (nose into the curb) after backing in: forward and
@@ -2057,7 +2132,7 @@ coach:
     lda k_inspot
     beq @notin
     lda k_ang                   ; still swinging in: the turning lines
-    cmp #7
+    cmp #9
     bcs @notin
     A16
     lda k_v
@@ -2096,8 +2171,9 @@ coach:
     sbc k_tgt                   ; px still to go (signed: + short of the line)
     sta k_tmp+14
     bpl @ahead
-    cmp #($10000 - 4)
-    bcc @far                    ; more than 4 px past the line
+    clc
+    adc k_over
+    bmi @far                    ; more than k_over px past the line
 @ahead:
     lda k_v
     beq @halt16
@@ -2169,20 +2245,12 @@ coach:
     ldx #.loword(co_back)
 @set:
     ; a new instruction ends a callout that has had its moment (a bump's
-    ; joke mustn't hide LET GO): new since the callout went up, not just
-    ; new this frame. A LET GO line always wins once the callout has been
-    ; up MSG_URGENT frames: it can't wait out a curb scrape's joke
-    lda #(MSG_T - MSG_URGENT + 1)
-    cpx #.loword(co_late)
-    beq @cut
-    cpx #.loword(co_stop)
-    beq @cut
-    cpx #.loword(co_brake)
-    beq @cut
+    ; joke mustn't hide BACK IN): new since the callout went up, not just
+    ; new this frame. (The timed lines, LET GO, NOW! and STRAIGHT!, don't
+    ; wait at all: a callout waits under them, msg_held)
     cpx k_saycoach
     beq @same
     lda #(MSG_T - MSG_MIN + 1)
-@cut:
     cmp k_msgt
     beq @same
     bcc @same
@@ -2214,8 +2282,7 @@ coach:
     bmi @ezs                    ; nose nearly on the car ahead: stop here
     bcs @ez
 @ezs:
-    ldx #.loword(co_easestop)
-    jmp @set
+    jmp @ezstop
 @ez:
     jsr gap_pred
     A16
@@ -2236,6 +2303,12 @@ coach:
     cmp #EASE_AIM
     bcc @eo16
     A8
+@ezstop:
+    lda k_late                  ; (pulling out after TOO LATE: ENOUGH stays up)
+    beq @ezs2
+    lda #3
+    sta k_late
+@ezs2:
     ldx #.loword(co_easestop)
     jmp @set
 @eo16:
@@ -2262,9 +2335,9 @@ coach:
     jsr room_ahead              ; (no room to pull out: swing now, take the curb)
     bcs @late
 @nl:
-    ; NOW!, if the nose will swing clear of the car ahead; if not, back
-    ; straight until it will
-    jsr bmw_clear
+    ; NOW!, if the nose will swing clear of the car ahead once your hand gets
+    ; there; if not, back straight until it will
+    jsr bmw_ahead
     bcc @clr
     ldx #.loword(co_now)
     jmp @set
@@ -2272,15 +2345,16 @@ coach:
     ldx #.loword(co_clear)
     jmp @set
 @late:
-    lda #1                      ; stay with it till it's pulled out
-    sta k_late
+    ldy #2                      ; stay with it till it's pulled out
     ldx #.loword(co_easeout)
     A16
     lda k_v
     A8
     bpl @lset
+    dey
     ldx #.loword(co_late)
 @lset:
+    sty k_late
     jmp @set
 @counter:
     ; swinging in on left lock, still well turned, and it'll end on the
@@ -2383,7 +2457,7 @@ TH_PAD = 4
 ; its flags: where the car will be pointing when your hand catches up
 .a8
 th_pred:
-    lda k_react
+    jsr rs_now
     clc
     adc #TH_PAD                 ; and the wheel centring, the braking
 ; A8 = frames: the same, that many frames ahead
@@ -2426,10 +2500,37 @@ th_ahead:
 ; carry set = swinging in on left lock from here clears the car ahead. The
 ; turn centre is C = axle - 32 (cos, sin); the front corner swings round it
 ; 54 px out, so C must be about that far from the BMW's rear corner: 53 px.
-; Judged from where the car is now, so NOW! never says go to a quick hand
-; that TOO SOON then calls back
+; bmw_clear judges the pose the car is in now (it has counter-steered);
+; bmw_ahead the pose it will be in on right lock when a hand that's 3/4 of
+; your reaction away rolls to DOWN+LEFT (NOW! is said that early), so a
+; slow hand doesn't get MIND THE BMW for a swing its NOW! would clear.
+; From heading t to t' on right lock the axle moves 32 (c - c', s - s'), so
+; C' = axle + (32 c - 64 c', 32 s - 64 s') (bmw_at: k_t0 = c', k_t1 = s')
 CLEAR_R = 53
+bmw_ahead:
+    jsr rs_now
+    inc a
+    inc a
+    sta k_lead
+    lsr a
+    lsr a
+    eor #$FF
+    sec
+    adc k_lead                  ; 3/4 of it
+    jsr th_ahead
+    pha
+    jsl cos8
+    sta k_t0
+    pla
+    jsl sin8
+    sta k_t1
+    bra bmw_at
 bmw_clear:
+    lda k_c
+    sta k_t0
+    lda k_s
+    sta k_t1
+bmw_at:
     lda #CLEAR_R
     ldx k_coach                 ; (once NOW! is up, a pixel's wobble won't take it back)
     cpx #.loword(co_now)
@@ -2445,18 +2546,26 @@ bmw_clear:
     nop
     nop
     ldx RDMPYL
-    stx k_cr2                ; r * r
+    stx k_cr2                   ; r * r
+    lda k_t0
+    ldy #64
+    jsr smul
+    .a16
+    sta k_tmp+12
+    A8
     lda k_c
     ldy #32
     jsr smul
     .a16
+    sec
+    sbc k_tmp+12
     jsr asr7
     sta k_tmp+12
     lda k_ax
     xba
     and #$00FF
-    sec
-    sbc k_tmp+12                ; C x
+    clc
+    adc k_tmp+12                ; C x
     eor #$FFFF
     sec
     adc #SPOT_X0                ; dx
@@ -2464,17 +2573,25 @@ bmw_clear:
     bcs @yes
     sta k_tmp+14
     A8
+    lda k_t1
+    ldy #64
+    jsr smul
+    .a16
+    sta k_tmp+12
+    A8
     lda k_s
     ldy #32
     jsr smul
     .a16
+    sec
+    sbc k_tmp+12
     jsr asr7
     sta k_tmp+12
     lda k_ay
     xba
     and #$00FF
-    sec
-    sbc k_tmp+12                ; C y
+    clc
+    adc k_tmp+12                ; C y
     eor #$FFFF
     sec
     adc #A_REAR                 ; dy
@@ -2516,6 +2633,7 @@ bmw_clear:
 ; and from BACK IN to DOWN, averaged in as they come. NOW! goes up when the
 ; gap you'd end up with once your hand gets there is NOW_AIM.
 NOW_AIM = 6
+NOW_AIM1 = 8                ; (before it has timed your answer to a NOW! or a STRAIGHT!)
 react_time:
     lda k_lgo
     cmp #1
@@ -2559,8 +2677,50 @@ react_time:
     lda k_rt
     jsr fold_react
 @thr:
-    ; NOW! when the gap you'll get (gap_ahead) is NOW_AIM, GET READY 10 px before
+    ; the steering cues: NOW! answered by rolling to LEFT, STRAIGHT! by
+    ; letting go of the d-pad
+    lda k_nst
+    beq @aim
+    inc k_ntm
+    cmp #1
+    bne @st
+    lda k_notch
+    bmi @sans
+    bra @sw
+@st:
+    A16
+    lda pad
+    and #(PAD_UP | PAD_DOWN | PAD_LEFT | PAD_RIGHT)
+    A8
+    beq @sans
+@sw:
+    lda k_ntm
+    cmp #60
+    bcc @aim
+    stz k_nst                   ; no answer: stop timing
+    bra @aim
+@sans:
+    ; the first answer is your steering reaction; after that a slower one
+    ; counts at once, a quicker one half (late costs more than early)
+    stz k_nst
+    lda k_ntm
+    jsr clamp_react
+    ldy k_reacts
+    beq @set
+    cmp k_reacts
+    bcs @set
+    adc k_reacts
+    lsr a
+@set:
+    sta k_reacts
+@aim:
+    ; NOW! when the gap you'll get (gap_ahead) is NOW_AIM, GET READY 10 px
+    ; before; wider until the coach has seen you answer a steering cue
     lda #($80 + NOW_AIM)
+    ldy k_reacts
+    bne @aimk
+    lda #($80 + NOW_AIM1)
+@aimk:
     sta k_nowb
     clc
     adc #10
@@ -2569,6 +2729,14 @@ react_time:
 
 ; A = a measured answer (frames): average it into k_react (6..40)
 fold_react:
+    jsr clamp_react
+    clc
+    adc k_react
+    lsr a
+    sta k_react
+    rts
+
+clamp_react:
     cmp #6
     bcs @lo
     lda #6
@@ -2577,10 +2745,20 @@ fold_react:
     bcc @hi
     lda #40
 @hi:
-    clc
-    adc k_react
-    lsr a
-    sta k_react
+    rts
+
+; A8 = your reaction to the steering cues, as far as the coach knows it:
+; before it has timed one, your pedal answers, but at least RS_MIN (a pedal
+; cue is easy to see coming; NOW! isn't)
+RS_MIN = 18
+rs_now:
+    lda k_reacts
+    bne @x
+    lda k_react
+    cmp #RS_MIN
+    bcs @x
+    lda #RS_MIN
+@x:
     rts
 
 ; A8 = the curb gap you'd end up with if your hand rolls to DOWN+LEFT when
@@ -2597,7 +2775,7 @@ gap_ahead:
 @p:
     sta k_t0
     A8
-    lda k_react
+    jsr rs_now
     inc a
     inc a
     jsr th_ahead
@@ -2692,7 +2870,7 @@ co_strr:   .byte "HOLD DOWN+RIGHT: STRAIGHTEN", 0
 co_lock:   .byte "HOLD DOWN+RIGHT: BACK IN", 0
 co_back:   .byte "HOLD DOWN+RIGHT: BACK IN", 0
 co_wait:   .byte "WAIT! LET THE BIKE GO BY", 0
-co_ready:  .byte "KEEP DOWN+RIGHT: GET READY", 0
+co_ready:  .byte "HOLD DOWN+RIGHT: GET READY", 0
 co_now:    .byte "NOW! ROLL TO DOWN+LEFT", 0
 co_clear:  .byte "MIND THE BMW: HOLD DOWN ONLY", 0
 co_swing:  .byte "HOLD DOWN+LEFT: SWING IN", 0
@@ -2708,6 +2886,53 @@ co_nosein: .byte "HOLD UP+LEFT: STRAIGHTEN", 0
 co_pinned: .byte "PINNED! HOLD DOWN ONLY", 0
 co_pullup: .byte "STUCK! HOLD UP TO PULL AWAY", 0
 co_backup: .byte "STUCK! HOLD DOWN TO BACK OFF", 0
+
+; k_sbase += what the three lamps pay (a red one pays 0)
+grade_pts:
+    lda k_gc
+    asl a
+    TAXB
+    A16
+    lda f:pts_curb,x
+    clc
+    adc k_sbase
+    sta k_sbase
+    A8
+    lda k_ga
+    asl a
+    TAXB
+    A16
+    lda f:pts_ang,x
+    clc
+    adc k_sbase
+    sta k_sbase
+    A8
+    lda k_gs
+    asl a
+    TAXB
+    A16
+    lda f:pts_space,x
+    clc
+    adc k_sbase
+    sta k_sbase
+    A8
+    rts
+
+
+; A16 = what this spot's CURB KISS pays (k_skiss px out); X = its label
+kiss_pts:
+    lda k_skiss
+    asl a
+    TAXB
+    A16
+    lda f:kiss_lbl,x
+    pha
+    lda f:kiss_tbl,x
+    plx
+    rts
+.a8
+kiss_tbl: .word KISS, KISS - 100, KISS - 200
+kiss_lbl: .addr bl_kiss0, bl_kiss1, bl_kiss2
 
 ; ------------------------------------------------------------------
 ;  work out what this spot scores (carry set = time ran out)
@@ -2733,8 +2958,9 @@ park_result:
     cmp #3
     bcc @parked
 @ticket:
-    ; half in: HALF IN 150, and the $75 TICKET takes 75 back; both the curb
-    ; and the angle red: WAY OFF 50
+    ; half in: HALF IN 150 and the lamps that aren't red (a crooked park
+    ; tight to the curb still pays its curb), and the $75 TICKET takes 75
+    ; back; both the curb and the angle red: WAY OFF 50
     plp
     lda #O_TICKET
     sta k_out
@@ -2751,39 +2977,16 @@ park_result:
 @hp:
     stx k_half
     stx k_sbase
+    jsr grade_pts
     ldx #TICKET
     jsr add_pen
     jmp @done
 @parked:
     inc k_parked
     ; base: PARKED 200 + curb + angle + space
-    lda k_gc
-    asl a
-    TAXB
-    A16
-    lda f:pts_curb,x
-    clc
-    adc #PARKED
-    sta k_sbase
-    A8
-    lda k_ga
-    asl a
-    TAXB
-    A16
-    lda f:pts_ang,x
-    clc
-    adc k_sbase
-    sta k_sbase
-    A8
-    lda k_gs
-    asl a
-    TAXB
-    A16
-    lda f:pts_space,x
-    clc
-    adc k_sbase
-    sta k_sbase
-    A8
+    ldx #PARKED
+    stx k_sbase
+    jsr grade_pts
     ; the outcome: all great = perfect, nothing ok = nicely done
     lda k_gc
     ora k_ga
@@ -2791,6 +2994,32 @@ park_result:
     TAXB
     lda f:out_of_grades,x
     sta k_out
+    ; just one lamp at OK: a good park, and which lamp to work on
+    cmp #O_OK
+    bne @og
+    lda k_gc
+    cmp #2
+    beq @oc
+    lda k_ga
+    cmp #2
+    beq @oa
+    lda #O_OKS                  ; (only the space is left at OK)
+    bra @os
+@oc:
+    lda k_ga
+    ora k_gs
+    cmp #2
+    bcs @og
+    lda #O_OKC
+    bra @os
+@oa:
+    lda k_gs
+    cmp #2
+    bcs @og
+    lda #O_OKA
+@os:
+    sta k_out
+@og:
     plp
     bcc @style
     ; time ran out: parked, but no style
@@ -2871,7 +3100,27 @@ park_result:
 @nt16:
     A8
 @nk:
-    ; CURB KISS: within 2 px of the curb without ever touching it
+    ; ZERO ANGLE: straight to half a degree (the GREAT lamp allows three)
+    A16
+    lda k_th
+    bpl @za
+    eor #$FFFF
+    inc a
+@za:
+    cmp #ZERO_TH
+    A8
+    bcs @nz
+    lda #$04
+    tsb k_style
+    A16
+    lda k_sbonus
+    clc
+    adc #ZERO
+    sta k_sbonus
+    A8
+@nz:
+    ; CURB KISS: within 2 px of the curb without ever touching it, paid by
+    ; the pixel: 0 px 300, 1 px 200, 2 px 100
     lda k_flags
     and #F_CURB
     bne @streak
@@ -2880,13 +3129,14 @@ park_result:
     cmp #3
     A8
     bcs @streak
+    sta k_skiss
     inc k_kisses
     lda #$08
     tsb k_style
+    jsr kiss_pts
     A16
-    lda k_sbonus
     clc
-    adc #KISS
+    adc k_sbonus
     sta k_sbonus
     A8
 @streak:
@@ -2978,27 +3228,15 @@ WAY_OFF  = 50                   ; half in with the curb and angle lamps both red
 CENTRE   = 100
 TICKET   = 75
 ONE_MOVE = 150
-KISS     = 150
+KISS     = 300                  ; CURB KISS at 0 px; 100 less a pixel out
+ZERO     = 150                  ; ZERO ANGLE
+ZERO_TH  = $0060                ; |heading| under this (half a degree)
 SHAVE    = 200                  ; CLOSE SHAVE (the coach never mentions it)
 STREAK   = 400                  ; PERFECT x2 +400, x3 +800
 pts_curb:  .word 300, 150, 50, 0, 0
 pts_ang:   .word 200, 100, 40, 0, 0
 pts_space: .word 100, 60, 30, 0, 0
 
-; k_score = the spots banked so far (base + bonus - penalties), never below 0
-update_total:
-    A16
-    lda k_base
-    clc
-    adc k_bonus
-    sec
-    sbc k_pen
-    bpl @p
-    lda #$0000
-@p:
-    sta k_score
-    A8
-    rts
 
 outcome_message:
     lda k_out
@@ -3039,15 +3277,18 @@ outcome_message:
     rts
 
 out_msgs:
-    .addr om0, om1, om2, om3, om4, om5
+    .addr om0, om1, om2, om3, om4, om5, om6, om7, om8
 out_tp:
-    .byte TP_GREEN, TP_GREEN, TP_WHITE, TP_ORANGE, TP_RED, TP_YELLOW
+    .byte TP_GREEN, TP_GREEN, TP_WHITE, TP_ORANGE, TP_RED, TP_YELLOW, TP_GREEN, TP_GREEN, TP_GREEN
 om0: .byte "PERFECT PARK! GREEN P PRO!", 0
 om1: .byte "NICELY DONE.", 0
 om2: .byte "PARKED. IT'LL DO.", 0
 om3: .byte "HALF IN. $75 TICKET!", 0
 om4: .byte "TOWED! SEE YA AT THE LOT", 0
 om5: .byte "TIME! IT'LL DO, I GUESS.", 0
+om6: .byte "GOOD PARK! NEXT: HUG CURB", 0
+om7: .byte "GOOD PARK! NEXT: STRAIGHTER", 0
+om8: .byte "GOOD PARK! NEXT: CENTRE IT", 0
 str_asleep: .byte "ASLEEP AT THE WHEEL? TOWED!", 0
 
 ; ------------------------------------------------------------------
@@ -3071,7 +3312,7 @@ ph_anim:
     cmp #24
     bne @nb
     A8
-    jsr result_box
+    jsl result_box
     A16
 @nb:
     lda k_anim
@@ -3083,7 +3324,7 @@ ph_anim:
     cmp #24
     bcs @ns
     A8
-    jsr box_step
+    jsl box_step
     A16
 @ns:
     ; A moves on once the box has been up a moment; otherwise ~4 s
@@ -3300,6 +3541,10 @@ BOX_COL = 0
 BOX_ROW = 6
 BOX_W   = 18
 NUM_COL = BOX_W - 2             ; the numbers end in this column
+
+; The result box's code lives in bank $80 (jsl result_box / box_step); its
+; strings and tables stay here in EVENTS2, read with DB = $83 as before.
+.segment "CODE"               ; (bank $80: EVENTS2 is full)
 result_box:
     ; no pausing over the box (its rows are spread out; the PAUSED box's
     ; wouldn't be): START is back with the next spot
@@ -3352,7 +3597,7 @@ result_box:
     ldx #((BOX_ROW+1)*32 + BOX_COL + 1)
     jsl txt_print
     stz txt_bg
-    rts
+    rtl
 
 ; the box's lines tick in one every other frame (all at once is more than a
 ; frame's work): A = which line; the one after the last is this spot's net
@@ -3372,7 +3617,7 @@ box_step:
     jsr box_items
 @x:
     stz txt_bg
-    rts
+    rtl
 @tot:
     lda #1
     sta k_bmode
@@ -3403,17 +3648,34 @@ box_step:
     stz txt_bg
     jsr update_total            ; the HUD score moves by exactly this line
     SFX SFX_COIN
+    rtl
+
+; k_score = the spots banked so far (base + bonus - penalties), signed: the
+; HUD shows -175 after a -175 spot, so the next spot's box adds up on it
+; (only the final score stops at 0)
+update_total:
+    A16
+    lda k_base
+    clc
+    adc k_bonus
+    sec
+    sbc k_pen
+    sta k_score
+    A8
     rts
 
-box_titles: .addr bt0, bt1, bt2, bt3, bt4, bt5
+.segment "EVENTS2"
+box_titles: .addr bt0, bt1, bt2, bt3, bt4, bt5, bt6, bt6, bt6
 bt0: .byte "PERFECT PARK!", 0
 bt1: .byte "NICELY DONE.", 0
 bt2: .byte "IT'LL DO.", 0
 bt3: .byte "HALF IN. TICKET!", 0
 bt4: .byte "TOWED!", 0
 bt5: .byte "TIME'S UP.", 0
+bt6: .byte "GOOD PARK.", 0
 bt_asleep: .byte "ASLEEP? TOWED!", 0
 
+.segment "CODE"               ; (bank $80: EVENTS2 is full)
 ; the lines (k_bmode 0: just count them into k_bcount)
 box_items:
     lda k_out
@@ -3427,7 +3689,7 @@ box_items:
 @hl:
     lda #TP_WHITE
     jsr bi_plus
-    jmp @pens
+    bra @grades                 ; (the lamps that aren't red pay; no style)
 @nh:
     cmp #O_TOWED
     jeq @pens
@@ -3436,6 +3698,7 @@ box_items:
     ldy #PARKED
     lda #TP_WHITE
     jsr bi_plus
+@grades:
     lda k_gc
     asl a
     TAXB
@@ -3492,10 +3755,25 @@ box_items:
     jsr bi_plus
 @s3b:
     lda k_style
+    and #$04
+    beq @s3c
+    ldx #.loword(bl_zero)
+    ldy #ZERO
+    lda #TP_GREEN
+    jsr bi_plus
+@s3c:
+    lda k_style
     and #$08
     beq @s4
-    ldx #.loword(bl_kiss)
-    ldy #KISS
+    lda k_skiss
+    asl a
+    TAXB
+    A16
+    lda f:kiss_tbl,x
+    tay
+    lda f:kiss_lbl,x
+    tax
+    A8
     lda #TP_GREEN
     jsr bi_plus
 @s4:
@@ -3598,6 +3876,7 @@ box_items:
 @x:
     rts
 
+.segment "EVENTS2"
 pen_flag: .byte F_CURB, F_WALK, F_HYD, F_HEDGE, F_BIKE
 pen_pts:  .word 50, 100, 200, 100, 150
 pen_lbl:  .addr bl_curbhit, bl_walk, bl_hyd, bl_hedge, bl_bike
@@ -3611,7 +3890,10 @@ bl_ang:     .byte "ANGLE", 0
 bl_space:   .byte "SPACE", 0
 bl_one:     .byte "ONE-MOVE", 0
 bl_left:    .byte "TIME LEFT", 0
-bl_kiss:    .byte "CURB KISS", 0
+bl_kiss0:   .byte "KISSED IT", 0      ; 0 px off the curb
+bl_kiss1:   .byte "CLOSE KISS", 0     ; 1 px
+bl_kiss2:   .byte "CURB KISS", 0      ; 2 px
+bl_zero:    .byte "ZERO ANGLE", 0
 bl_shave:   .byte "CLOSE SHAVE", 0
 bl_streak2: .byte "PERFECT X2", 0
 bl_streak3: .byte "PERFECT X3", 0
@@ -3631,6 +3913,7 @@ gw1: .byte "GOOD", 0
 gw2: .byte "OK", 0
 gw3: .byte "BAD", 0
 
+.segment "CODE"               ; (bank $80: EVENTS2 is full)
 ; X = label, Y = points, A = palette: "LABEL   +nnn" in that colour
 bi_plus:
     pha
@@ -3806,6 +4089,7 @@ row_cell:
     A8
     rts
 
+.segment "EVENTS2"
 clear_box:
     ldx #(BOX_ROW*32 + BOX_COL)
     A16
@@ -3829,6 +4113,7 @@ clear_box:
 ; then each box row followed by k_bgap lines of STRIP_ROW, a copy of a blank
 ; box row) so the box reads at 8 + gap px a row. The gap is BOX_GAP px, less
 ; for a box too tall to fit above the bottom row.
+.segment "CODE"               ; (bank $80: EVENTS2 is full)
 BOX_GAP   = 6
 STRIP_ROW = 28                  ; off screen; the panel's own strip is 29-31
 BOX_TOP   = 51                  ; screen line of the box's top border
@@ -3958,6 +4243,8 @@ box_spread:
     sta $4374
 @x:
     rts
+
+.segment "EVENTS2"
 
 ; ------------------------------------------------------------------
 ; HUD: a navy panel across the top, BG3 rows 0-4, opened up by an HDMA
@@ -4096,12 +4383,47 @@ hud_top:
     ldx #(1*32 + 18)
     ldy #1
     jsl txt_num
-    ldx k_score
-    stx tmp1
+    ; the running total, red with a minus sign while it's below 0
+    A16
+    lda k_score
+    bpl @sp
+    eor #$FFFF
+    inc a
+@sp:
+    sta tmp1
+    A8
+    lda #(HUD_ATTR | (TP_YELLOW << 2))
+    bit k_score+1
+    bpl @sc
+    lda #(HUD_ATTR | (TP_RED << 2))
+@sc:
+    sta k_t1
     ldx #(1*32 + 26)
     ldy #5
-    lda #(HUD_ATTR | (TP_YELLOW << 2))
     jsl txt_num
+    bit k_score+1
+    bpl @sx
+    ldx #(1*32 + 29)            ; the sign goes just left of the digits
+    A16
+    lda k_score
+    eor #$FFFF
+    inc a
+    cmp #10
+    bcc @sg
+    dex
+    cmp #100
+    bcc @sg
+    dex
+    cmp #1000
+    bcc @sg
+    dex
+@sg:
+    A8
+    lda #('-' - $20 + TXT_WIN)
+    sta tmp2
+    lda k_t1
+    jsl txt_char
+@sx:
     stz txt_bg
     rts
 
@@ -4159,14 +4481,16 @@ lamp_tile: .byte TXT_METER+4+TXT_WIN, TXT_METER+4+TXT_WIN, TXT_METER+4+TXT_WIN, 
 hud_msg:
     lda k_msgt
     beq @coach
+    jsr msg_held
+    bcs @coach
     ldx k_msg
     lda k_msgcol
     bra @show
 @coach:
     lda k_phase
-    bne @x
+    jne @x
     ldx k_coach
-    beq @x
+    jeq @x
     lda #TP_CYAN
     cpx #.loword(co_park)
     bne @show
@@ -4181,7 +4505,7 @@ hud_msg:
     cpx k_shown
     bne @draw
     cmp k_shcol
-    beq @x
+    jeq @x
 @draw:
     stx k_shown
     sta k_shcol
@@ -4199,6 +4523,28 @@ hud_msg:
     sta k_lgo
     stz k_lgot
 @nlg:
+    ; NOW! or STRAIGHT! just went up: time your answer (if it's still to come)
+    lda k_nst
+    bne @nst                    ; (back from under a callout: already timing)
+    cpx #.loword(co_now)
+    bne @nnow
+    lda k_notch
+    bmi @nst
+    lda #1
+    bra @tst
+@nnow:
+    cpx #.loword(co_stop)
+    bne @nst
+    A16
+    lda pad
+    and #(PAD_UP | PAD_DOWN | PAD_LEFT | PAD_RIGHT)
+    A8
+    beq @nst
+    lda #2
+@tst:
+    sta k_nst
+    stz k_ntm
+@nst:
     ; blank the line inside the panel, then centre the text
     phx
     ldx #(3*32 + 1)
@@ -4377,9 +4723,9 @@ draw_player:
     rts
 
 ; |heading| in 1/256 turns -> frame: GREAT (0-1) straight, GOOD (2-3) 4,
-; OK (4-6) 8, then 14 / 22 / 32 / 44 / 58 / 72 degrees
-pcar_frame: .byte 0, 0, 1, 1, 2, 2, 2
-            .byte 3, 3, 3, 3, 3, 3
+; OK (4-8) 8, then 14 / 22 / 32 / 44 / 58 / 72 degrees
+pcar_frame: .byte 0, 0, 1, 1, 2, 2, 2, 2, 2
+            .byte 3, 3, 3, 3
             .byte 4, 4, 4, 4, 4, 4
             .byte 5, 5, 5, 5, 5, 5, 5, 5
             .byte 6, 6, 6, 6, 6, 6, 6, 6, 6, 6
