@@ -7,7 +7,7 @@ exploit detectors: holding UP, mashing B while walking, random input.
 """
 import sys
 
-from policies import Policy, idle, hold_up, random_input, A, B, UP, DOWN, LEFT, RIGHT
+from policies import Policy, idle, hold_up, random_input, A, B, X, UP, DOWN, LEFT, RIGHT
 
 # ev_ram offsets (src/ev_park.s)
 K_X, K_Y, K_DASH, K_DASHCD, K_BALLS, B_STATE = 0, 2, 16, 18, 26, 48
@@ -269,8 +269,108 @@ class park_human(_Peeker):
         return self.done(m)
 
 
-POLICIES = {c.__name__: c for c in [park_ace, park_fetcher, park_sloppy, park_timing, park_human,
+K_CAM = 34
+
+
+def _hand_latency():
+    """the latency pt.py's run_bot is applying to this bot (0 outside a curve run)"""
+    f = sys._getframe(2)
+    while f is not None:
+        if 'pending' in f.f_locals and 'latency' in f.f_locals:
+            return f.f_locals['latency'] or 0
+        f = f.f_back
+    return 0
+
+
+class park_hand(_Peeker):
+    """The CURVE bot: a practised player with a human hand.
+
+    It only reacts to what's on screen: a dog is a threat from the frame its
+    "!" shows (over the dog, or pinned to the bottom edge). From then on it
+    judges the charge by eye, the way you time a ball coming at you: it
+    watches the gap close and presses B early enough that its own (known,
+    practised) reaction delay lands the step where it aims. It aims as late
+    as its consistency allows: a steady hand (small jitter) goes for the
+    CLOSE SHAVE, a shaky one aims safely inside the DODGE range, and if even
+    that's a gamble it gets set on the "!" instead (the beginner's dodge).
+    A press that lands early still arms the step, so erring early is safe.
+    Between dogs it walks north and goes back for a pat when the dog it
+    dodged sits within easy reach."""
+
+    def __init__(self):
+        super().__init__()
+        self.lat = None
+        self.seen = {}           # dog slot -> plan
+        self.hold_b = 0
+        self.gap = {}            # dog slot -> last gaps (closing speed by eye)
+
+    def act(self, t, tel, rng):
+        if self.lat is None:
+            self.lat = _hand_latency()
+        me, dogs = self.view()
+        cam = self.g.core.peek(self.g.sym['ev_ram'] + K_CAM, 2)
+        cam = cam[0] | cam[1] << 8
+        L = self.lat
+        J = L // 4
+        m = UP
+        live = set()
+        for d in dogs:
+            if d['st'] not in (DS_ALERT, DS_CHARGE):
+                continue
+            live.add(d['i'])
+            dist = abs(d['x'] - me['x']) + abs(d['y'] - me['y'])
+            hist = self.gap.setdefault(d['i'], [])
+            hist.append(dist)
+            del hist[:-4]
+            if d['i'] not in self.seen:
+                self.seen[d['i']] = 'watch'
+            plan = self.seen[d['i']]
+            if plan == 'done':
+                continue
+            # closing speed, by eye, over the last few frames (never under a walk)
+            v = max(2.6, (hist[0] - hist[-1]) / max(1, len(hist) - 1))
+            aim = 12 + 1.5 * J * v
+            behind = d['y'] - cam > 192           # coming from off the bottom: no read on it
+            if aim > 34 or behind:
+                if not me['armed']:
+                    self.hold_b = 8               # get set on the "!"
+                self.seen[d['i']] = 'done'
+                continue
+            if d['st'] == DS_ALERT:
+                if d['y'] < me['y'] and dist < 64:
+                    m &= ~UP                      # he's right ahead, barking: wait for him
+                if dist - v * (L + J) <= aim:     # too close to time it: get set now
+                    self.hold_b = 8
+                    self.seen[d['i']] = 'done'
+            elif dist - v * L <= aim:
+                self.hold_b = 8
+                self.seen[d['i']] = 'done'
+        for i in list(self.seen):
+            if i not in live:
+                del self.seen[i]
+                self.gap.pop(i, None)
+        if self.hold_b:
+            self.hold_b -= 1
+            m |= B
+        elif not live and not me['dash']:
+            sit = _sitter(me, dogs, 70)
+            if sit is not None:
+                m = _toward(me, sit)
+            if me['x'] < 100:
+                m |= RIGHT
+            elif me['x'] > 156:
+                m |= LEFT
+        # X does nothing in the park. Flipping it now and then re-sends the
+        # held mask: pt.py's jittered hand can land an old decision after a
+        # newer one, which would otherwise stick (a human lets go of DOWN)
+        if (t >> 4) & 1:
+            m |= X
+        return self.done(m)
+
+
+POLICIES = {c.__name__: c for c in [park_ace, park_fetcher, park_sloppy, park_timing, park_human, park_hand,
                                      up_mash_b, up_mash_ab]}
 DEFAULTS = {'park': ['idle', 'hold_up', 'up_mash_b', 'up_mash_ab', 'random_input',
-                     'park_timing', 'park_sloppy', 'park_human', 'park_fetcher', 'park_ace']}
+                     'park_timing', 'park_sloppy', 'park_human', 'park_fetcher', 'park_hand', 'park_ace']}
+CURVE = {'park': 'park_hand'}
 

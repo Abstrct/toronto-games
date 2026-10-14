@@ -13,7 +13,7 @@
 .import park_tiles, park_map, park_solid, park_pal, park_spr, park_spr_pal
 
 PARK_H     = 2560
-START_Y    = 2540
+START_Y    = 2532
 FINISH_Y   = 40
 MAX_Y      = START_Y + 2     ; feet and shadow stay clear of the bottom HUD bar
 TIME_LIMIT = 90*60
@@ -25,6 +25,11 @@ DASH       = $0300
 ALERT_T    = 36              ; "!" tell before a dog charges (+0..19)
 DODGE_R    = 40              ; a charging dog this close when B goes = DODGE
 SHAVE_R    = 22              ; ... this close, pressed by hand = CLOSE SHAVE
+HAND_BONUS = 25              ; style for a dodge timed by hand (B with him in range)
+SHAVE_BONUS = 75             ; ... and for a CLOSE SHAVE (got set early = no bonus)
+BACK_R     = 40              ; walk this close to a barking dog and he backs off
+DODGE_PTS  = 50              ; base points a dodge
+HEAL_RUN   = 3               ; dogs beaten in a row that win back a heart
 DASH_WHIFF = 70              ; sidestep cooldown when nothing was dodged
 DASH_HIT   = 12              ; ... and after a clean dodge
 STUMBLE    = 48              ; a sidestep with no dog about leaves you off balance
@@ -92,6 +97,9 @@ k_xmv    = ev_ram + 572      ; 1 = this frame's x step went through
 k_canlr  = ev_ram + 574      ; slide: 1 = a step left is open where you stand, 2 = right
 k_sdir   = ev_ram + 576      ; the way we're sliding round something (sticks till clear)
 k_scd    = ev_ram + 578      ; frames before the gap search runs again (it's dear)
+k_hand   = ev_ram + 580      ; dodges timed by hand (B with him in range), shaves included
+k_hurt   = ev_ram + 582      ; hearts lost (3 = out); k_tackle counts every tackle
+k_streak = ev_ram + 584      ; dogs beaten since the last tackle / heart back
 k_cbuf   = ev_ram + 640      ; 64 bytes: one BG2 canopy row, unpacked for DMA
 EV_SEED  = ev_ram + 510
 
@@ -509,7 +517,7 @@ park_update:
     dec k_timer
     A8
     bne @common
-    lda k_tackle
+    lda k_hurt
     cmp #3
     bcc @up
     lda #ST_DONE
@@ -638,6 +646,14 @@ walk_input:
     lda k_stum
     beq @steady
     dec k_stum
+    stz k_wx                    ; (an armed step goes away from him)
+    lda pad_new
+    bit #PAD_B
+    beq @stumx
+    A8
+    jsr try_arm                 ; a whiff costs you the stumble, not the dog
+    A16
+@stumx:
     jmp @ydone
 @steady:
     ; an armed sidestep goes off by itself as the dog lunges
@@ -694,6 +710,9 @@ walk_input:
     beq @nob
     lda k_dashcd
     beq @bpress
+    A8                          ; on cooldown: no step, but you can get set
+    jsr try_arm
+    A16
 @nob:
     jmp @nodash
 @bpress:
@@ -702,15 +721,7 @@ walk_input:
     bcs @step
     lda k_live
     beq @step
-    lda k_armed
-    bne @held
-    lda #1
-    sta k_armed
-    A16
-    lda k_wx
-    sta k_armdx
-    A8
-    SFX SFX_BLIP
+    jsr try_arm
 @held:
     A16
     lda k_wx
@@ -1010,6 +1021,23 @@ walk_input:
 .a8
 
 str_oops: .byte " OOPS! NO DOG THERE ", 0
+
+; B with a dog on its way ("!" or charging, not yet in range): get set, and
+; the step goes off by itself as he lunges (a plain DODGE, never a shave)
+try_arm:
+    lda k_live
+    beq @x
+    lda k_armed
+    bne @x
+    lda #1
+    sta k_armed
+    A16
+    lda k_wx
+    sta k_armdx
+    A8
+    SFX SFX_BLIP
+@x:
+    rts
 
 ; carry set if a charging dog is within DODGE_R (clobbers tmp1-tmp3)
 near_charger:
@@ -1760,6 +1788,36 @@ think_alert:
     bcc @noball
     jmp go_ball
 @noball:
+    ; walk right up to a barking dog and he bounces back out of your way:
+    ; the lunge always comes from a few strides out, so it can be timed
+    jsr dog_dist                ; tmp1 = distance, tmp2/tmp3 = you - him
+    A16
+    stz D_VX,x
+    stz D_VY,x
+    lda tmp1
+    cmp #BACK_R
+    bcs @stay
+    lda tmp3
+    beq @bx
+    bmi @bs
+    lda #($10000 - $0100)       ; you're south of him: he backs north
+    bra @by
+@bs:
+    lda #$0100
+@by:
+    sta D_VY,x
+@bx:
+    lda tmp2
+    beq @stay
+    bmi @bxr
+    lda #($10000 - $0080)
+    bra @bxs
+@bxr:
+    lda #$0080
+@bxs:
+    sta D_VX,x
+@stay:
+    A8
     dec D_TIMER,x
     bne @x
     lda #DS_CHARGE
@@ -1884,6 +1942,8 @@ clamp_v:
 tackle:
     A16
     inc k_tackle
+    inc k_hurt
+    stz k_streak
     stz D_VX,x
     stz D_VY,x
     A8
@@ -1968,19 +2028,29 @@ dodged:
     ldy #CALM_DODGE
     sty k_calm
     SFX SFX_COIN
-    ; pressed by hand with him right on you: CLOSE SHAVE
+    ; got set early (armed): a plain DODGE. Timed by hand with him in range:
+    ; +HAND_BONUS, and right on you: CLOSE SHAVE, +SHAVE_BONUS
     lda k_shok
     beq @plain
     A16
+    inc k_hand
     lda tmp1
     cmp #SHAVE_R
+    bcc @shave
+    lda k_style
+    clc
+    adc #HAND_BONUS
+    sta k_style
     A8
-    bcs @plain
-    A16
+    LDPTR0 str_timed
+    lda #TP_GREEN
+    bra @say
+@shave:
+    .a16
     inc k_shaves
     lda k_style
     clc
-    adc #25
+    adc #SHAVE_BONUS
     sta k_style
     A8
     LDPTR0 str_shave
@@ -1988,16 +2058,36 @@ dodged:
     bra @say
 @plain:
     LDPTR0 str_dodge
-    lda #TP_GREEN
+    lda #TP_WHITE
 @say:
     jsr popup
     ldx #50
     stx k_popup
     ldx k_cur
+    jmp beat_dog
+
+; a dog beaten (dodged or fetched): every HEAL_RUN in a row since the last
+; tackle wins back a lost heart (keeps X)
+beat_dog:
+    A16
+    inc k_streak
+    lda k_streak
+    cmp #HEAL_RUN
+    bcc @x
+    lda k_hurt
+    beq @x
+    dec k_hurt
+    stz k_streak
+    A8
+    SFX SFX_CHEER
+    rts
+@x:
+    A8
     rts
 
 str_dodge: .byte " DODGE! ", 0
-str_shave: .byte " CLOSE SHAVE! +25 ", 0
+str_timed: .byte " NICE TIMING! +25 ", 0
+str_shave: .byte " CLOSE SHAVE! +75 ", 0
 
 ; skidding past: slow down, then sit
 think_past:
@@ -2392,6 +2482,7 @@ go_ball:
     lda #CALM_END
     sta k_calm
     A8
+    jsr beat_dog
 @n:
     lda #DS_BALL
     sta D_STATE,x
@@ -2822,7 +2913,7 @@ draw_dog:
     bmi @vis16
     cmp #(SPOT_BOT + 8)
     bcc @vis16
-    lda #200
+    lda #(SPOT_BOT + 2)
     sta spr_y
     A8
     jmp draw_warn
@@ -2848,8 +2939,17 @@ draw_dog:
     ora k_prio
     sta tmp5
     stz tmp5+1
+    lda D_STATE,x
+    cmp #DS_ALERT
+    bne @fv
+    lda k_x+1                   ; barking (even backing off): he faces you
+    cmp D_X+1,x
+    bcs @r
+    bra @fl
+@fv:
     lda D_VX+1,x
     bpl @r
+@fl:
     lda #$40
     sta tmp5+1
 @r:
@@ -3031,7 +3131,7 @@ dog_mouth:
     stz tmp5+1
     rts
 
-; spr_y = 200: a blinking "!" and an arrow pinned to the bottom edge
+; spr_y = SPOT_BOT + 2: a blinking "!" and an arrow pinned to the bottom edge
 draw_warn:
     lda frame
     and #$08
@@ -3207,7 +3307,8 @@ park_hud:
     beq park_hud_now
     rts
 park_hud_now:
-    ; solid HUD bars (rows 0-1 and 27) so sprites never muddle the numbers
+    ; solid HUD bars (rows 0-1 and 26-28) so sprites never muddle the numbers;
+    ; the progress row is 26, clear of the last 8 lines (CRT overscan)
     ldx #(0*32)
     A16
     lda #$0220                  ; 32 x 2
@@ -3217,9 +3318,9 @@ park_hud_now:
     sta tmp2
     lda #$20
     jsl txt_fill
-    ldx #(27*32)
+    ldx #(26*32)
     A16
-    lda #$0220                  ; 32 x 2: row 28 covers the last scanline
+    lda #$0320                  ; 32 x 3: row 28 covers the last scanline
     sta tmp1
     A8
     lda #TXT_WIN
@@ -3255,7 +3356,7 @@ park_hud_now:
     lda #(TXT_HEART + TXT_WIN)
     sta tmp2
     txa
-    cmp k_tackle
+    cmp k_hurt
     lda #($20 | (TP_GREY << 2))
     bcc @lost
     lda #($20 | (TP_RED << 2))
@@ -3284,7 +3385,7 @@ park_hud_now:
     lda #($20 | (TP_YELLOW << 2))
     jsl txt_num
 @nochain:
-    ; progress north, row 27
+    ; progress north, row 26
     A16
     lda #START_Y
     sec
@@ -3321,7 +3422,7 @@ park_hud_now:
     A16
     txa
     clc
-    adc #(27*32 + 7)
+    adc #(26*32 + 7)
     tax
     A8
     lda #($20 | (TP_GREEN << 2))
@@ -3330,8 +3431,8 @@ park_hud_now:
     inx
     cpx #17
     bne @pc
-    PRINT 1, 27, TP_GREY, str_q
-    PRINT 25, 27, TP_YELLOW, str_d
+    PRINT 1, 26, TP_GREY, str_q
+    PRINT 25, 26, TP_YELLOW, str_d
     stz txt_bg
     rts
 
@@ -3360,36 +3461,59 @@ park_score:
     lda k_tackle
     sta ev_stat+4
     lda k_style
-    sta ev_stat+6               ; DODGE 'N' PAT: pats + close shaves
+    sta ev_stat+6               ; DODGE 'N' PAT: pats + timing bonuses
+    stz ev_break+2
+    stz ev_break+4
     lda k_quit
     and #$00FF
     bne @failed
     lda k_fin
     and #$00FF
     beq @failed
-    ; made it: 750 + 15/s left + 75/dodge + 50/fetch + 25/ball
-    ;          + DODGE 'N' PAT - 150/tackle, never under 750
+    ; made it. BASE: 750 + 15/s left + 50/dog dodged or fetched + 25/ball
+    ; left. STYLE: DODGE 'N' PAT (pats, timed dodges, close shaves).
+    ; TACKLES: -150 each, never under 750 in all.
     lda #750
     sta tmp4
     lda k_tmpx
     ldy #15
     jsr madd
     lda k_dodged
-    ldy #75
-    jsr madd
-    lda k_fetch
-    ldy #50
+    clc
+    adc k_fetch
+    ldy #DODGE_PTS
     jsr madd
     lda k_balls
+    and #$00FF
     ldy #25
     jsr madd
-    lda k_style
-    ldy #1
-    jsr madd
-    lda k_tackle
-    ldy #150
-    jsr madd_neg
     lda tmp4
+    sta ev_break                ; base
+    lda k_style
+    sta ev_break+2              ; bonus
+    clc
+    adc tmp4
+    sta tmp4                    ; base + bonus
+    sec
+    sbc #750
+    sta tmp0                    ; the most the tackles can take
+    lda #$0000
+    ldy k_tackle
+    beq @pz
+@pl:
+    clc
+    adc #150                    ; 150 a tackle
+    dey
+    bne @pl
+@pz:
+    cmp tmp0
+    bcc @pen
+    lda tmp0
+@pen:
+    sta ev_break+4              ; penalty
+    eor #$FFFF
+    sec
+    adc tmp4
     sta ev_score
     A8
     stz ev_fail
@@ -3423,13 +3547,14 @@ park_score:
     lda #590
 @cap:
     sta ev_score
+    sta ev_break                ; all base: no style or penalty on a DNF
     A8
     lda k_quit
     beq @nq
     lda #3                      ; gave up
     bra @f
 @nq:
-    lda k_tackle
+    lda k_hurt
     cmp #3
     lda #$01                    ; TACKLED!
     bcs @f
@@ -3454,39 +3579,15 @@ madd:
 @x:
     rts
 
-; A16: tmp4 -= A * Y, floored at 750
-madd_neg:
-    .a16
-    cpy #$0000
-    beq @x
-    sta tmp0
-@l:
-    lda tmp4
-    sec
-    sbc tmp0
-    sta tmp4
-    dey
-    bne @l
-    lda tmp4
-    bmi @floor
-    cmp #750
-    bcs @x
-@floor:
-    lda #750
-    sta tmp4
-@x:
-    rts
 .a8
 
 .include "park_meta.inc"
 
 ; ------------------------------------------------------------------
 ; data built by tools/art_park.py that the shared assets.s doesn't carry
-.segment "EVENTS2"
+.segment "GFX5"
 park_spr2:     .incbin "park_spr2.bin"      ; the dogs' half of the sprite sheet
 park_spr2_end:
-
-.segment "GFX5"
 park_canopy:   .incbin "park_canopy.bin"
 park_can_mask  = park_canopy
 park_can_row   = park_canopy + 1280
