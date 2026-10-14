@@ -6,6 +6,7 @@
 
 .global roster_resume           ; register.s
 .global t_demo                  ; title.s
+.global reg_fade_out_q          ; register.s: fade out, keeping d-pad taps
 
 .segment "BSS"
 m_sel:      .res 1
@@ -180,7 +181,14 @@ main_menu:
     A8
     beq @loop
     SFX SFX_SELECT
+    lda m_sel
+    cmp #3
+    beq @plain
+    jsr reg_fade_out_q          ; on to sign-up: taps carry into the name grid
+    bra @out
+@plain:
     jsl fade_out
+@out:
     lda m_sel
     rtl
 

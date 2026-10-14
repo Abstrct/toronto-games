@@ -279,8 +279,11 @@ def lake_layer(city):
                 cp = cpx[sx, sy]
                 if cp[3] > 0:
                     window = cp[0] > 200 and cp[1] > 140 and cp[2] < 150
-                    if window and rnd.random() < 0.55:
-                        px[x, y] = l(8 if depth < 20 else 14)
+                    # lit windows only shimmer near the shore: further out
+                    # (PRESS START's row) the water stays dark, or a gold
+                    # smear sits in the gap between the words
+                    if window and depth < 16 and rnd.random() < 0.55:
+                        px[x, y] = l(8 if depth < 10 else 14)
                     else:
                         px[x, y] = l(min(7, idx + 2))
         # glints

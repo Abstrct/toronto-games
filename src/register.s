@@ -5,6 +5,9 @@
 .include "screens.inc"
 
 .global roster_resume           ; menu.s: B on the event picker comes back here
+.global reg_fade_out_q          ; menu.s: the main menu's way into sign-up
+
+R_QMAX = 8                      ; d-pad taps kept for the name grid
 
 .segment "BSS"
 r_cx:       .res 1      ; grid cursor
@@ -15,6 +18,10 @@ r_sp:       .res 1      ; highlighted sponsor
 r_btmr:     .res 1      ; frames since the last delete: B on a blank name
                         ; only backs out once you've stopped deleting
 r_rsel:     .res 1      ; roster cursor, kept between visits
+r_keep:     .res 1      ; name_entry: keep the name (back from the sponsors)
+r_rm:       .res 1      ; remove confirm: 0 NO, 1 YES
+r_qn:       .res 1      ; d-pad taps queued on the way into the name grid
+r_q:        .res R_QMAX
 
 .segment "SCREENS"
 .a8
@@ -34,7 +41,7 @@ reg_flow:
     bcc @again
     rtl                         ; carry still set
 @roster:
-    jsr roster_screen           ; A: 0 add, 1 remove, 2 start, $FF back
+    jsr roster_screen           ; A: 0 add, 1 emptied, 2 start, $FF back
     cmp #$FF
     beq @back
     cmp #2
@@ -47,8 +54,7 @@ reg_flow:
     jsr add_player
     bra @again
 @remove:
-    dec num_players
-    bra @again
+    bra @again                  ; removed the last one: sign someone up
 @start:
     clc
     rtl
@@ -58,11 +64,16 @@ reg_flow:
 
 ; ------------------------------------------------------------------
 add_player:
+    stz r_keep
 @name:
     jsr name_entry
     bcs @cancel
     jsr sponsor_select
-    bcs @name
+    bcc @signed
+    lda #$01                    ; B on the sponsors: the name is still there
+    sta r_keep
+    bra @name
+@signed:
     inc num_players
     clc
     rts
@@ -89,9 +100,23 @@ roster_screen:
     A8
     lda #$20
     jsl txt_box
+    jsr draw_roster_list
+    jmp roster_live
+
+; the competitors, one per 16 px row (txt_bg ends 0)
+draw_roster_list:
     lda #TXT_WIN
     sta txt_bg
-    ; players
+    ; blank rows 4..18 first: a removed player leaves nothing behind
+    ldx #(4*32 + 2)
+    A16
+    lda #$0F1C                  ; 28 x 15
+    sta tmp1
+    A8
+    lda #(TXT_SPACE + TXT_WIN)
+    sta tmp2
+    lda #$20
+    jsl txt_fill
     stz tmp7
 @pl:
     lda tmp7
@@ -148,15 +173,23 @@ roster_screen:
     inc tmp7
     bra @pl
 @listed:
+    stz txt_bg
+    rts
+
+roster_live:
     ; the cursor stays where it was: a full roster greys ADD out but never
     ; moves the cursor onto START! (an "add" press would start the games)
     lda r_rsel
     sta m_sel
     jsr draw_roster_menu
     PRINTC 26, TP_GREY, str_roster_hint
-    jsl fade_in
+    ; fade in from inside the loop: the pad is live from the first visible
+    ; frame, so no tap is dropped (pad_new is edge-triggered: a button still
+    ; held from the last screen does nothing)
+    stz inidisp_sh
 @loop:
     jsl wait_frame
+    jsr fade_step
     jsl menu_backdrop_tick
     A16
     lda pad_new
@@ -165,28 +198,26 @@ roster_screen:
     bit #(PAD_RIGHT | PAD_DOWN)
     bne @next
     bit #PAD_B
-    bne @back
+    jne @back
     bit #PAD_START
     bne @start
     bit #PAD_A
     bne @pick
     A8
     bra @loop
+    ; no wrap: LEFT from ADD PLAYER must never land on START!
 @prev:
     A8
     lda m_sel
-    bne @p1
-    lda #3
-@p1:
+    jeq @loop
     dec a
     bra @moved
 @next:
     A8
     lda m_sel
+    cmp #2
+    jcs @loop
     inc a
-    cmp #3
-    bcc @moved
-    lda #$00
 @moved:
     sta m_sel
     SFX SFX_BLIP
@@ -210,11 +241,44 @@ roster_screen:
     jmp @loop
 @ok:
     lda m_sel
+    cmp #1
+    beq @remove
     sta r_rsel
     SFX SFX_SELECT
+    lda m_sel
+    bne @plain_out
+    jsr reg_fade_out_q          ; ADD PLAYER: d-pad taps carry into the grid
+    lda #$00
+    rts
+@plain_out:
     jsl fade_out
     lda m_sel
     rts
+@remove:
+    ; REMOVE: "REMOVE 4 JEN?  NO  YES", the cursor on NO, so a second A
+    ; from a mash keeps everyone. Done in place: no fade, no dropped tap.
+    SFX SFX_SELECT
+    jsr remove_confirm
+    bcs @gone
+    jmp @loop
+@gone:
+    dec num_players
+    stz r_rsel                  ; back on ADD PLAYER, never on REMOVE
+    lda num_players
+    bne @still
+    ; nobody left: straight to PLAYER 1's name
+    jsl fade_out
+    lda #$01
+    rts
+@still:
+    jsr draw_roster_list
+    stz m_sel
+    jsr roster_bar_clear
+    stz txt_bg
+    jsr draw_roster_menu
+    PRINTC 26, TP_GREY, str_wipe30
+    PRINTC 26, TP_GREY, str_roster_hint
+    jmp @loop
 @back:
     A8
     SFX SFX_BACK
@@ -281,6 +345,148 @@ roster_confirm:
     PRINTC 26, TP_GREY, str_wipe30
     PRINTC 26, TP_GREY, str_roster_hint
     clc
+    rts
+
+; "REMOVE 4 JEN?   NO   YES" on the action bar, cursor on NO. LEFT / RIGHT
+; (or UP / DOWN) move it, A picks, B or START is no.
+; Carry set = remove the last player; clear = keep (bar and hint redrawn).
+remove_confirm:
+    stz r_rm                    ; 0 = NO, 1 = YES
+    jsr roster_bar_clear
+    LDPTR0 str_remove_q
+    ldx #(21*32 + 3)
+    lda #($20 | (TP_YELLOW << 2))
+    jsl txt_print
+    lda num_players
+    A16
+    and #$00FF
+    sta tmp1
+    A8
+    ldx #(21*32 + 10)
+    ldy #1
+    lda #($20 | (TP_CYAN << 2))
+    jsl txt_num
+    lda #($20 | (TP_WHITE << 2))
+    sta tmp6
+    lda num_players
+    dec a
+    ldx #(21*32 + 12)
+    jsl print_player_name
+    ; "?" right after the name
+    lda num_players
+    dec a
+    jsl player_offset
+    ldy #$0000
+@len:
+    lda players+PL_NAME,x
+    beq @got
+    inx
+    iny
+    cpy #8
+    bne @len
+@got:
+    tya
+    clc
+    adc #12
+    A16
+    and #$00FF
+    clc
+    adc #(21*32)
+    tax
+    A8
+    lda #('?' - 32 + TXT_WIN)
+    sta tmp2
+    lda #($20 | (TP_YELLOW << 2))
+    jsl txt_char
+    stz txt_bg
+    PRINTC 26, TP_GREY, str_wipe30
+    PRINTC 26, TP_GREY, str_remove_hint
+    jsr rm_draw
+@w:
+    jsl wait_frame
+    jsl menu_backdrop_tick
+    A16
+    lda pad_new
+    bit #(PAD_LEFT | PAD_RIGHT | PAD_UP | PAD_DOWN)
+    bne @flip
+    bit #(PAD_B | PAD_START)
+    bne @no
+    bit #PAD_A
+    bne @pick
+    A8
+    bra @w
+@flip:
+    A8
+    lda r_rm
+    eor #$01
+    sta r_rm
+    SFX SFX_BLIP
+    jsr rm_draw
+    bra @w
+@pick:
+    A8
+    lda r_rm
+    beq @no8
+    SFX SFX_BACK
+    sec
+    rts
+@no:
+    A8
+@no8:
+    SFX SFX_BLIP
+    jsr roster_bar_clear
+    stz txt_bg
+    jsr draw_roster_menu
+    PRINTC 26, TP_GREY, str_wipe30
+    PRINTC 26, TP_GREY, str_roster_hint
+    clc
+    rts
+
+; NO / YES with the arrow on r_rm
+rm_draw:
+    lda #TXT_WIN
+    sta txt_bg
+    ldx #(21*32 + 22)
+    lda #(TXT_SPACE + TXT_WIN)
+    sta tmp2
+    lda r_rm
+    bne @a0
+    lda #(TXT_ARROW_R + TXT_WIN)
+    sta tmp2
+@a0:
+    lda #($20 | (TP_YELLOW << 2))
+    jsl txt_char
+    ldx #(21*32 + 26)
+    lda #(TXT_SPACE + TXT_WIN)
+    sta tmp2
+    lda r_rm
+    beq @a1
+    lda #(TXT_ARROW_R + TXT_WIN)
+    sta tmp2
+@a1:
+    lda #($20 | (TP_YELLOW << 2))
+    jsl txt_char
+    LDPTR0 str_rm_no
+    ldx #(21*32 + 23)
+    lda r_rm
+    bne @n0
+    lda #($20 | (TP_YELLOW << 2))
+    bra @n1
+@n0:
+    lda #($20 | (TP_WHITE << 2))
+@n1:
+    jsl txt_print
+    LDPTR0 str_rm_yes
+    ldx #(21*32 + 27)
+    lda r_rm
+    beq @y0
+    lda #($20 | (TP_YELLOW << 2))
+    bra @y1
+@y0:
+    lda #($20 | (TP_WHITE << 2))
+@y1:
+    jsl txt_print
+    stz txt_bg
     rts
 
 ; blank the inside of the action bar (row 21); leaves txt_bg = window
@@ -396,11 +602,18 @@ str_leave_pl:    .byte " PLAYERS?", 0
 str_leave_1:     .byte " PLAYER?", 0
 str_yes_no:      .byte "A YES, LEAVE    B NO, STAY", 0
 str_wipe30:      .byte "                              ", 0
+str_remove_q:    .byte "REMOVE", 0
+str_remove_hint: .byte "A PICK     B NO", 0
+str_rm_no:       .byte "NO", 0
+str_rm_yes:      .byte "YES", 0
 
 ; ------------------------------------------------------------------
 ; name entry: carry set if cancelled
 name_entry:
     jsr menu_setup
+    jsr q_pad                   ; a tap on ppu_off's frame counts too
+    lda r_keep
+    bne @kept
     stz r_len
     stz r_cx
     stz r_cy
@@ -410,6 +623,7 @@ name_entry:
     inx
     cpx #10
     bne @clr
+@kept:
     PRINTC 2, TP_YELLOW, str_player
     lda num_players
     inc a
@@ -440,6 +654,7 @@ name_entry:
     stz inidisp_sh
 @loop:
     jsl wait_frame
+    jsr q_take                  ; taps from the way in, one per frame
     jsr fade_step
     jsl menu_backdrop_tick
     jsr name_cursor_blink
@@ -568,6 +783,7 @@ name_entry:
     sta r_btmr
     jmp @loop
 @cancel:
+    stz r_qn
     SFX SFX_BACK
     jsl fade_out
     sec
@@ -621,9 +837,106 @@ name_entry:
     iny
     cpy #9
     bne @copy
+    stz r_qn
     SFX SFX_SELECT
     jsl fade_out
     clc
+    rts
+
+; reg_fade_out_q: fade_out (17 frames) that keeps the d-pad taps made on
+; the way out, for the name grid: a quick hand that taps RIGHT before the
+; grid is up still moves the cursor. A / B / START are never kept, so a
+; button held over from this screen can't type.
+reg_fade_out_q:
+    stz r_qn
+    lda #$0F
+@l:
+    sta inidisp_sh
+    pha
+    jsl wait_frame
+    jsr q_pad
+    pla
+    dec a
+    bpl @l
+    lda #$80
+    sta inidisp_sh
+    jsl wait_frame
+    jsr q_pad
+    rts
+
+; this frame's new d-pad tap onto the back of the queue
+q_pad:
+    lda pad_new+1
+    and #$0F                    ; UP DOWN LEFT RIGHT
+    beq @x
+    pha
+    lda r_qn
+    cmp #R_QMAX
+    bcs @full
+    TAXB
+    pla
+    sta r_q,x
+    inc r_qn
+    rts
+@full:
+    pla
+@x:
+    rts
+
+; name grid, each frame. While taps from the way in are still queued, this
+; frame's presses (d-pad, A, B, START) join the back of the queue and the
+; oldest entry becomes this frame's press, so order is kept: RIGHT RIGHT A
+; types the letter two to the right even when the A lands mid-drain.
+; Entry: bits 0-3 d-pad, $10 START, $40 B, $80 A.
+q_take:
+    lda r_qn
+    bne @queued
+    rts
+@queued:
+    lda pad_new+1
+    and #$1F                    ; START + d-pad
+    sta tmp0
+    lda pad_new+1
+    and #$80                    ; B -> $40
+    lsr a
+    ora tmp0
+    sta tmp0
+    lda pad_new
+    and #$80                    ; A
+    ora tmp0
+    beq @take
+    pha
+    lda r_qn
+    cmp #R_QMAX
+    bcs @drop
+    TAXB
+    pla
+    sta r_q,x
+    inc r_qn
+    bra @take
+@drop:
+    pla
+@take:
+    ; this frame's press = the oldest entry
+    lda r_q
+    and #$80
+    sta pad_new
+    lda r_q
+    and #$40
+    asl a
+    sta tmp0
+    lda r_q
+    and #$1F
+    ora tmp0
+    sta pad_new+1
+    ldx #$0000
+@sh:
+    lda r_q+1,x
+    sta r_q,x
+    inx
+    cpx #(R_QMAX - 1)
+    bne @sh
+    dec r_qn
     rts
 
 ; one step of a fade-in run from a screen's own loop
