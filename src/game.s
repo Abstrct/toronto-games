@@ -779,7 +779,7 @@ skins:
 REC_BYTES = 16 * NUM_EVENTS * 5
 ; bump the last character whenever default_records changes: carts with the
 ; old signature are re-seeded (and lose their saved board) on the next boot
-.define REC_SIG "TG06"
+.define REC_SIG "TG07"
 records_load:
     ldx #$0000
 @sig:
@@ -873,11 +873,11 @@ rec_sig: .byte REC_SIG
 
 default_records:
     ; EV_BIKE  Bike Courier
-    REC 4000, "COURIER"
-    REC 3300, "FIXIE"
-    REC 2600, "TTC GUS"
-    REC 1900, "PEDICAB"
-    REC 1300, "SALMON"
+    REC 6500, "COURIER"
+    REC 5400, "FIXIE"
+    REC 4400, "TTC GUS"
+    REC 3500, "PEDICAB"
+    REC 2600, "SALMON"
     ; EV_BAY   Bay St Power Walk
     REC 3000, "SUITGUY"
     REC 2600, "BAYBANKR"
@@ -885,11 +885,11 @@ default_records:
     REC 1800, "INTERN"
     REC 1400, "DECAF"
     ; EV_PARK  Off-Leash Alert
-    REC 3000, "DOODLE"
-    REC 2400, "GOLDIE"
-    REC 1800, "FRISBEE"
-    REC 1200, "HIPSTER"
-    REC 600, "SQUIRREL"
+    REC 4200, "DOODLE"
+    REC 3400, "GOLDIE"
+    REC 2600, "FRISBEE"
+    REC 1900, "HIPSTER"
+    REC 1300, "SQUIRREL"
     ; EV_COPS  Tallboy Trot
     REC 3600, "RACCOON"
     REC 3000, "BIKE COP"
@@ -909,11 +909,11 @@ default_records:
     REC 1800, "LEARNER"
     REC 1000, "TOWTRUCK"
     ; EV_SUBWAY   TTC Surfing
-    REC 3300, "HANDRAIL"
-    REC 2900, "COMMUTER"
-    REC 2500, "TOURIST"
-    REC 2000, "STROLLER"
-    REC 1500, "LINE 1"
+    REC 5000, "HANDRAIL"
+    REC 4300, "COMMUTER"
+    REC 3600, "TOURIST"
+    REC 2900, "STROLLER"
+    REC 2200, "LINE 1"
 default_records_end:
 .assert default_records_end - default_records = REC_BYTES, error, "default_records: five REC lines per event"
 ; ==================================================================

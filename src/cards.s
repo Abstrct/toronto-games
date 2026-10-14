@@ -855,7 +855,7 @@ strlen:
 ; the two stat lines shown on the card: ev_stat indices per event, the first
 ; one kept when there is room for only one
 card_stat_pick:
-    .byte 1, 2                  ; bike: TTC TOKENS, WIPEOUTS
+    .byte 1, 3                  ; bike: TTC TOKENS, STYLE
     .byte 0, 1                  ; bay: TIME LEFT, PASSED
     .byte 1, 2                  ; park: DOGS DODGED, TACKLES
     .byte 0, 2                  ; cops: SIP 'N' HOPS, HURDLES
@@ -3240,7 +3240,7 @@ eb3: .byte "THE BIKE COP SAW THAT", $0A, "TALLBOY. RUN TO SPADINA!", 0
 eb4: .byte "ROUND BUOYS 1, 2 AND 3,", $0A, "THEN CROSS THE LINE.", 0
 eb5: .byte "THREE SPOTS ON BRUNSWICK.", $0A, "PARK IT. DON'T DENT A BMW.", 0
 eb6: .byte "RIDE TO UNION HANDS-FREE.", $0A, "GRAB A POLE, GET GERMS.", 0
-ec0: .byte "D-PAD STEER    A PEDAL", $0A, "B HOP          DOWN BRAKE", $0A, "HOP RAILS, DRAFT THE 501!", 0
+ec0: .byte "D-PAD STEER    A PEDAL", $0A, "B HOP          DOWN BRAKE", $0A, "HOP RAILS, DODGE LATE: X8", 0
 ec1: .byte "LEFT, RIGHT AS DOTS LAND", $0A, "UP/DOWN LANE  A EXCUSE ME", $0A, "Y ON A GOLD DOT: PRESTO!", 0
 ec2: .byte "D-PAD WALK   A THROW BALL", $0A, "B WHEN ! SHOWS: SIDESTEP", $0A, "B AS HE LUNGES: BONUS!", 0
 ec3: .byte "TAP A AT CHALK. RED: HOLD", $0A, "B: SIP WHILE COP CAN'T SEE", $0A, "B MID-AIR = SIP 'N' HOP", 0
@@ -3268,7 +3268,7 @@ card_break_labels:
     .addr bl_course, bl_style, bl_bump      ; sail
     .addr bl_park,  bl_style, bl_dents      ; parking
     .addr bl_ride,  bl_style, bl_germs      ; subway
-bl_tips:   .byte "TIPS", 0
+bl_tips:   .byte "TIPS+STYLE", 0
 bl_walk:   .byte "WALK", 0
 bl_course: .byte "COURSE", 0
 bl_arrive: .byte "ARRIVAL", 0
@@ -3279,7 +3279,7 @@ bl_park:   .byte "PARKING", 0
 bl_ride:   .byte "RIDE", 0
 bl_style:  .byte "STYLE", 0
 bl_pats:   .byte "PATS", 0
-bl_wipe:   .byte "WIPEOUTS", 0
+bl_wipe:   .byte "WIPEOUT X200", 0
 bl_spill:  .byte "SPILLS", 0
 bl_tackle: .byte "TACKLES", 0
 bl_fine:   .byte "COP'S FINE", 0
@@ -3293,14 +3293,16 @@ bl_germs:  .byte "GERMS", 0
 ; own fail), 2 (out of time), 3 (called it a day), 4 (its second fail);
 ; 0 = none. A base of 0 in a card_still event shows str_still instead.
 card_fail_note:
-    .addr fn_bike,   fn_bike,   fn_bike,   fn_bike      ; bike
+    .addr fn_bike,   fn_bike_n, fn_bike_n, fn_bike_s    ; bike
     .addr fn_bay,    fn_bay,    fn_bay,    fn_bay       ; bay
     .addr fn_park,   fn_park_t, fn_park_q, fn_park      ; park
     .addr fn_cops,   fn_cops,   fn_cops_q, fn_cops      ; cops
     .addr fn_sail,   fn_sail,   fn_sail,   fn_sail      ; sail
     .addr fn_pk,     fn_pk,     fn_pk_q,   fn_pk        ; parking
     .addr fn_sub,    fn_sub,    fn_sub_q,  fn_sub       ; subway
-fn_bike:   .byte "NO DELIVERY, NO 1000 FEE", 0
+fn_bike:   .byte "THIRD WIPEOUT. NO TIPS!", 0
+fn_bike_n: .byte "NOT DELIVERED. NO TIPS!", 0
+fn_bike_s: .byte "STOPPED 8 SECONDS. NO TIPS", 0
 fn_bay:    .byte "NO TRAIN: NO 1000 OR STYLE", 0
 fn_park:   .byte "THIRD TACKLE ENDS THE WALK", $0A, "CROSSING PAID BY DISTANCE", 0
 fn_park_t: .byte "CROSSING PAID BY DISTANCE", 0
@@ -3358,7 +3360,7 @@ sl_streak:   .byte "BEST STREAK", 0
 sl_metres: .byte "METRES", 0
 sl_sipnhop: .byte "SIP 'N' HOPS", 0
 sl_chain:  .byte "SURF CHAIN", 0
-sl_tokens: .byte "TTC TOKENS", 0
+sl_tokens: .byte "TTC TOKENS X50", 0
 sl_style:  .byte "STYLE", 0
 sl_pat:    .byte "DODGE 'N' PAT", 0
 sl_fine:   .byte "COP'S FINE", 0
