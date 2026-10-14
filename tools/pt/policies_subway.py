@@ -7,6 +7,10 @@ subway_expert reads the true train force and the dot's velocity from RAM
 and leans against both with a short prediction: frame-perfect balance, the
 ceiling (0 germs, the full STANDING SURF chain, lots of DEAD CENTRE).
 
+subway_ace is the expert plus the trick the card never mentions, NO HANDS
+(glide into a stop off the D-pad with the dot still gold: +100 a stop). It is
+the ceiling the default records are judged against.
+
 subway_surfer is the human yardstick (the CURVE bot): it plans only from
 what's on screen. It sees the dot (and judges its drift from the last few
 frames of motion, not from RAM velocity) and the lurch cue: a HOLLOW arrow
@@ -103,6 +107,34 @@ class subway_expert(_Reader):
         return steer(s['x'], s['v'], push, 8, 1.0)
 
 
+class subway_ace(_Reader):
+    """subway_expert plus the trick the card never mentions (NO HANDS): on
+    each brake into a stop, park the dot `park` px behind the middle with no
+    drift, then let go of the pad for the last `off` frames and let the
+    brake carry it through the gold. Frame-perfect like the expert: the
+    ceiling, and proof the trick is reachable."""
+    park = 3.0
+    off = 34
+    settle = 40
+
+    def act(self, t, tel, rng):
+        s = self.read()
+        if s['grab']:
+            return 0
+        push = [1 if f > 0 else -1 if f < 0 else 0 for f in s['f']]
+        if s['ls'] == LS_WARN and s['lt'] <= 3:
+            ax, sg = PUSH[s['kind']]
+            push[ax] = sg
+        x = list(s['x'])
+        if s['ls'] == LS_ACT and s['kind'] == 3:
+            if s['lt'] <= self.off:
+                return 0
+            if s['lt'] <= self.off + self.settle:
+                x[0] += self.park           # aim a touch behind the middle
+                return steer(x, s['v'], [0, push[1]], 8, 0.4)
+        return steer(x, s['v'], push, 8, 1.0)
+
+
 class subway_surfer(_Reader):
     """Human-like: the dot's position, its drift judged from motion, and the
     on-screen cue. lead = how many frames before the push the cue makes it
@@ -175,7 +207,7 @@ class subway_newbie(_Reader):
         return m
 
 
-POLICIES = {c.__name__: c for c in (subway_expert, subway_surfer, subway_human, subway_newbie)}
+POLICIES = {c.__name__: c for c in (subway_expert, subway_ace, subway_surfer, subway_human, subway_newbie)}
 DEFAULTS = {'subway': ['idle', 'hold_right', 'mash_a', 'random_input', 'subway_newbie', 'subway_human',
-                       'subway_expert']}
+                       'subway_expert', 'subway_ace']}
 CURVE = {'subway': 'subway_surfer'}

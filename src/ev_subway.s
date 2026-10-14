@@ -34,10 +34,16 @@
 ;         chime to the next stop: that leg's surf x3 (225 ... 1350);
 ;       DEAD CENTRE: while a lurch pushes and you're working the pad, a
 ;         point every 2 frames with the dot gold, every frame inside 2 px;
-;       GAGS: +100 for each gag ridden out without grabbing anything.
-;   PATIENT ZERO (20 germs) or CALL IT A DAY: RIDE 40 per LEG LEANED (a leg
-;   finished with the pad used; standing still earns nothing), no style
-;   (any finish beats any failed run: 240 > 5x40).
+;       GAGS: +100 for each gag you leaned into and rode out without
+;         grabbing anything.
+;     and one the card never mentions (an expert's trick):
+;       NO HANDS: glide into a stop off the D-pad for the last 30 frames
+;         of the brake, the dot still gold, on a clean leg: +100.
+;   A LEG LEANED is a leg where you pressed the way the solid arrow points
+;   while the train pushed (a hold left over from the stop doesn't count).
+;   PATIENT ZERO (20 germs: the count stops there) or CALL IT A DAY: RIDE 40
+;   per LEG LEANED (standing still earns nothing), no style (any finish
+;   beats any failed run: 240 > 5x40).
 ; Once the run is decided (20 germs, or the doors open at Union) the pause
 ; menu is shut and a give-up already in the pipe is ignored.
 ;
@@ -69,6 +75,8 @@ VMAX      = $0090           ; dot speed cap, 8.8 px/frame
 WARN      = 40              ; frames of telegraph before every lurch
 WARN_GAG  = 30              ; a gag's telegraph (the passengers give less notice)
 GAG_PAY   = 100             ; riding a gag out without grabbing anything
+NH_T      = 30              ; NO HANDS: frames off the D-pad into the stop
+NH_PAY    = 100
 GRAB_T    = 64              ; frames a grab gag takes (lunge, hold, walk back)
 BASE_RIDE = 1000
 GERM_PEN  = 40              ; (x40 is done with shifts in sb_score)
@@ -158,6 +166,9 @@ w_plen   = ev_ram + 174     ; popup buffer length
 w_built  = ev_ram + 176     ; 1 = this ride's course is drawn up
 w_pend   = ev_ram + 178     ; 1 = a callout waits to be drawn (w_ppal)
 w_ppal   = ev_ram + 180
+w_nhq    = ev_ram + 182     ; 1 = a NO HANDS callout waits for the surf one
+w_nohand = ev_ram + 184     ; stops glided into hands-free
+w_gtouch = ev_ram + 186     ; 1 = you leaned the arrow's way during this push
 COLBUF   = ev_ram + 256     ; two 28-word column buffers (256, 320)
 EV_SEED  = ev_ram + 510
 COURSE   = ev_ram + 512     ; this run's course: 4 bytes a lurch (<= 26 lurches)
@@ -330,6 +341,11 @@ sb_update:
     bne @p
     A8
     jsr popup_clear
+    lda w_nhq                   ; the surf callout is done: now the NO HANDS one
+    beq @p8
+    stz w_nhq
+    jsr nohands_popup
+@p8:
     A16
 @p:
     A8
@@ -620,6 +636,7 @@ tr_warn:
 @go:
     lda #LS_ACT
     sta w_ls
+    stz w_gtouch                ; (a gag pays only if you leaned into it)
     ldx w_dur
     stx w_lt
     lda w_kind
@@ -766,6 +783,10 @@ tr_act:
     lda #LS_END
     sta w_ls
     ldx #100
+    lda w_nhq
+    beq @e
+    ldx #120                    ; (time for the NO HANDS callout)
+@e:
     stx w_end
     lda #ST_UNION
     sta w_status
@@ -779,8 +800,14 @@ tr_act:
     A8
     jmp load_lurch
 
-; a gag ridden out with no grab: +100 and a callout
+; a gag ridden out with no grab: +100 and a callout (if you leaned
+; into it: standing there with your hands in your pockets isn't riding it)
 gag_paid:
+    lda w_gtouch
+    bne @pay
+    stz w_gag
+    rts
+@pay:
     A16
     lda w_style
     clc
@@ -853,6 +880,7 @@ arrive:
     bcc @nb
     sta w_best
 @nb:
+    jsr no_hands
     jsr surf_popup
     bra @leg
 @broke:
@@ -928,8 +956,12 @@ surf_popup:
     ldx tmp3
     stx tmp1
     jsr pb_plus
-    lda #TP_YELLOW
     ldx #90
+    lda w_nhq
+    beq @t
+    ldx #60                     ; (a NO HANDS callout follows)
+@t:
+    lda #TP_YELLOW
     jsr pop_show
     lda w_gold
     beq @c
@@ -940,6 +972,48 @@ surf_popup:
     rts
 
 str_surf:  .byte "STANDING SURF CHAIN ", 0
+
+; Not on the card (the coach never says it): glide into a stop hands-free.
+; Off the D-pad for the last NH_T frames of the brake with the dot still
+; gold, on a clean leg: +100. The setup is the skill: park the dot a touch
+; behind the middle with no drift and let the brake carry it through.
+; Judged at the stop, paid with its callout (after the surf one).
+no_hands:
+    A16
+    lda w_press
+    cmp #NH_T
+    bcc @x
+    lda w_r2
+    cmp #SWEET2
+    bcs @x
+    A8
+    lda #1
+    sta w_nhq
+    rts
+@x:
+    A8
+    rts
+
+nohands_popup:
+    A16
+    lda w_style
+    clc
+    adc #NH_PAY
+    sta w_style
+    A8
+    inc w_nohand
+    LDPTR0 str_nohands
+    jsr pb_start
+    ldx #NH_PAY
+    stx tmp1
+    jsr pb_plus
+    lda #TP_GREEN
+    ldx #50
+    jsr pop_show
+    SFX SFX_CHEER
+    rts
+
+str_nohands: .byte "LOOK MA, NO HANDS!", 0
 str_gsurf: .byte "GOLD SURF CHAIN ", 0
 str_x3:    .byte " X3", 0
 
@@ -1159,9 +1233,25 @@ balance:
     and #(PAD_LEFT | PAD_RIGHT | PAD_UP | PAD_DOWN)
     beq @nopad
     stz w_press
+    ; a LEG LEANED is one where you pressed the way the SOLID arrow points
+    ; while the train pushed: a hold carried over from the last stop, the
+    ; hollow arrow or the wrong way doesn't make it a leg you rode
+    A8
+    lda w_ls
+    cmp #LS_ACT
+    bne @nt
+    lda w_kind
+    asl a
+    TAXB
+    A16
+    lda f:lean_pad,x
+    and pad
+    beq @nt
     A8
     lda #1
     sta w_touch
+    sta w_gtouch
+@nt:
     A16
 @nopad:
     ; on the hollow arrow a lean is half strength and you find your feet
@@ -1298,6 +1388,9 @@ balance:
 @x:
     A8
     rts
+
+; per lurch kind: the way the solid arrow points (against the push)
+lean_pad: .word PAD_RIGHT, PAD_UP, PAD_DOWN, PAD_LEFT, PAD_LEFT, PAD_RIGHT
 
 ; A16: the tip-over term (offset px / 256), negated unless a lurch pushes
 tip:
@@ -1439,15 +1532,19 @@ grab:
     tya
     clc
     adc w_germs
-    sta w_germs
     cmp #20
     bcc @alive
+    lda #20                     ; (a 2-germ grab at 19 still stops at twenty)
+    sta w_germs
     A8
     lda #1                      ; PATIENT ZERO: decided, no pausing out of it
     sta w_over
     stz pause_ok
     A16
+    bra @pz
 @alive:
+    sta w_germs
+@pz:
     stz w_bx
     stz w_by
     stz w_vx
@@ -1474,6 +1571,10 @@ grab:
     A8
     lda #^grab_msgs
     sta ptr0+2
+    lda w_over                  ; the twentieth germ: everyone keeps their distance
+    beq @msg
+    LDPTR0 str_pz
+@msg:
     jsr pb_start
     lda #TP_GREEN
     ldx #70
@@ -1488,6 +1589,7 @@ gm0: .byte "GRABBED THE STICKY POLE!", 0
 gm1: .byte "FACE-FIRST IN A BACKPACK!", 0
 gm2: .byte "SAT ON A STRANGER! SORRY!", 0
 gm3: .byte "HANDS ON THE FLOOR. EW!", 0
+str_pz: .byte "PATIENT ZERO! MIND THE GAP!", 0
 
 ; the rider's gag: lunge to the target, hold (germs!), walk back
 gag_move:
@@ -2162,6 +2264,21 @@ draw_people:
     clc
     adc spr_y
     sta spr_y
+    ; PATIENT ZERO: they all step back and mind the gap
+    lda w_germs
+    cmp #20
+    bcc @pos
+    lda spr_x
+    cmp #RIDER_X
+    bcs @away
+    sec
+    sbc #12
+    sta spr_x
+    bra @pos
+@away:
+    clc
+    adc #12
+    sta spr_x
     bra @pos
 @seated:
     lda w_speed
