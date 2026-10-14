@@ -196,8 +196,25 @@ class _Planner(_Reader):
             return RIGHT
         return LEFT
 
+    hop_rails = False   # B as it's about to cross a rail (a TRACK HOP, not a wobble)
+
     def act(self, t, tel, rng):
+        m = self.act1(t, tel, rng)
+        if self.hop_rails and not m & DOWN:
+            me = self.me
+            r = self.g.core.peek(self.ev + B_HOPCD, 2)
+            vx = me['vx']
+            if me['state'] == 0 and r[0] == 0 and r[1] == 0 and me['speed'] >= 1.4 and abs(vx) > 0.5:
+                for rail in RAILS:
+                    k = (rail - me['x']) / vx
+                    if 2 <= k <= 10:
+                        m |= B
+                        break
+        return m
+
+    def act1(self, t, tel, rng):
         me, ents = self.read()
+        self.me = me
         if me['state'] != 0:
             self.target = HOME
             self.draft = None
@@ -265,9 +282,11 @@ class _Planner(_Reader):
 
 
 class bike_pro(_Planner):
-    """Rides hard, detours for tokens, drafts the 501, quick eyes (Rob)."""
+    """Rides hard, detours for tokens, drafts the 501, hops the rails it
+    crosses, quick eyes (Rob). The title demo's bot."""
     react = (2, 6)
     drafts = True
+    hop_rails = True
 
 
 class bike_human(_Planner):
@@ -337,6 +356,7 @@ def _prog_tables():
 
 
 PROG, DISP = _prog_tables()
+STOP_SEEN = 230               # src/ev_bike_ent.inc: the stopped car's callout
 SETTLE = 7
 VIS = {1: 0, 2: 16, 3: 0, 4: 16, 5: 40, 6: 40, 7: 0, 8: 0, 9: 0}
 MINCHG = 7
@@ -695,6 +715,7 @@ class bike_stylist(bike_courier):
         return c
 
     def act(self, t, tel, rng):
+        self.rng = rng
         me, ents = self.read()
         self.calibrate(t, me)
         m = self.decide(t, me, ents)
@@ -732,7 +753,9 @@ class bike_stylist(bike_courier):
         base = DOWN if t < self.brake_until else A
         if t < self.next_look:
             return self.out(t, base)
-        self.next_look = t + self.look
+        # glances aren't a metronome, even for a quick player (so no two runs
+        # are the same run)
+        self.next_look = t + self.look + self.rng.randint(-1, 1)
         x = me['x']
         if t < self.busy_until and self.exp_x is not None:
             x0, t_settle = self.exp_x, self.busy_until - t
@@ -778,12 +801,245 @@ class bike_stylist(bike_courier):
         return self.out(t, m)
 
 
-CURVE = {'bike': 'bike_stylist'}
+# ---------------------------------------------------------------------------
+# bike_commuter: the curve bot since sprint 5. A careful first-timer who read
+# the card once, the way Dana and Gord rode in round 5 (bike_stylist plans
+# every line with exact traffic speeds and weaves for style, so it never sat
+# in the bike lane long enough to meet what they met):
+#  * it rides the bike lane and only leaves it for something in its way;
+#  * it sees what is on screen (the ~45 frames above the rider, plus the
+#    501's warning sign behind) and glances every 4-7 frames;
+#  * something in its line: a pothole gets a hop about half the time (the
+#    card says B HOP), otherwise it steers for the nearest line that looks
+#    clear, holding the pad until it is about there (no counter-steer), and
+#    comes home to the bike lane once the way is clear;
+#  * after a few seconds it knows roughly how late its own thumb is and
+#    presses B that much early (a first-timer's sense of it: +- a quarter);
+#  * now and then it misses a hazard on a glance (sloppy).
+class bike_commuter(_Reader):
+    look = (4, 7)
+    sight = 165
+    margin = 3
+    hop_pref = 0.5
+    rail_hop = 0.5      # crosses a rail with a hop this often (B HOP RAILS)
+    greedy = True       # detours for a line of tokens
+    reach = 50          # ...this far from where it is
+    sloppy = 0.05
+    hold = 70           # frames ahead that count as "in my way"
 
-POLICIES = {c.__name__: c for c in [bike_stylist, bike_courier, bike_ace, bike_pro, bike_human, bike_novice, bike_safe, bike_greedy,
+    def __init__(self):
+        self.g = None
+        self.target = HOME
+        self.next_look = 0
+        self.lag = None
+        self.hopping = {}       # hole key -> True (hop it) / False (steer)
+        self.b_until = -1
+        self.brake = False
+        self.move = (0, -1, -1)
+
+    def read(self):
+        me, ents = _Reader.read(self)
+        r = self.g.core.peek(self.ev + B_HOPCD, 2)
+        me['hopcd'] = r[0] | r[1] << 8
+        r = self.g.core.peek(self.ev + B_HOP, 2)
+        me['hop'] = r[0] | r[1] << 8
+        return me, ents
+
+    def threats(self, me, ents, rng):
+        """[(kind, x_at_arrival, half width, frames to arrival, key)]"""
+        out = []
+        sp = me['speed']
+        for e in ents:
+            t, rel = e['t'], e['rel']
+            if t in (T_TOKEN, 10):
+                continue
+            behind = t == T_TRAM_N and -160 <= rel < -20 and e['vy'] > sp
+            # CAR IN BIKE LANE. AGAIN. comes up just before the car does
+            stopped = t == T_PARKED and e['x'] < 200 and rel <= STOP_SEEN
+            if not behind and not stopped and not -30 <= rel <= self.sight:
+                continue
+            if self.sloppy and rng.random() < self.sloppy:
+                continue
+            hh = HH[t]
+            close = sp - e['vy']
+            if rel > hh:
+                if close <= 0.05:
+                    continue
+                ta = (rel - hh) / close
+            elif rel < -hh:
+                if close >= -0.05:
+                    continue
+                ta = (rel + hh) / close
+            else:
+                ta = 0
+            if ta > self.hold:
+                continue
+            ex = e['x'] + e['vx'] * ta
+            key = (t, round(e['x']), me['dist'] + rel)
+            if t == T_PED:
+                out.append((t, (e['x'] + ex) / 2, HW[t] + abs(ex - e['x']) / 2, ta, key))
+            else:
+                out.append((t, ex, HW[t], ta, key))
+            if t == T_PARKED and e['flags'] & 2:
+                out.append((0, e['x'] - 20, 10, ta, key))
+        return out
+
+    def blocked(self, threats, L, x, upto=None):
+        lo, hi = min(x, L), max(x, L)
+        for (k, cx, hw, ta, key) in threats:
+            if upto is not None and ta > upto:
+                continue
+            w = hw + self.margin
+            if cx - w < hi and lo < cx + w:
+                # in the way of the line, or of the way over to it
+                if abs(cx - L) < w or ta < 8 + abs(L - x) / 1.5:
+                    return True
+        return False
+
+    def act(self, t, tel, rng):
+        me, ents = self.read()
+        if me['state'] != 0:
+            self.target = HOME
+            self.brake = False
+            self.move = (0, -1, -1)
+            return A
+        if self.lag is None and me['speed'] > 0:
+            self.lag = max(0, t - 1)
+        lag = self.lag or 0
+        x, sp = me['x'], me['speed']
+        if t >= self.next_look:
+            self.next_look = t + rng.randint(*self.look)
+            self.plan(me, ents, rng, t)
+        # steering is a motor program: hold the pad for as long as the move
+        # takes (judged by eye), let go, see where it landed, touch it up
+        dirn, end, settle = self.move
+        if t >= settle and abs(self.target - x) >= 5:
+            self.start_move(self.target, x, t)
+            dirn, end, settle = self.move
+        m = dirn if t < end else 0
+        m |= DOWN if self.brake else A
+        # the hop: B when the hole is about two lengths off (pressed early
+        # by what it thinks its thumb takes)
+        if t < self.b_until:
+            m |= B
+        elif me['hopcd'] == 0 and sp >= 1.4:
+            for e in ents:
+                if e['t'] != T_HOLE or not 0 < e['rel'] <= self.sight:
+                    continue
+                key = (T_HOLE, round(e['x']), me['dist'] + e['rel'])
+                if not self.hopping.get(key) or abs(e['x'] - x) >= HW[T_HOLE] + 2:
+                    continue
+                if e['rel'] - sp * lag * rng.uniform(0.75, 1.25) <= 10 * sp:
+                    self.b_until = t + 3
+                    m |= B
+                break
+        return m
+
+    def start_move(self, L, x, t):
+        d = L - x
+        n = min(range(1, 199), key=lambda k: abs(DISP[k] - abs(d)))
+        self.move = (RIGHT if d > 0 else LEFT, t + n, t + n + 12 + (self.lag or 0))
+
+    def plan(self, me, ents, rng, t):
+        # where the bike is headed: a move it has pressed for but not seen
+        # land yet (the efference copy: it knows what its thumb just did)
+        x = self.target if t < self.move[2] else me['x']
+        th = self.threats(me, ents, rng)
+        # holes in my line: hop or steer? (decided once per hole)
+        for (k, cx, hw, ta, key) in th:
+            if k == T_HOLE and key not in self.hopping and abs(cx - x) < hw + self.margin:
+                self.hopping[key] = rng.random() < self.hop_pref
+        hop_ok = me['speed'] >= 1.4
+        live = [h for h in th if not (h[0] == T_HOLE and self.hopping.get(h[4]) and hop_ok)]
+        cur = self.target
+        self.brake = False
+        if not self.blocked(live, cur, x):
+            # a line of tokens near by, and the way to it clear: go and get
+            # them (TOKENS PAY 50 ON DELIVERY); else home to the bike lane,
+            # once the last move has landed
+            tl = self.token_line(me, ents, live, x) if self.greedy else None
+            if tl == cur:
+                return
+            if tl is not None and t >= self.move[2]:
+                self.go(tl, x, me, rng, t)
+                return
+            if cur != HOME and t >= self.move[2] and not self.blocked(live, HOME, x):
+                self.go(HOME, x, me, rng, t)
+            return
+        # find the nearest line that looks clear
+        for L in sorted(LANES, key=lambda L: abs(L - x)):
+            if not self.blocked(live, L, x):
+                self.go(L, x, me, rng, t)
+                return
+        self.brake = me['speed'] > 1.0
+
+    def token_line(self, me, ents, live, x):
+        best = None
+        for e in ents:
+            if e['t'] != T_TOKEN or not 30 < e['rel'] < self.sight:
+                continue
+            L = min(LANES, key=lambda L: abs(L - e['x']))
+            if abs(L - e['x']) > 8 or abs(L - x) > self.reach:
+                continue
+            if self.blocked(live, L, x):
+                continue
+            if best is None or e['rel'] < best[0]:
+                best = (e['rel'], L)
+        return best and best[1]
+
+    def go(self, L, x, me, rng, t):
+        if L == self.target:
+            return
+        self.target = L
+        self.start_move(L, x, t)
+        if me['hopcd'] == 0 and me['speed'] >= 1.4 and any(min(x, L) < r < max(x, L) for r in RAILS) \
+                and rng.random() < self.rail_hop:
+            self.b_until = t + 3
+
+
+CURVE = {'bike': 'bike_rider'}
+
+POLICIES = {c.__name__: c for c in [bike_commuter, bike_stylist, bike_courier, bike_ace, bike_pro, bike_human, bike_novice, bike_safe, bike_greedy,
                                     bike_camp_left, bike_camp_strack, bike_camp_centre,
                                     bike_camp_ntrack, bike_camp_gap]}
 DEFAULTS = {'bike': ['idle', 'hold_a', 'mash_a', 'random_input',
                      'bike_camp_left', 'bike_camp_strack', 'bike_camp_centre',
                      'bike_camp_ntrack', 'bike_camp_gap',
-                     'bike_human', 'bike_safe', 'bike_pro', 'bike_greedy', 'bike_courier', 'bike_stylist']}
+                     'bike_human', 'bike_safe', 'bike_pro', 'bike_greedy', 'bike_courier', 'bike_stylist',
+                     'bike_commuter', 'bike_rider']}
+
+
+# bike_rider: the curve bot. Whoever is holding the pad: a quick hand (under
+# ~10 frames, it finds out on its first pedal stroke) has played this before
+# and rides for style (bike_stylist); anyone slower rides like a careful
+# first-timer (bike_commuter).
+class bike_rider(bike_commuter):
+    FAST = 10
+
+    def __init__(self):
+        bike_commuter.__init__(self)
+        self.sty = bike_stylist()
+
+    def act(self, t, tel, rng):
+        if self.lag is None:
+            self.sty.game = self.game
+            ms = self.sty.act(t, tel, rng)
+            mc = bike_commuter.act(self, t, tel, rng)
+            return mc if self.lag is None or self.lag >= self.FAST else ms
+        if self.lag < self.FAST:
+            return self.sty.act(t, tel, rng)
+        return bike_commuter.act(self, t, tel, rng)
+
+
+class bike_dana(bike_commuter):
+    """Steers round everything, never hops (Dana, round 5)."""
+    hop_pref = 0.0
+    rail_hop = 0.0
+
+
+class bike_gord(bike_commuter):
+    """Hops every pothole in the bike lane (Gord, round 5)."""
+    hop_pref = 1.0
+
+
+POLICIES.update({c.__name__: c for c in [bike_rider, bike_dana, bike_gord]})
