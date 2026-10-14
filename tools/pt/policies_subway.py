@@ -30,6 +30,16 @@ arrow's way as soon as the HOLLOW arrow shows and holds it, only pulls back
 once the dot is red. On the round-5 build it went PATIENT ZERO for 120 every
 time, as Dana did; it should reach Union.
 
+subway_obey (and obey20 / obey25 / dana) is the round-7 prompt test: it
+never looks at the dot, only at the arrow and the status line, and does what
+they say ("CURVE! HOLD ^": hold that way while the arrow is solid) 20-25
+frames late. On the round-7 build a held lean drove the dot out the far side
+of the ring (PATIENT ZERO at 10 and 22 frames alike); a held lean now settles
+the dot in the white, so all four reach Union.
+
+subway_ace plays the title demo (request: demo_export POLICY['subway']):
+it shows the undocumented trick twice in the demo's 24 s.
+
 Every ride differs past TMU (the course is drawn from rng on the ride's first
 frame, and run_bot seeds rng), and three of the last four legs carry a gag
 (kinds 4 SIGNAL PROBLEMS and 5 BACKPACK) that the bots read like any lurch.
@@ -207,7 +217,55 @@ class subway_newbie(_Reader):
         return m
 
 
-POLICIES = {c.__name__: c for c in (subway_expert, subway_ace, subway_surfer, subway_human, subway_newbie)}
-DEFAULTS = {'subway': ['idle', 'hold_right', 'mash_a', 'random_input', 'subway_newbie', 'subway_human',
+class subway_obey(_Reader):
+    """Does exactly what the words say and nothing else (the round-7 Dana
+    test): it never looks at the dot. When the arrow goes SOLID and the
+    status says "CURVE! HOLD ^", it holds that way until the arrow goes, all
+    `delay` frames late. `hollow` also leans on the blinking HOLLOW arrow (as
+    Dana did: "lean on any arrow"), and `linger` keeps holding that many
+    frames after the arrow has gone. On the round-7 build this went PATIENT
+    ZERO at 10 and 22 frames alike (holding drove the dot out the far side);
+    a held lean must settle the dot in the white and reach Union."""
+    delay = 22
+    hollow = False
+    linger = 0
+
+    def act(self, t, tel, rng):
+        q = getattr(self, 'q', None)
+        if q is None:
+            q = self.q = []
+            self.last, self.gone = 0, 0
+        q.append(self.decide())
+        return q.pop(0) if len(q) > self.delay else 0
+
+    def decide(self):
+        s = self.read()
+        if s['ls'] == LS_ACT or (self.hollow and s['ls'] == LS_WARN):
+            ax, sg = PUSH[s['kind']]
+            self.last = (RIGHT if sg < 0 else LEFT) if ax == 0 else (DOWN if sg < 0 else UP)
+            self.gone = 0
+            return self.last
+        self.gone += 1
+        return self.last if self.gone <= self.linger else 0
+
+
+class subway_obey20(subway_obey):
+    delay = 20
+
+
+class subway_obey25(subway_obey):
+    delay = 25
+
+
+class subway_dana(subway_obey):
+    """Dana's own round-7 script: leans on any arrow, hollow or solid, 22
+    frames late, and lets go 10 frames after it's gone."""
+    hollow = True
+    linger = 10
+
+
+POLICIES = {c.__name__: c for c in (subway_expert, subway_ace, subway_surfer, subway_human, subway_newbie,
+                                    subway_obey, subway_obey20, subway_obey25, subway_dana)}
+DEFAULTS = {'subway': ['idle', 'hold_right', 'mash_a', 'random_input', 'subway_newbie', 'subway_dana', 'subway_obey', 'subway_human',
                        'subway_expert', 'subway_ace']}
 CURVE = {'subway': 'subway_surfer'}

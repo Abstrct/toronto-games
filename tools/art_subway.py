@@ -247,11 +247,35 @@ def build_sprites():
                            (64, up, [(7, 13), (7, 6), (4, 6), (7, 3), (8, 3), (11, 6), (8, 6), (8, 13)])):
         d.polygon([(x0 + x, HY + y) for x, y in pts], fill=6, outline=1)
         d.polygon([(x0 + x, HY + y) for x, y in inner], fill=11, outline=11)
-    # dots 8x8 at y=144: ok (white/cyan), sweet (gold), danger (red), parked (grey)
-    for k, (fc, sc) in enumerate(((2, 9), (6, 8), (7, 13), (3, 15))):
-        x0 = 96 + k * 8
-        d.ellipse([x0, 144, x0 + 6, 150], fill=sc, outline=1)
-        d.ellipse([x0 + 1, 145, x0 + 4, 148], fill=fc)
+    # the balance dot, 16x16 pieces centred on (7,7): a 9 px disc with a dark
+    # rim (11 px across), so its colour reads from the couch. ok (white, cyan
+    # shade), sweet (gold), danger (red with a white !, and a bigger pulse
+    # frame), parked (grey) while a grab plays out
+    def dot(x0, y0, fc, sc, r=4.5, bang=False, shine=True):
+        for yy in range(16):
+            for xx in range(16):
+                q = math.hypot(xx - 7, yy - 7)
+                if q <= r:
+                    c = fc
+                    if (xx - 7) + (yy - 7) > r * 0.9:
+                        c = sc                      # shade, lower right
+                    sh.px(x0 + xx, y0 + yy, c)
+                elif q <= r + 1.1:
+                    sh.px(x0 + xx, y0 + yy, 1)
+        if shine:
+            sh.px(x0 + 5, y0 + 5, 2)
+            sh.px(x0 + 6, y0 + 5, 2)
+            sh.px(x0 + 5, y0 + 6, 2)
+        if bang:
+            for yy in range(4, 9):
+                sh.px(x0 + 7, y0 + yy, 2)
+            sh.px(x0 + 7, y0 + 10, 2)
+    DY = 160
+    dot(80, DY, 2, 9)                               # ok
+    dot(96, DY, 6, 8)                               # sweet
+    dot(112, DY, 7, 13, bang=True, shine=False)     # danger
+    dot(80, DY + 16, 7, 13, r=5.6, bang=True, shine=False)  # danger, pulse
+    dot(96, DY + 16, 3, 15, shine=False)            # parked
     # germs 8x8 at (96,152),(104,152)
     for k in range(2):
         x0 = 96 + k * 8
@@ -288,8 +312,9 @@ def build_sprites():
     sh.obj('arrow_u', 112, 128, 16, 16)
     sh.obj('arrow_ro', 48, 160, 16, 16)
     sh.obj('arrow_uo', 64, 160, 16, 16)
-    for k, n in enumerate(('dot_ok', 'dot_sweet', 'dot_bad', 'dot_off')):
-        sh.obj(n, 96 + k * 8, 144, 8, 8, 3, 3)
+    for n, x, y in (('dot_ok', 80, 160), ('dot_sweet', 96, 160), ('dot_bad', 112, 160),
+                    ('dot_bad2', 80, 176), ('dot_off', 96, 176)):
+        sh.obj(n, x, y, 16, 16, 7, 7)
     sh.obj('germ0', 96, 152, 8, 8, 4, 4)
     sh.obj('germ1', 104, 152, 8, 8, 4, 4)
     sh.obj('ring', 0, 160, 48, 48, 24, 24)
@@ -337,7 +362,7 @@ def build():
         view.alpha_composite(render(sh, (16, 128, 16, 32), P.CROWD[2]), (212, 120))
         view.alpha_composite(render(sh, (48, 128, 16, 32), P.CROWD[3]), (176, 179))
         view.alpha_composite(render(sh, (0, 160, 48, 48), MISC), (104, 108))
-        view.alpha_composite(render(sh, (96, 144, 8, 8), MISC), (130, 126))
+        view.alpha_composite(render(sh, (96, 160, 16, 16), MISC), (126, 122))
         view.alpha_composite(render(sh, (96, 128, 16, 16), MISC), (150, 124))
         preview(view, name)
     return '%d tiles, %d pals' % (len(ts), len(pals))
