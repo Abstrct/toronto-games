@@ -35,12 +35,13 @@ TRAIN_LEN  = 320
 TRAIN_FLOOR= TRAIN_Y + 30   ; where the climbing walker's feet reach the door
 TIME_LIMIT = 60*60
 BEAT       = 15             ; frames per 8th note
-ACCEL      = $000C          ; speed approach per frame (8.8 px/frame)
+ACCEL      = $0010          ; speed approach per frame (8.8 px/frame)
 DECEL      = $0008
 SPD_OFF    = $00A0          ; EARLY / LATE: a short stride
-SPD_GOOD   = $0110
+SPD_STUT   = $0060          ; a double step
+SPD_GOOD   = $0120
 SPD_PERF   = $0130
-GROOVE_MAX = 8              ; streak cap; each step of streak adds 6/256 px/frame
+GROOVE_MAX = 8              ; streak cap; each step of streak adds 7/256 px/frame
 DOORS_T    = 10*60          ; "doors closing" with this many frames left
 
 ST_WALK    = 0
@@ -144,6 +145,17 @@ w_pri    = ev_ram + 574         ; walker sprite priority bits
 h_cells  = ev_ram + 576         ; HUD: the 20 progress cells on show (20 bytes)
 p_msg    = ev_ram + 596         ; popup waiting to be printed (one a frame)
 p_pal    = ev_ram + 598
+w_hitd   = ev_ram + 600         ; signed frames off the beat of the last step
+w_hitt   = ev_ram + 601         ; frames its mark stays on the strip
+w_tips   = ev_ram + 602         ; coaching tips already given (bits)
+w_tipt   = ev_ram + 603         ; frames until the queued tip shows
+w_tipm   = ev_ram + 604         ; the queued tip
+w_sloppy = ev_ram + 606         ; EARLY / LATE / MISS so far
+w_immov  = ev_ram + 607         ; EXCUSE ME at a cart or board
+w_warn   = ev_ram + 608         ; slot of the next one in your way ($FFFF none)
+w_warnr  = ev_ram + 610         ; ... how far ahead
+w_jogw   = ev_ram + 612         ; slot of a jogger coming up behind you
+w_jogr   = ev_ram + 614         ; ... how far back (negative)
 
 T_SUIT    = 1
 T_TOURIST = 2
@@ -169,7 +181,7 @@ ev_bay:
     jsr hud_coffee
     PRINT 1, 3, TP_WHITE, str_king
     PRINT 26, 3, TP_YELLOW, str_union
-    PRINT 8, 27, TP_WHITE, str_grvl
+    PRINT 21, 25, TP_WHITE, str_grvl
     jsr hud_progress
     jsr hud_groove
     jsl event_countdown
@@ -184,7 +196,12 @@ ev_bay:
     jsr bay_hud
     lda ev_giveup               ; pause menu: GIVE UP ends the run now
     beq @on
-    sta w_quit
+    lda w_state                 ; the train already came (made it or
+    cmp #ST_FINISH              ; missed it): that result stands
+    bcs @end
+    lda #$01
+    sta w_quit                  ; scored as a missed train, ev_fail 3
+@end:
     lda #ST_DONE
     sta w_state
 @on:
@@ -448,14 +465,18 @@ beat_slot:
     beq @miss
     cmp #G_OFF
     beq @sloppy
+    lda #GROOVE_MAX
+    ldx w_decaf
+    beq @cap
+    lsr a                       ; DECAF: half the groove at most
+@cap:
+    sta tmp0
     lda w_streak
-    cmp #GROOVE_MAX
+    cmp tmp0
     bcs @reset
     inc w_streak
     lda w_streak
     cmp #GROOVE_MAX
-    bne @reset
-    lda w_decaf
     bne @reset
     lda w_groove
     bne @reset
@@ -466,11 +487,23 @@ beat_slot:
     jsr popup
     bra @reset
 @sloppy:
-    lsr w_streak                ; a sloppy step costs half the groove
+    lda w_streak                ; a sloppy step costs two notches of groove
+    sec
+    sbc #2
+    bcs @sl
+    lda #0
+@sl:
+    sta w_streak
     stz w_groove
     bra @reset
 @miss:
-    lsr w_streak                ; so does a skipped beat
+    lda w_streak                ; a skipped beat costs three
+    sec
+    sbc #3
+    bcs @ms
+    lda #0
+@ms:
+    sta w_streak
     stz w_groove
     jsr combo_break
     A16
@@ -480,6 +513,7 @@ beat_slot:
     lda w_staps
     beq @reset
 @was:
+    jsr sloppy_tip
     lda #G_MISS
     jsr show_grade
     A16
@@ -499,12 +533,41 @@ beat_slot:
 
 str_groove: .byte "IN THE GROOVE! TOP SPEED", 0
 
+; the third EARLY / LATE / MISS of the run: how the strip works
+sloppy_tip:
+    inc w_sloppy
+    lda w_sloppy
+    cmp #3
+    bne @x
+    lda #TIP_BEAT
+    ldx #.loword(str_tbeat)
+    jmp tip
+@x:
+    rts
+
 ; A = grade word to show
 show_grade:
     sta w_grade
     lda #24
     sta w_gradet
     rts
+
+; A = tip bit, X = tip: queue it once a run, after the current popup
+tip:
+    bit w_tips
+    bne @x
+    ora w_tips
+    sta w_tips
+    stx w_tipm
+    lda #64
+    sta w_tipt
+@x:
+    rts
+
+TIP_LANE  = $01
+TIP_BEAT  = $02
+str_tlane: .byte "TIP: UP/DOWN TO SWITCH LANES", 0
+str_tbeat: .byte "TIP: STEP AS EACH DOT LANDS", 0
 
 ; X = message (this bank), A = text palette, Y = frames on show.
 ; Queued: popup_flush prints the last one asked for once a frame (a step,
@@ -558,8 +621,9 @@ beat_offset:
     rts
 
 ; LEFT / RIGHT taps. The first alternating step of a slot sets the stride;
-; a second one in the same 8th is a double step (no harm to the stride, but
-; it's off the beat, so it breaks the combo).
+; a second one in the same 8th is a double step: a stutter off the beat. It
+; breaks the combo and makes the slot sloppy (a short stride, groove down),
+; so tapping faster than the music doesn't pay.
 input_steps:
     lda pad_new+1               ; LEFT = $02, RIGHT = $01
     and #$03
@@ -586,29 +650,55 @@ input_steps:
     inc w_staps
     lda tmp0
     cmp #$03
-    beq @shuffle                ; both at once
+    jeq @shuffle                ; both at once
     cmp w_last
-    beq @shuffle                ; same foot twice
+    jeq @shuffle                ; same foot twice
     sta w_last
     stz w_since
     lda w_sbest
     beq @first
     jsr combo_break             ; double step
-    bra @step
+    lda w_sbest
+    cmp #G_OFF
+    jeq @step                   ; already sloppy
+    lda #G_OFF
+    sta w_sbest
+    A16
+    lda #SPD_STUT               ; a stutter: shorter than any stride,
+    sta w_target
+    lda w_speed                 ; and it checks you on the spot
+    lsr a
+    lsr a
+    sta tmp2
+    lda w_speed
+    sec
+    sbc tmp2
+    sta w_speed
+    A8
+    jsr beat_offset
+    lda tmp1
+    sta w_sd
+    sta w_hitd
+    lda #16
+    sta w_hitt
+    jmp @off
 @first:
     jsr beat_offset
     ldy #G_PERFECT
     cmp #3
     bcc @g
     dey
-    cmp #5
+    cmp #6
     bcc @g
-    dey                         ; 5-7 frames out: EARLY / LATE
+    dey                         ; 6-7 frames out: EARLY / LATE
 @g:
     tya
     sta w_sbest
     lda tmp1
     sta w_sd
+    sta w_hitd                  ; where the step landed, for the strip
+    lda #16
+    sta w_hitt
     jsr set_target
     lda w_sbest
     cmp #G_OFF
@@ -626,6 +716,7 @@ input_steps:
     bra @show
 @off:
     jsr combo_break
+    jsr sloppy_tip
     lda w_sd
     bmi @early
     lda #G_LATE
@@ -648,19 +739,18 @@ set_target:
     lda spd_base,x
     sta tmp3
     A8
-    lda w_decaf
-    bne @d
     lda w_streak
     asl a
-    adc w_streak                ; streak * 3 (no carry: streak <= 8)
-    asl a                       ; * 6
+    asl a
+    asl a
+    sec
+    sbc w_streak                ; streak * 7 (streak <= 8)
     A16
     and #$00FF
     clc
     adc tmp3
     sta tmp3
     A8
-@d:
     A16
     lda tmp3
     sta w_target
@@ -848,6 +938,12 @@ spill:
     lda #$01
     sta w_decaf
     stz w_groove
+    lda w_streak                ; groove drops to half
+    cmp #(GROOVE_MAX / 2)
+    bcc @half
+    lda #(GROOVE_MAX / 2)
+    sta w_streak
+@half:
     ldx #.loword(str_decaf)
     lda #TP_RED
     ldy #90
@@ -857,7 +953,7 @@ spill:
     A8
     rts
 
-str_decaf: .byte "OUT OF COFFEE! NO GROOVE!", 0
+str_decaf: .byte "OUT OF COFFEE! HALF GROOVE", 0
 
 approach_speed:
     A16
@@ -925,6 +1021,15 @@ move_player:
     rts
 
 tick_timers:
+    lda w_tipt                  ; a coaching tip waiting its turn
+    beq @t0
+    dec w_tipt
+    bne @t0
+    ldx w_tipm
+    lda #TP_CYAN
+    ldy #100
+    jsr popup
+@t0:
     A16
     lda w_cd
     beq @c1
@@ -1097,6 +1202,7 @@ input_excuse:
     jsr combo_break
     stz d_f                     ; people who stepped aside
     stz d_b                     ; anybody in earshot at all
+    stz w_immov                 ; a cart or board close ahead
     ldy #$0000
 @e:
     lda E_TYPE,y
@@ -1121,8 +1227,13 @@ input_excuse:
     A8
     bcs @n
     lda E_TYPE,y
+    cmp #T_CART
+    bcc @walk
+    inc w_immov                 ; carts and boards don't
+    bra @n
+@walk:
     cmp #T_JOGGER
-    bcs @n                      ; joggers, carts and boards don't
+    bcs @n                      ; nor do joggers
     lda E_FLAGS,y
     and #$08
     bne @n
@@ -1136,10 +1247,18 @@ input_excuse:
     bne @e
     lda d_f
     bne @moved
+    lda w_immov
+    bne @budge
     lda d_b
     beq @none
     SFX SFX_STEP                ; too far yet: polite, but nobody moves
     bra @say
+@budge:
+    SFX SFX_BACK                ; asking a hot dog cart to move
+    ldx #.loword(str_budge)
+    lda #TP_YELLOW
+    ldy #50
+    jmp popup
 @moved:
     SFX SFX_SELECT
 @say:
@@ -1181,6 +1300,7 @@ str_excuse2: .byte "PARDON ME! COMING THROUGH!", 0
 str_excuse3: .byte "SORRY, JUST SQUEEZING BY!", 0
 str_excuse4: .byte "ON YOUR LEFT! ER, RIGHT!", 0
 str_nobody:  .byte "EXCUSE ME? ...NOBODY THERE", 0
+str_budge:   .byte "IT WON'T BUDGE! UP/DOWN!", 0
 
 ; X = slot: move to a free neighbouring lane, or flatten against the
 ; wall; either way they never block you again. Keeps Y.
@@ -1223,7 +1343,7 @@ bump_player:
     pha
     lda #ST_STUMBLE
     sta w_state
-    ldx #30
+    ldx #24
     stx w_timer
     stz w_streak
     stz w_groove
@@ -1241,6 +1361,13 @@ bump_player:
     A8
     SFX SFX_SPLASH
     pla
+    cmp #T_CART                 ; a cart or a sandwich board doesn't give:
+    bcc @soft                   ; you bounce off it into the middle lane
+    pha
+    lda #1
+    sta w_lane
+    pla
+@soft:
     asl a
     TAXB
     lda bump_tab,x              ; say who it was: that's what cost you
@@ -1254,7 +1381,10 @@ bump_player:
     lda #TP_RED
     ldy #60
     jsr popup
-    lda #3
+    lda #TIP_LANE
+    ldx #.loword(str_tlane)
+    jsr tip
+    lda #2
     jmp spill
 
 bump_tab: .addr str_sorry, str_sorry, str_tourist, str_zombie, str_left, str_sorry, str_cart, str_board
@@ -1560,6 +1690,11 @@ seg_board:
 
 ; ------------------------------------------------------------------
 ents_update:
+    ldx #$FFFF
+    stx w_warn
+    stx w_jogw
+    ldx #$7FFF
+    stx w_warnr
     ldx #$0000
 @ent:
     lda E_TYPE,x
@@ -1642,6 +1777,7 @@ ents_update:
     bne @kill
 @ok:
     A8
+    jsr warn_check
     jsr ent_collide
     ldx w_cur
     A16
@@ -1663,6 +1799,46 @@ ents_update:
     jne @ent
     rts
 
+; Who's in your way: the nearest person or thing ahead in your lane (inside
+; 96 px, about 1.2 s of walking) gets a red '!' over their head, and so does a
+; jogger closing in behind you, from 200 px back (off screen: at the left
+; edge). X = slot, tmp0 = rel. Keeps X.
+warn_check:
+    lda E_LANE,x
+    cmp w_lane
+    bne @x
+    lda E_FLAGS,x
+    and #$0C                    ; already bumped us / stepped aside
+    bne @x
+    lda E_TYPE,x
+    cmp #T_PIGEON
+    beq @x
+    cmp #T_JOGGER
+    beq @jog
+    A16
+    lda tmp0
+    bmi @x16
+    cmp #96
+    bcs @x16
+    cmp w_warnr
+    bcs @x16
+    sta w_warnr
+    stx w_warn
+@x16:
+    A8
+@x:
+    rts
+@jog:
+    A16
+    lda tmp0
+    bpl @x16
+    cmp #($10000 - 200)
+    bcc @x16
+    sta w_jogr
+    stx w_jogw
+    bra @x16
+    .a8
+
 ; per-type behaviour, X = slot
 ent_behave:
     lda E_TYPE,x
@@ -1671,7 +1847,7 @@ ent_behave:
     cmp #T_ZOMBIE
     beq @zombie
     cmp #T_PIGEON
-    beq @pigeon
+    jeq @pigeon
     rts
 @tourist:
     dec E_TIMER,x
@@ -1711,6 +1887,18 @@ ent_behave:
     cmp #3
     bcs @x
     sta tmp6
+    cmp w_lane                  ; never into your lane right in front of
+    bne @free                   ; you: that would be a bump nobody saw coming
+    A16
+    lda E_WX,x
+    sec
+    sbc w_dist
+    clc
+    adc #24
+    cmp #(24 + 96)
+    A8
+    bcc @x
+@free:
     stx tmp5
     lda E_WX,x
     sta tmp4
@@ -1923,6 +2111,7 @@ bay_draw:
     lda w_state
     cmp #ST_FINISH
     bcs @nobeat
+    jsr draw_warn
     jsr draw_beat
 @nobeat:
     ; front lane first so nearer people overlap farther ones
@@ -2217,19 +2406,42 @@ put_one:
     jsl oam_put
     rts
 
-; the beat strip on the road: a target on the left, 8th-note ticks sliding
-; into it (one per step), the next foot inside it, and the
-; grade of your last step above it
-BEAT_X = 32
-BEAT_Y = 204                    ; on the dark panel under the curb (row 25)
+; the beat strip on the bottom panel: the grade of your last step, a
+; target, 8th-note ticks sliding into it (one per step), the next foot inside
+; it, and a mark where your last step landed (right of the target: early,
+; left: late; 2 px a frame, like the ticks). All of it inside scanlines
+; 200-215, clear of the bottom overscan.
+BEAT_X = 60
+BEAT_Y = 208                    ; target on rows 25-26 of the panel
 draw_beat:
+    ; where the last step landed
+    lda w_hitt
+    beq @noh
+    dec w_hitt
+    lda w_hitd
+    jsr ev_sext                 ; (returns A16)
+    .a16
+    asl a
+    eor #$FFFF
+    inc a                       ; -2 * offset
+    clc
+    adc #(BEAT_X - 4)
+    sta spr_x
+    lda #(BEAT_Y - 9)
+    sta spr_y
+    A8
+    ldx #MS_HIT_BASE
+    stx tmp6
+    lda #0
+    jsr put_one
+@noh:
     ; grade word
     lda w_gradet
     beq @nog
     A16
-    lda #2                      ; under the target, left of GROOVE (row 27)
+    lda #4                      ; left of the target
     sta spr_x
-    lda #215
+    lda #(BEAT_Y - 4)
     sta spr_y
     A8
     lda #$3A
@@ -2312,7 +2524,7 @@ draw_beat:
     asl a
     clc
     adc #(BEAT_X - 4)
-    cmp #(BEAT_X + 140)
+    cmp #(BEAT_X + 96)          ; clear of GROOVE on the right
     A8
     bcs @x
     A16
@@ -2339,6 +2551,50 @@ draw_beat:
 
 grade_lo:   .addr 0, 0, ms_wgood, ms_wperfect, ms_wearly, ms_wlate, ms_wmiss
 grade_base: .word 0, 0, MS_WGOOD_BASE, MS_WPERFECT_BASE, MS_WEARLY_BASE, MS_WLATE_BASE, MS_WMISS_BASE
+
+; the red '!' over whoever is in your way (see warn_check)
+draw_warn:
+    ldx w_warn
+    bmi @jog
+    A16
+    lda E_WX,x
+    sec
+    sbc w_dist
+    clc
+    adc #(PLAYER_SX - 4)
+    sta spr_x
+    A8
+    jsr @put
+@jog:
+    ldx w_jogw
+    bmi @x
+    A16
+    lda w_jogr
+    clc
+    adc #(PLAYER_SX - 4)
+    cmp #4
+    bpl @in
+    lda #4                      ; still off screen: at the left edge
+@in:
+    sta spr_x
+    A8
+@put:
+    lda E_LY,x
+    sec
+    sbc #44
+    sta spr_y
+    stz spr_y+1
+    lda w_clock                 ; a little hop so it catches the eye
+    and #$08
+    beq @h
+    dec spr_y
+@h:
+    ldx #MS_WARN_BASE
+    stx tmp6
+    lda #0
+    jmp put_one
+@x:
+    rts
 
 ; the "you" marker, bobbing on the beat (drawn first: always on top)
 draw_marker:
@@ -2870,7 +3126,8 @@ hud_progress:
     bne @pc
     rts
 
-; bottom panel, row 27: GROOVE [4 cells] and the combo's name, each
+; bottom panel, right of the strip: GROOVE [4 cells] on row 25 and the
+; combo on row 26 (rows 25-26: clear of the bottom overscan), each
 ; redrawn only when it changes
 hud_groove:
     lda w_streak
@@ -2909,7 +3166,7 @@ hud_groove:
     A16
     txa
     clc
-    adc #(27*32 + 14)
+    adc #(25*32 + 27)
     tax
     A8
     lda tmp7
@@ -2932,18 +3189,18 @@ hud_groove:
     sta ptr0+1
     lda #^combo_hud
     sta ptr0+2
-    ldx #(27*32 + 19)
+    ldx #(26*32 + 22)
     lda #($20 | (TP_YELLOW << 2))
     jsl txt_print
 @x:
     rts
 
 combo_hud: .addr str_hx1, str_hx2, str_hx3, str_hx4, str_hx5
-str_hx1: .byte "             ", 0
-str_hx2: .byte "X2 POWER WALK", 0
-str_hx3: .byte "X3 RUSH HOUR ", 0
-str_hx4: .byte "X4 BAY STREAK", 0
-str_hx5: .byte "X5 GO EXPRESS", 0
+str_hx1: .byte "        ", 0
+str_hx2: .byte "COMBO X2", 0
+str_hx3: .byte "COMBO X3", 0
+str_hx4: .byte "COMBO X4", 0
+str_hx5: .byte "COMBO X5", 0
 
 str_541:    .byte "5:41:", 0
 str_542:    .byte "5:42:00", 0
@@ -2958,9 +3215,15 @@ str_grvl:   .byte "GROOVE", 0
 ; made it:  1000 + 25/sec to spare + 15/pass + 20/coffee + STYLE
 ;           (STYLE: the combo level for every PERFECT step, 10 x level a
 ;           PRESTO TAP)
+;           card: BASE (1000 + time + passes + a full cup, 320) + STYLE
+;           - SPILLS (20 a sip of coffee lost)
 ; missed:   distance/5 + 5/pass (always under a finish); gave up: the same,
-;           ev_fail 3
+;           ev_fail 3. Card: BASE only.
 bay_score:
+    A16
+    stz ev_break+2
+    stz ev_break+4
+    A8
     A16
     lda w_time
     sta tmp0
@@ -2996,7 +3259,7 @@ bay_score:
     clc
     adc tmp4                    ; s*25
     clc
-    adc #1000
+    adc #(1000 + 16*20)         ; and a full cup
     sta tmp4
     lda w_passed
     asl a
@@ -3007,20 +3270,26 @@ bay_score:
     sbc w_passed                ; p*15
     clc
     adc tmp4
-    sta tmp4
-    lda w_coffee
-    and #$00FF
+    sta ev_break                ; BASE
+    lda w_style
+    sta ev_break+2              ; + STYLE
+    lda #16
+    sec
+    sbc w_coffee
+    and #$00FF                  ; sips lost
     asl a
     asl a
     sta tmp1
     asl a
     asl a
     clc
-    adc tmp1                    ; c*20
+    adc tmp1                    ; *20
+    sta ev_break+4              ; - SPILLS
+    lda ev_break
     clc
-    adc tmp4
-    clc
-    adc w_style
+    adc ev_break+2
+    sec
+    sbc ev_break+4
     sta ev_score
     A8
     stz ev_fail
@@ -3041,6 +3310,7 @@ bay_score:
     clc
     adc tmp0
     sta ev_score
+    sta ev_break                ; BASE (no bonus, no penalty)
     A8
     lda w_quit
     beq @one

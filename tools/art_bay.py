@@ -333,7 +333,8 @@ def word(sh, x, y, text, col):
 
 
 def beat_ui(sh, d):
-    """Marker over the walker, the beat strip (target, ticks, foot arrows), grade words."""
+    """Marker over the walker, the beat strip (target, ticks, foot arrows, step
+    mark), the blocker '!', grade words."""
     # 'you' marker: yellow down-arrow, dark outline (8x8 at 16,96)
     d.polygon([(17, 97), (23, 97), (20, 102)], fill=3)
     sh.outline(16, 96, 8, 8)
@@ -352,6 +353,14 @@ def beat_ui(sh, d):
         d.rounded_rectangle([x0 + 1, 97, x0 + 14, 110], radius=3, fill=ring)
         d.rounded_rectangle([x0 + 3, 99, x0 + 12, 108], radius=2, fill=fill)
         sh.outline(x0, 96, 16, 16)
+    # where your step landed on the strip: a short yellow bar (8x8 at 72,96)
+    d.rectangle([75, 97, 76, 102], fill=3)
+    sh.outline(72, 96, 8, 8)
+    # '!' over whoever you're about to walk into (8x8 at 80,96)
+    d.rectangle([83, 97, 85, 102], fill=2)
+    d.rectangle([83, 104, 85, 105], fill=2)
+    d.point((84, 98), fill=3)
+    sh.outline(80, 96, 8, 8)
     word(sh, 0, 112, 'PERFECT', 3)
     word(sh, 48, 112, 'GOOD', 4)
     word(sh, 80, 112, 'EARLY', 14)
@@ -619,7 +628,7 @@ def build_sprites():
     sh.obj('coach', 0, 160, 64, 32, 0, 0)
     sh.obj('loco', 64, 160, 64, 32, 0, 0)
     sh.obj('cab', 0, 192, 16, 32, 0, 0)
-    sh.obj('wmiss', 16, 192, 32, 16, 0, 0)
+    sh.obj('wmiss', 16, 192, 32, 8, 0, 0)
     sh.obj('tickgold', 48, 192, 8, 8, 4, 4)
     sh.obj('splash', 112, 0, 16, 16)
     sh.obj('pigeon0', 112, 16, 8, 8, 4, 7)
@@ -628,14 +637,16 @@ def build_sprites():
     sh.obj('marker', 16, 96, 8, 8, 4, 7)
     sh.obj('tickbig', 24, 96, 8, 8, 4, 4)
     sh.obj('ticksm', 16, 104, 8, 8, 4, 4)
+    sh.obj('hit', 72, 96, 8, 8, 4, 4)
+    sh.obj('warn', 80, 96, 8, 8, 4, 7)
     sh.obj('footl', 24, 104, 8, 8, 4, 4)
     sh.obj('footr', 64, 96, 8, 8, 4, 4)
     sh.obj('target', 32, 96, 16, 16, 8, 8)
     sh.obj('targetlit', 48, 96, 16, 16, 8, 8)
-    sh.obj('wperfect', 0, 112, 48, 16, 0, 0)
-    sh.obj('wgood', 48, 112, 32, 16, 0, 0)
-    sh.obj('wearly', 80, 112, 32, 16, 0, 0)
-    sh.obj('wlate', 96, 128, 32, 16, 0, 0)
+    sh.obj('wperfect', 0, 112, 48, 8, 0, 0)   # one tile row: the row below is walker
+    sh.obj('wgood', 48, 112, 32, 8, 0, 0)
+    sh.obj('wearly', 80, 112, 32, 8, 0, 0)
+    sh.obj('wlate', 96, 128, 32, 8, 0, 0)
     out('bay_spr.bin', sh.tiles())
     with open('build/bay_meta.inc', 'w') as f:
         f.write(sh.meta_inc())
