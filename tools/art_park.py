@@ -690,7 +690,12 @@ def build_sprites():
     red = list(MISC)                     # 6: the red "!" over a crouched dog
     red[5], red[6] = MISC[6], MISC[5]    # (red bubble, white mark)
     data += pal_bytes([hexrgb(c) for c in red], 16)
-    out('park_spr_pal.bin', data)        # sprite palettes 1..6
+    # 7: the flash as a dog springs (the tell that his leap has begun):
+    # white fur with a yellow rim, whatever the breed
+    flash = list(DOG_BASE)
+    flash[2], flash[3], flash[4] = '#f8f8f8', '#f8d830', '#f8f8f8'
+    data += pal_bytes([hexrgb(c) for c in flash], 16)
+    out('park_spr_pal.bin', data)        # sprite palettes 1..7
     return sh
 
 
