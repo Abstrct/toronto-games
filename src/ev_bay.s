@@ -44,6 +44,7 @@
 .include "screens.inc"
 
 .import bay_tiles, bay_bg1, bay_bg2, bay_pal, bay_spr, bay_spr_pal, bay_sky
+.import trick_seen          ; boot.s: the attract demo's WATCH THAT MOVE! cue
 
 PLAYER_SX  = 72
 COURSE_LEN = 3600           ; keep in step with tools/art_bay.py
@@ -1750,6 +1751,7 @@ close_shave:
     jmp popup_pts
 @slalom:
     inc w_slaloms
+    jsl trick_seen
     asl a
     TAXB
     lda slalom_msg-4,x

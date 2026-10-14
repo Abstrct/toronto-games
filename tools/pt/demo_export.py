@@ -36,7 +36,7 @@ import pt  # noqa: E402
 ROOT = pt.ROOT
 OUT = os.path.join(ROOT, 'src', 'demo_data.inc')
 # the bot that plays each event's demo (fallback: the event's CURVE bot)
-POLICY = {'bike': 'bike_pro', 'bay': 'bay_beat', 'park': 'park_ace', 'cops': 'cops_pro',
+POLICY = {'bike': 'bike_pro', 'bay': 'bay_weave', 'park': 'park_ace', 'cops': 'cops_pro',
           'sail': 'sail_expert', 'parking': 'park_expert',
           'subway': 'subway_ace'}
 
