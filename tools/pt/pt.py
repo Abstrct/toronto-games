@@ -359,11 +359,15 @@ class Game:
             if any(glyph(c) for c in rows[r]):
                 issues.append(('overscan', 'text on row %d (scanlines %d-%d, hidden by CRT overscan): %r'
                                % (r, r * 8, r * 8 + 7, rows[r].strip(' .'))))
+        # text on a solid window panel (tile + 128) sits above sprites; only
+        # text printed straight onto the playfield can be covered by them
+        tm = self.core.peek(self.sym['txt_map'], 2048)
+        bare = lambda cx, cy: glyph(rows[cy][cx]) and not (tm[(cy * 32 + cx) * 2] & 0x80)
         hit = {}
         for (x, y, w, h) in self.sprites():
             for cy in range(max(0, (y + 1) // 8), min(28, (y + h + 7) // 8)):
                 for cx in range(max(0, x // 8), min(32, (x + w + 7) // 8)):
-                    if glyph(rows[cy][cx]):
+                    if bare(cx, cy):
                         hit.setdefault(cy, set()).add(cx)
         for cy, xs in sorted(hit.items()):
             issues.append(('sprite_over_text', 'sprite overlaps text on row %d: %r' % (cy, rows[cy].strip(' .'))))
@@ -1168,7 +1172,7 @@ def cmd_lint(a):
             print('    %-16s @%-4d %s' % (i['kind'], i['frame'], i['msg']))
         n += len(issues)
     print('\n%d issue(s). Heuristics: overscan = text in the top/bottom 8 scanlines; sprite_over_text = an OAM box'
-          ' over a text glyph (fine if the sprite is meant to sit behind a panel).' % n)
+          ' over a text glyph printed straight onto the playfield (panel text sits above sprites).' % n)
 
 
 # ---------------------------------------------------------------- golden
