@@ -114,11 +114,11 @@ START goes to the main menu.
 |---|-------|-------|--------------|
 | 1 | KC Incidental | Broken Social Scene, "KC Accidental" | title |
 | 2 | Bobcaygeese | The Tragically Hip, "Bobcaygeon" | menus, sign-up, records |
-| 3 | Off-Leash Alert | Trinity Bellwoods, 3/4 view | D-pad walk · B when a "!" shows: sidestep (hold ◀ or ▶ to pick a side) · A throw a tennis ball | Walk from the Queen St gate to the Dundas gate. A dog with a "!" is about to charge. Press B early to get set and you sidestep safely, or press it as he lunges for NICE TIMING or a CLOSE SHAVE bonus. Then walk up and pat him (DODGE 'N' PAT). Every 3 dogs in a row wins back a heart; three tackles and you're done. |
+| 3 | Gold Guns Gulls | Metric, "Gold Guns Girls" | Bike Courier |
 | 4 | Ahead by a Centimetre | The Tragically Hip, "Ahead by a Century" | event standings, final table |
 | 5 | Whelp, I'm Alive | Metric, "Help I'm Alive" | Bay St Power Walk |
 | 6 | Hay, Officer | Mother Mother, "Hayloft" | Tallboy Trot |
-| 7 | TTC Surfing | Line 1, Bloor-Yonge to Union | D-pad lean | Ride to Union hands-free. Every lurch is announced: listen for the beeps, squeal or hiss, and watch the yellow arrow, then lean that way to keep the dot in the ring. Leave the ring and you grab something, which means more germs. Clean legs build a STANDING SURF chain. Twenty germs and you're PATIENT ZERO. |
+| 7 | Brother Downwind | Sam Roberts, "Brother Down" | Harbour Regatta |
 | 8 | If I Had a Million Collars | Barenaked Ladies, "If I Had $1000000" | Off-Leash Alert |
 | 9 | Podium Reprise | the title theme behind a fanfare | podium at Nathan Phillips Square |
 | 10 | Green P Shuffle | original: an F major swing | Parallel Parking |

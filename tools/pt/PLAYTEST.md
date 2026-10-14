@@ -1,7 +1,7 @@
 # Playtester brief
 
 You're playtesting **Toronto Games**, an SNES ROM and spiritual successor to
-Epyx's *California Games* (1987). It has five Toronto events, 1–8 players taking
+Epyx's *California Games* (1987). It has seven Toronto events, 1–8 players taking
 turns, sponsors, a medal table and a podium. You'll be given a PERSONA: stay in
 character. The team wants brutal honesty. Never report something you didn't
 actually see.
