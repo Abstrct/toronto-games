@@ -101,7 +101,10 @@ def tree(d, cd, cx, cy, r=14, kind='oak', var=0):
     d.rectangle([cx - 2, cy, cx + 2, foot], fill=COL['trunk'])
     d.line([cx + 2, cy + 2, cx + 2, foot], fill=COL['wood2'])
     mark_solid(cx - 3, foot - 6, cx + 3, foot)
-    mark_behind(cx - r + 3, cy - r, cx + r - 3, foot - 8)
+    # feet anywhere north of the trunk's foot and under the canopy (or a body's
+    # width to its side) are behind the tree; from a few px above its top edge
+    # so a dog stood just behind it can't paint its legs over the leaves
+    mark_behind(cx - r - 6, cy - r - 6, cx + r + 6, foot - 1)
     if kind == 'spruce':
         for i in range(4):
             w = 4 + i * 3
@@ -691,8 +694,12 @@ def place_dogs(court, dc):
 
     dogs = []
     kinds = [0, 3, 1, 2, 3, 0, 2, 1, 3, 1, 0, 2, 3, 2, 1, 0]
+    # a forgiving first minute: wide gaps between the first dogs, closing up
+    # (170 px, about 3 s of walking, down to 104) as you near Dundas
+    y0 = 2370
     for i in range(16):
-        y = 2370 - i * 130 + rnd.randint(-12, 12)
+        y = y0 + rnd.randint(-12, 12)
+        y0 -= 170 - i * 66 // 15
         px_ = path_x.get(y // 32 * 32, 128)
         for _ in range(60):
             side = rnd.choice((-1, 1))
