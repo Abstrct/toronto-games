@@ -26,7 +26,7 @@ ATT_WAIT  = 1200        ; 20 s of title before the first panel
 ATT_BACK  = 600         ; after a demo: 10 s of title before the panels
 ATT_SHOW  = 480         ; each panel stays up 8 s
 TITLE_DEMO = $FF
-NUM_SFX   = 18          ; the sound test's SOUND list (audio.s sfx_table)
+NUM_SFX   = 21          ; the sound test's SOUND list (audio.s sfx_table)
 TP_PROMPT = TP_PINK     ; the title never uses pink: PRESS START's strip palette
 PROMPT_ROW = 22
 .define RGB(r,g,b) ((((b)>>3)<<10)|(((g)>>3)<<5)|((r)>>3))
@@ -706,6 +706,7 @@ sfx_names:
     .word .loword(fx5), .loword(fx6), .loword(fx7), .loword(fx8), .loword(fx9)
     .word .loword(fx10), .loword(fx11), .loword(fx12), .loword(fx13)
     .word .loword(fx14), .loword(fx15), .loword(fx16), .loword(fx17)
+    .word .loword(fx18), .loword(fx19), .loword(fx20)
 fx0:  .byte "BLIP", 0
 fx1:  .byte "SELECT", 0
 fx2:  .byte "BACK", 0
@@ -724,6 +725,9 @@ fx14: .byte "SIP", 0
 fx15: .byte "CHEER", 0
 fx16: .byte "TICK", 0
 fx17: .byte "GROAN", 0
+fx18: .byte "DOOR CHIME", 0
+fx19: .byte "FERRY HORN", 0
+fx20: .byte "FIREWORK", 0
 str_st_title:  .byte "SOUND TEST", 0
 str_st_music:  .byte "MUSIC", 0
 str_st_sound:  .byte "SOUND", 0

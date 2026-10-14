@@ -710,26 +710,30 @@ score_card:
     rtl
 
 ; card_sting (jsl): the result card's sound, played once, as the card
-; appears (score_card is its only caller). card_sting_sfx per outcome:
-; 0 a new Toronto record, 1 onto the board, 2 called it a day, 3 the rest.
-; The audio side swaps a jingle in here, and nowhere else.
+; appears (score_card is its only caller): the result jingle (audio.s
+; sfx_result: 0 the ta-da, 1 the sad trombone, 2 the record fanfare), with
+; the crowd under a new Toronto record and a bell for a place on the board.
 card_sting:
-    ldx #$0000                  ; a new record
     lda c_rank
-    beq @play
-    inx                         ; on the board
-    lda c_rank
-    bpl @play
-    inx                         ; gave up
-    lda ev_fail
-    cmp #$03
-    beq @play
-    inx                         ; anything else
-@play:
-    lda f:card_sting_sfx,x
+    bne @nrec
+    lda #SFX_CHEER              ; a new record: the crowd under the fanfare
     jsl sfx_play
+    lda #$02
+    bra @jin
+@nrec:
+    bmi @nb
+    lda #SFX_BELL               ; on the board: a bell over the jingle
+    jsl sfx_play
+@nb:
+    lda ev_fail
+    beq @fin
+    lda #$01                    ; any fail line: the sad trombone
+    bra @jin
+@fin:
+    lda #$00                    ; finished: the ta-da
+@jin:
+    jsl sfx_result              ; the result jingle (audio.s): it takes over the music voices
     rtl
-card_sting_sfx: .byte SFX_CHEER, SFX_BELL, SFX_GROAN, SFX_COIN
 
 ; card_plan: how many rows the sum, the note and the board lines take, so
 ; c_nst (stats shown: 2, or 1 when space is short), c_note / c_noteptr, and
@@ -3804,7 +3808,7 @@ ec2: .byte "D-PAD WALK   A THROW BALL", $0A, "SAFE: B WHEN ! SHOWS: 50", $0A, "B
 ec3: .byte "YELLOW CHALK: TAP A", $0A, "RED CHALK: HOLD A", $0A, "B: SIP WHILE COP CAN'T SEE", 0
 ec4: .byte "LEFT/RIGHT: TURN  A: HIKE", $0A, "YELLOW ARROW: NEXT MARK", $0A, "GREEN DIAMONDS: ON COURSE", 0
 ec5: .byte "UP: REAR BUMPER TO LINE", $0A, "BACK IN: DOWN+RIGHT, THEN", $0A, "DOWN+LEFT. A: PARK IT!", 0
-ec6: .byte "HOLLOW ARROW: GET READY", $0A, "SOLID: D-PAD THAT WAY NOW", $0A, "GOLD DOT ALL LEG: SURF X3", 0
+ec6: .byte "HOLLOW ARROW: GET READY", $0A, "SOLID: D-PAD THAT WAY NOW", $0A, "GOLD DOT STOP TO STOP = X3", 0
 ef0: .byte "WIPED OUT!", 0
 ef1: .byte "MISSED THE TRAIN!", 0
 ef2: .byte "TACKLED!", 0

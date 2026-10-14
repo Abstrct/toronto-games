@@ -905,7 +905,7 @@ fireworks:
     ora #$10                    ; priority 1: behind the towers (BG2)
     ldx cer_i
     sta fw_pal,x
-    SFX SFX_SPLASH
+    SFX SFX_FIREWORK
 @age:
     ldx #$0000
 @a:

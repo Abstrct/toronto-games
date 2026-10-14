@@ -56,8 +56,9 @@ colours. B on the sponsor wall goes back to your name with the name kept.
   starts on NO, so mashing A can't delete anyone.
 - **START!**: on to the events.
 
-B leaves for the main menu, but first asks whether you want to lose the
-players you've signed up. On the event picker, B goes back to the roster
+B leaves for the main menu, but first asks LOSE ALL n PLAYERS? NO / YES,
+with the cursor on NO. A counts only once you've let go, so a stray B and a
+mashed A keep everyone. On the event picker, B goes back to the roster
 with everyone still signed up.
 
 **Turns.** Players take turns at each event. An UP NOW card names whose
@@ -68,14 +69,14 @@ event list.
 **Scores.** The result card shows how the score adds up. A score never goes
 below 0: if the penalties are bigger than the rest, the card still shows the
 full sum and says SCORES NEVER GO BELOW 0. A failed Bike run forfeits its
-tips and style, and the card shows them in grey.
+tokens and style, and the card itemises them in grey (FORFEIT TOKENS X50, FORFEIT STYLE).
 
 **Medals.** Equal scores share a place and its medal. A score of 0 never
 wins a medal.
 - **Multiplayer:** each event awards gold, silver and bronze (5, 3 and 1
   medal points). A medal table with a CN Tower ticker follows each event. After
-  the last event comes the podium at Nathan Phillips Square, then the final
-  table.
+  the last event comes the podium at Nathan Phillips Square, which names gold,
+  silver and bronze, then the final table.
 - **Solo:** you race the Toronto Record. Matching it wins gold, two thirds of
   it wins silver and one third wins bronze. The event card shows all three
   marks.
