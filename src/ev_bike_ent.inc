@@ -152,6 +152,127 @@ south_busy:
     sta tmp3+1
     jmp lane_busy
 
+; The bike lane is where a careful courier rides, so nothing there may leave
+; them no way out: a pothole in it never comes with an open door beside it
+; or the 501 coming up the tracks next to it, and a door never opens with
+; either of those about (round 5: "a pothole lands in your lane every ~5 s,
+; often next to an open car door").
+PAIR_GAP  = 110                 ; world px either side that count as "beside"
+DOOR_LATE = 100                 ; a door held shut till it's this close stays shut
+
+; carry set if the 501 (northbound) is behind the rider or alongside, rel
+; -330 .. +149. Keeps X, tmp0.
+tram_n_close:
+    ldy #$0000
+@l:
+    lda E_TYPE,y
+    cmp #T_TRAM_N
+    bne @n
+    A16
+    lda E_WY,y
+    sec
+    sbc b_dist
+    clc
+    adc #330
+    cmp #480
+    A8
+    bcc @yes
+@n:
+    iny
+    iny
+    cpy #(NUM_ENT*2)
+    bne @l
+    clc
+    rts
+@yes:
+    sec
+    rts
+
+; doors within PAIR_GAP of world y tmp2 that haven't opened yet never will
+; (a bike-lane pothole is going there). Keeps X, tmp0.
+shut_doors_near:
+    ldy #$0000
+@l:
+    lda E_TYPE,y
+    cmp #T_PARKED
+    bne @n
+    lda E_FLAGS,y
+    and #$02
+    bne @n
+    A16
+    lda E_WY,y
+    sec
+    sbc tmp2
+    bpl @p
+    eor #$FFFF
+    inc a
+@p:
+    cmp #PAIR_GAP
+    bcs @n16
+    lda #$0000
+    sta E_TIMER,y
+@n16:
+    A8
+@n:
+    iny
+    iny
+    cpy #(NUM_ENT*2)
+    bne @l
+    rts
+
+; carry set if, within PAIR_GAP of world y tmp2, there is a door that is
+; open or will open (A bit 0) or a pothole in the bike lane (A bit 1).
+; Keeps X, tmp0.
+curb_busy:
+    sta tmp3
+    ldy #$0000
+@l:
+    lda E_TYPE,y
+    cmp #T_PARKED
+    beq @car
+    cmp #T_POTHOLE
+    bne @n
+    lda tmp3
+    and #$02
+    beq @n
+    lda E_X+1,y
+    cmp #170
+    bcc @n
+    bra @near
+@car:
+    lda tmp3
+    and #$01
+    beq @n
+    lda E_FLAGS,y
+    and #$02
+    bne @near
+    A16
+    lda E_TIMER,y
+    A8
+    beq @n
+@near:
+    A16
+    lda E_WY,y
+    sec
+    sbc tmp2
+    bpl @p
+    eor #$FFFF
+    inc a
+@p:
+    cmp #PAIR_GAP
+    A8
+    bcc @yes
+@n:
+    iny
+    iny
+    cpy #(NUM_ENT*2)
+    bne @l
+    clc
+    rts
+@yes:
+    sec
+    rts
+
 ; ------------------------------------------------------------------
 spawn_ahead:
 @l:
@@ -255,8 +376,8 @@ spawn_segment:
     rts
 
 seg_table:
-    .addr seg_parked, seg_parked, seg_parked, seg_parked_l
-    .addr seg_car_n, seg_car_n, seg_car_s, seg_car_s
+    .addr seg_parked, seg_parked, seg_stopped, seg_parked_l
+    .addr seg_car_n, seg_car_n, seg_car_s, seg_stopped
     .addr seg_tram_n, seg_tram_s, seg_hole, seg_hole
     .addr seg_tokens, seg_tokens, seg_tokens, seg_ped
 ; warm-up: tokens to learn on, parked cars (doors shut), traffic you pass
@@ -351,6 +472,160 @@ seg_parked_l:
 @x:
     rts
 
+; a car stopped in the bike lane, hazards on (Toronto, every day): the
+; one thing in the bike lane you can't hop, so a courier who never steers
+; meets it. Only with the 501 well away, and the 501 waits till it's passed.
+STOP_X = 196
+seg_stopped:
+    A16
+    lda b_nextsp
+    clc
+    adc #40
+    sta tmp2
+    A8
+    jsr tram_n_close
+    bcs @no
+    jsr pass_lane_busy
+    bcc @go
+@no:
+    jmp seg_parked
+@go:
+    jsr alloc_ent
+    bcs @x
+    A16
+    lda #T_PARKED
+    sta E_TYPE,x
+    lda #(STOP_X*256)
+    sta E_X,x
+    lda tmp2
+    sta E_WY,x
+    lda b_nextsp
+    clc
+    adc #100
+    sta b_nextsp
+    A8
+    jsr rand_car_pal
+    sta E_PAL,x
+@x:
+    rts
+
+; carry set if a northbound car would be beside a car stopped at world y
+; tmp2 when the rider gets there (the lane you pass it in). The car does
+; 3/8 of the rider's top speed: it's at C + 3/8 (S - dist) by then. Keeps X.
+pass_lane_busy:
+    ldy #$0000
+@l:
+    lda E_TYPE,y
+    cmp #T_CAR_N
+    bne @n
+    A16
+    lda tmp2
+    sec
+    sbc b_dist
+    lsr a
+    lsr a
+    lsr a
+    sta tmp3                    ; (S - dist) / 8
+    asl a
+    clc
+    adc tmp3                    ; * 3
+    clc
+    adc E_WY,y
+    sec
+    sbc tmp2
+    clc
+    adc #110
+    cmp #220                    ; within 110 of it
+    A8
+    bcc @yes
+@n:
+    iny
+    iny
+    cpy #(NUM_ENT*2)
+    bne @l
+    clc
+    rts
+@yes:
+    sec
+    rts
+
+; carry set if a new northbound car (at b_nextsp + 60) would end up beside
+; a car stopped in the bike lane ahead when the rider passes it
+car_n_blocks:
+    ldy #$0000
+@l:
+    lda E_TYPE,y
+    cmp #T_PARKED
+    bne @n
+    lda E_X+1,y
+    cmp #(STOP_X + 1)
+    bcs @n
+    A16
+    lda E_WY,y                  ; S
+    sec
+    sbc b_dist
+    bmi @n16                    ; already behind us
+    lsr a
+    lsr a
+    lsr a
+    sta tmp3
+    asl a
+    clc
+    adc tmp3                    ; 3/8 (S - dist)
+    clc
+    adc b_nextsp
+    clc
+    adc #60                     ; + C
+    sec
+    sbc E_WY,y
+    clc
+    adc #110
+    cmp #220
+    bcs @n16
+    A8
+    sec
+    rts
+@n16:
+    A8
+@n:
+    iny
+    iny
+    cpy #(NUM_ENT*2)
+    bne @l
+    clc
+    rts
+
+; carry set if a car stopped in the bike lane is ahead of the rider (or
+; still alongside): no 501 up the tracks until it's passed
+stopped_ahead:
+    ldy #$0000
+@l:
+    lda E_TYPE,y
+    cmp #T_PARKED
+    bne @n
+    lda E_X+1,y
+    cmp #(STOP_X + 1)
+    bcs @n
+    A16
+    lda E_WY,y
+    sec
+    sbc b_dist
+    clc
+    adc #80
+    bmi @n16
+    A8
+    sec
+    rts
+@n16:
+    A8
+@n:
+    iny
+    iny
+    cpy #(NUM_ENT*2)
+    bne @l
+    clc
+    rts
+
 seg_car_n:
     ; no new cars on the northbound tracks while the 501 is about
     ldy #$0000
@@ -362,6 +637,8 @@ seg_car_n:
     iny
     cpy #(NUM_ENT*2)
     bne @t
+    jsr car_n_blocks
+    bcs @x
     A16
     lda b_nextsp
     clc
@@ -430,6 +707,10 @@ seg_tram_n:
     iny
     cpy #(NUM_ENT*2)
     bne @chk
+    jsr stopped_ahead
+    bcc @free
+    jmp seg_car_n
+@free:
     A16
     lda b_dist
     sec
@@ -487,10 +768,29 @@ punish_camper:
     cmp #142
     bcc @notn
     cmp #185
-    bcs @hole
+    bcs @curb
     jsr tram_behind
     bcc @x
     bra @hole
+@curb:
+    ; the bike lane: a pothole, but never beside a door or with the 501
+    ; about; try again in half a second
+    jsr tram_n_close
+    bcs @later
+    A16
+    lda b_dist
+    clc
+    adc #250
+    sta tmp2
+    A8
+    jsr shut_doors_near
+    lda #$03
+    jsr curb_busy
+    bcc @hole
+@later:
+    ldx #(CAMP_T_BL - 30)
+    stx b_camp
+    rts
 @notn:
     cmp #74
     bcc @hole
@@ -535,6 +835,8 @@ tram_behind:
     iny
     cpy #(NUM_ENT*2)
     bne @chk
+    jsr stopped_ahead
+    bcs @no
     A16
     lda b_dist
     sec
@@ -625,7 +927,8 @@ seg_hole:
 @x:
     rts
 
-hole_lanes: .byte 178, 160, 160, 122, 88, 60        ; - 6 .. + 6
+; never the bike lane: the only potholes there are a camper's (above)
+hole_lanes: .byte 134, 160, 160, 122, 88, 60        ; - 6 .. + 6
 
 ; a line of TTC tokens; some lines run diagonally across a lane or the
 ; tracks, so the courier has to go and get them
@@ -811,11 +1114,52 @@ ents_update:
     jne @ent
     rts
 
+STOP_SEEN = 230                 ; rel: just before it comes on screen
+str_stopped: .byte "CAR IN BIKE LANE. AGAIN.", 0
+
 ; per-type behaviour (X = entity, tmp0 = rel)
 ent_logic:
     lda E_TYPE,x
     cmp #T_PARKED
-    bne @tram
+    jne @tram
+    lda E_X+1,x
+    cmp #(STOP_X + 1)
+    bcs @door
+    ; stopped in the bike lane: say so as it comes on screen
+    lda E_FLAGS,x
+    and #$40
+    jne @x
+    A16
+    lda tmp0
+    cmp #STOP_SEEN
+    A8
+    jcs @x
+    lda b_state
+    jne @x
+    lda b_popup+1               ; a style or crash callout keeps the panel
+    bne @x                      ; (it says so as soon as that one goes)
+    lda b_popup
+    cmp #20
+    bcs @x
+    lda E_FLAGS,x
+    ora #$40
+    sta E_FLAGS,x
+    A16
+    lda tmp0
+    pha
+    A8
+    LDPTR0 str_stopped
+    lda #TP_ORANGE
+    jsr pop_mid
+    ldx #40                     ; gone before the car reaches the panel's rows
+    stx b_popup
+    A16
+    pla
+    sta tmp0
+    A8
+    ldx b_cur
+    rts
+@door:
     lda E_FLAGS,x
     and #$02
     bne @x
@@ -826,12 +1170,28 @@ ent_logic:
     bmi @x16
     cmp E_TIMER,x
     bcs @x16
+    ; time to open: not with the 501 behind or beside the rider (it waits),
+    ; never next to a pothole in the bike lane, and once it's this close
+    ; without opening it stays shut (a door needs ~30 frames of warning)
+    cmp #DOOR_LATE
+    bcc @shut
+    lda E_WY,x
+    sta tmp2
     A8
+    jsr tram_n_close
+    bcs @x
+    lda #$02
+    jsr curb_busy
+    bcs @shut8
     lda E_FLAGS,x
     ora #$02
     sta E_FLAGS,x
     SFX SFX_TICK
     rts
+@shut8:
+    A16
+@shut:
+    stz E_TIMER,x
 @x16:
     A8
 @x:
@@ -1056,6 +1416,41 @@ ent_collide:
     ldx b_cur
     rts
 @car:
+    ; a parked car's side (we were beside it last frame, not behind it): a
+    ; scrape. Pushed back out, no wipeout (an overshoot shouldn't cost a heart)
+    lda E_TYPE,x
+    cmp #(T_PARKED_S + 1)
+    bcs @carhit
+    lda E_X+1,x
+    sec
+    sbc b_oldx+1
+    bcs @op
+    eor #$FF
+    inc a
+@op:
+    cmp hw_tab,y
+    bcc @carhit
+    lda b_oldx+1
+    cmp E_X+1,x
+    lda E_X+1,x
+    bcs @rside
+    sec
+    sbc hw_tab,y
+    bra @put
+@rside:
+    clc
+    adc hw_tab,y
+@put:
+    sta b_px+1
+    stz b_px
+    A16
+    stz b_vx
+    lda #4
+    sta b_shake
+    A8
+    SFX SFX_STEP
+    rts
+@carhit:
     lda #CA_CAR
     jmp crash
 @tram:
@@ -1395,12 +1790,56 @@ dr_none:
     rts
 
 dr_car:
+    ldx b_cur
+    lda E_TYPE,x
+    cmp #T_PARKED
+    bne @body
+    lda E_X+1,x
+    cmp #(STOP_X + 1)
+    bcs @body
+    ; stopped in the bike lane: hazards, front and back, blinking (drawn
+    ; first: the earlier sprite is on top)
+    lda frame
+    and #$10
+    bne @body
+    lda tmp5
+    pha
+    lda #$2A
+    sta tmp5
+    A16
+    lda spr_y
+    pha
+    sec
+    sbc #20
+    sta spr_y
+    A8
+    LDPTR1 bm_hazard
+    jsr bmeta
+    A16
+    lda spr_y
+    clc
+    adc #38
+    sta spr_y
+    A8
+    LDPTR1 bm_hazard
+    jsr bmeta
+    A16
+    pla
+    sta spr_y
+    A8
+    pla
+    sta tmp5
+@body:
     LDPTR1 bm_car
     jsr bmeta
     ldx b_cur
     lda E_TYPE,x
     cmp #T_PARKED
     bne @x
+    lda E_X+1,x
+    cmp #(STOP_X + 1)
+    bcc @x
+@door:
     lda E_FLAGS,x
     and #$02
     beq @x

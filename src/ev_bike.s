@@ -47,7 +47,9 @@ CHAIN_WIN   = 150           ; 2.5 s to land the next style move
 CHAIN_MAX   = 8
 STYLE_CAP   = 50000
 CAMP_T      = 300           ; 5 s in one line...
+CAMP_T_BL   = 420           ; (7 s in the bike lane, where a careful courier rides)
 CAMP_BAND   = 12            ; ...means within this many px
+CAMP_GRACE  = 30*60         ; and nobody is punished in the first 30 s
 STILL_T     = 480           ; 8 s stopped: FIRED
 DRAFT_TICK  = 36            ; frames of slipstream per DRAFT move
 POP_ROW     = 16            ; crash messages: just over the rider
@@ -98,6 +100,7 @@ b_hopsc  = ev_ram + 44      ; 1 = this hop already scored a rail
 b_prow   = ev_ram + 46      ; 1 = a crash message is up on POP_ROW
 b_fired  = ev_ram + 48      ; 1 = stood still too long: YOU'RE FIRED! (ev_fail 4)
 b_stroke = ev_ram + 50      ; frames left in the last pedal stroke (a tap of A)
+b_pmid   = ev_ram + 52      ; 1 = a panel is up on rows 8-10
 ; drawer / HUD bookkeeping (cleared by init, < 512)
 b_oamhw  = ev_ram + 384     ; OAM bytes used last frame (the local clear)
 b_hq     = ev_ram + 386     ; HUD caches: what is on screen now
@@ -410,10 +413,15 @@ ride_checks:
     .a16
     stz b_still
 @camp:
-    ; same line (within CAMP_BAND px) for CAMP_T frames? (not in the warm-up)
+    ; same line (within CAMP_BAND px) for CAMP_T frames? (not in the warm-up
+    ; or the first 30 s)
     lda b_dist
     cmp #WARMUP
-    bcs @campon
+    bcc @nocamp
+    lda b_time
+    cmp #(TIME_LIMIT - CAMP_GRACE)
+    bcc @campon
+@nocamp:
     stz b_camp
     A8
     rts
@@ -439,9 +447,15 @@ ride_checks:
 @same:
     .a16
     inc b_camp
-    lda b_camp
-    cmp #CAMP_T
-    bcs @punish
+    lda #CAMP_T
+    ldx b_campx
+    cpx #180
+    bcc @ct
+    lda #CAMP_T_BL
+@ct:
+    cmp b_camp
+    beq @punish
+    bcc @punish
     A8
     rts
 @punish:
@@ -872,28 +886,63 @@ crash:
     rts
 
 ; ------------------------------------------------------------------
-; popups. pop_mid: ptr0 = text, A = palette, the usual centre banner (row 9).
-; pop_near: ptr0 = text, in yellow on POP_ROW right over the rider, so a
-; wipeout's SPLAT! lands where the crash is. pop_clear: whichever is up.
+; popups, each on a padded navy panel (as Tallboy's and Parking's) so it
+; reads over the traffic. pop_mid: ptr0 = text, A = palette, centred on
+; row 9 (panel rows 8-10). pop_near: ptr0 = text, yellow, on POP_ROW right
+; over the rider (panel POP_ROW-1 .. +1), so a wipeout's SPLAT! lands where
+; the crash is. pop_clear: whichever is up.
 pop_mid:
     pha
     jsr pop_clear
+    jsr ptr0_len
+    tya
+    clc
+    adc #4
+    sta tmp1                    ; panel width
+    lda #3
+    sta tmp1+1
+    lda #32
+    sec
+    sbc tmp1
+    lsr a
+    A16
+    and #$00FF
+    clc
+    adc #(8*32)
+    tax
+    A8
+    lda #$20
+    jsl txt_box
+    lda #TXT_WIN
+    sta txt_bg
     pla
-    jsl event_popup
+    asl a
+    asl a
+    ora #$20
+    ldx #(9*32)
+    jsl txt_print_centre
+    stz txt_bg
+    lda #$01
+    sta b_pmid
+    rts
+
+; Y = length of the text at ptr0
+ptr0_len:
+    ldy #$0000
+@l:
+    lda [ptr0],y
+    beq @x
+    iny
+    bra @l
+@x:
     rts
 
 pop_near:
     jsr pop_clear
-    ; length -> tmp6
-    ldy #$0000
-@len:
-    lda [ptr0],y
-    beq @got
-    iny
-    bra @len
-@got:
+    jsr ptr0_len
     sty tmp6
-    ; column: rider column - len/2, kept on screen (1 .. 31-len)
+    ; text column: rider column - len/2, kept on screen with room for the
+    ; panel (2 .. 30-len)
     lda b_px+1
     lsr a
     lsr a
@@ -908,18 +957,35 @@ pop_near:
     bcs @c1
     lda #$00
 @c1:
-    cmp #1
+    cmp #2
     bcs @c2
-    lda #1
+    lda #2
 @c2:
     sta tmp7
-    lda #31
+    lda #30
     sec
     sbc tmp6
     cmp tmp7
     bcs @c3
     sta tmp7
 @c3:
+    lda tmp6
+    clc
+    adc #4
+    sta tmp1
+    lda #3
+    sta tmp1+1
+    A16
+    lda tmp7
+    and #$00FF
+    clc
+    adc #((POP_ROW-1)*32 - 2)
+    tax
+    A8
+    lda #$20
+    jsl txt_box
+    lda #TXT_WIN
+    sta txt_bg
     A16
     lda tmp7
     and #$00FF
@@ -929,18 +995,30 @@ pop_near:
     A8
     lda #($20 | (TP_YELLOW << 2))
     jsl txt_print
+    stz txt_bg
     lda #$01
     sta b_prow
     rts
 
 pop_clear:
-    jsl event_popup_clear
+    lda b_pmid
+    beq @near
+    stz b_pmid
+    ldx #(8*32)
+    A16
+    lda #$0320
+    sta tmp1
+    A8
+    stz tmp2
+    lda #$20
+    jsl txt_fill
+@near:
     lda b_prow
     beq @x
     stz b_prow
-    ldx #(POP_ROW*32)
+    ldx #((POP_ROW-1)*32)
     A16
-    lda #$0120
+    lda #$0320
     sta tmp1
     A8
     stz tmp2
@@ -1525,10 +1603,12 @@ hud_hearts:
     sta tmp2
     txa
     cmp b_wipes
-    lda #($20 | (TP_GREY << 2))
-    bcc @lost
     lda #($20 | (TP_RED << 2))
-@lost:
+    bcs @have
+    lda #(TXT_SPACE + TXT_WIN)  ; lost: gone (grey still read as full)
+    sta tmp2
+    lda #($20 | (TP_RED << 2))
+@have:
     pha
     A16
     lda 2,s
@@ -1600,14 +1680,16 @@ str_start:  .byte "QUEEN", 0
 str_end:    .byte "SPADINA", 0
 
 ; ------------------------------------------------------------------
-; Delivered:  RIDE     1000 + distance/16 (562) + time left/3 (~20 a s)
-;              TIPS     50 a TTC token + STYLE
-;              WIPEOUTS 200 each
+; Delivered:  DELIVERY     1000 + distance/16 (562) + time left/3 (~20 a s)
+;              TIPS & STYLE 50 a TTC token + STYLE
+;              WIPEOUT X200 200 each (the true cost: never more than 400)
 ; Not delivered (wiped out 1, out of time 2, gave up 3, fired 4): no
-; delivery, no tips. RIDE = distance/24 (up to 375) and that's the score,
-; so a failed run never beats a delivery (>= 1162); the card's reason line
-; says why the tips and the wipeouts don't count.
-; ev_break = RIDE, TIPS, WIPEOUTS; ev_score = RIDE + TIPS - WIPEOUTS.
+; delivery fee, no tips. RIDE = distance/24 (1 per 4 metres, up to 375) is
+; the score; TIPS & STYLE still goes in ev_break+2 and the card shows it in
+; grey as FORFEIT (card_forfeit), so a first-timer who wipes out sees what
+; their tokens and hops would have paid. A delivery (>= 1162) always beats
+; a failed run.
+; ev_break = base, bonus, penalty; ev_score = base + bonus - penalty.
 ; Stats: METRES (distance / 6), TOKENS, WIPEOUTS, STYLE.
 bike_score:
     A16
@@ -1631,6 +1713,22 @@ bike_score:
     lda b_style
     sta ev_stat+6
     stz ev_break+4
+    ; TIPS & STYLE = 50 * tokens + style (paid on delivery, forfeit if not)
+    lda b_tokens
+    asl a
+    sta tmp1                    ; t*2
+    asl a
+    asl a
+    asl a
+    sta tmp2                    ; t*16
+    asl a                       ; t*32
+    clc
+    adc tmp2
+    clc
+    adc tmp1
+    clc
+    adc b_style
+    sta ev_break+2
     lda b_quit
     bne @dnf
     lda b_dist
@@ -1655,22 +1753,6 @@ bike_score:
     clc
     adc #1000
     sta ev_break
-    ; TIPS = 50 * tokens + style
-    lda b_tokens
-    asl a
-    sta tmp1                    ; t*2
-    asl a
-    asl a
-    asl a
-    sta tmp2                    ; t*16
-    asl a                       ; t*32
-    clc
-    adc tmp2
-    clc
-    adc tmp1
-    clc
-    adc b_style
-    sta ev_break+2
     ; WIPEOUTS = 200 each
     lda #$0000
     ldx b_wipes
@@ -1693,7 +1775,8 @@ bike_score:
     rts
 @dnf:
     .a16
-    ; RIDE = distance/24, and nothing else: no delivery, no tips
+    ; RIDE = distance/24 is the score; TIPS & STYLE stays in ev_break+2,
+    ; forfeit (the card shows it grey, out of the sum)
     lda tmp3
     sta tmp0
     A8
@@ -1702,7 +1785,6 @@ bike_score:
     A16
     lda tmp0
     sta ev_break
-    stz ev_break+2
     sta ev_score
     A8
     lda #$03                    ; gave up
