@@ -33,6 +33,7 @@
 .include "screens.inc"
 
 .import bike_tiles, bike_map, bike_pal, bike_spr, bike_spr_pal
+.import trick_seen          ; boot.s: the attract demo's WATCH THAT MOVE! cue
 
 PLAYER_SY   = 176
 COURSE_LEN  = 9000
@@ -810,6 +811,7 @@ rail_cross:
     and b_xok
     jeq @x
     stz b_xok
+    jsl trick_seen
     phy
     lda #SM_XFER
     jsr style_award

@@ -61,6 +61,7 @@
 .include "screens.inc"
 
 .import subway_tiles, subway_bg1, subway_tunnel, subway_platform, subway_pal, subway_spr, subway_spr_pal
+.import trick_seen          ; boot.s: the attract demo's WATCH THAT MOVE! cue
 
 RIDER_X   = 128
 RIDER_Y   = 210             ; feet
@@ -1018,6 +1019,7 @@ no_hands:
     rts
 
 nohands_popup:
+    jsl trick_seen
     A16
     lda w_style
     clc

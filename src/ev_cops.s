@@ -41,6 +41,7 @@
 .include "screens.inc"
 
 .import cops_tiles, cops_bg1, cops_bg2, cops_pal, cops_spr, cops_spr_pal, cops_sky, sine_table
+.import trick_seen          ; boot.s: the attract demo's WATCH THAT MOVE! cue
 
 GROUND     = 192
 PLAYER_SX  = 104
@@ -1303,6 +1304,7 @@ sip_n_hop:
     A16
     inc c_brave
     A8
+    jsl trick_seen
     LDPTR0 str_brave
     bra @pre
 @sn0:
