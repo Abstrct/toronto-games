@@ -3243,10 +3243,10 @@ eb6: .byte "RIDE TO UNION HANDS-FREE.", $0A, "GRAB A POLE, GET GERMS.", 0
 ec0: .byte "D-PAD STEER    A PEDAL", $0A, "B HOP          DOWN BRAKE", $0A, "HOP RAILS, DRAFT THE 501!", 0
 ec1: .byte "LEFT, RIGHT AS DOTS LAND", $0A, "UP/DOWN LANE  A EXCUSE ME", $0A, "Y ON A GOLD DOT: PRESTO!", 0
 ec2: .byte "D-PAD WALK   A THROW BALL", $0A, "B WHEN ! SHOWS: SIDESTEP", $0A, "B AS HE LUNGES: BONUS!", 0
-ec3: .byte "JUMP AT THE CHALK MARKS", $0A, "TAP A HOP  HOLD A BIG JUMP", $0A, "B MID-AIR = SIP 'N' HOP", 0
+ec3: .byte "TAP A AT CHALK. RED: HOLD", $0A, "B: SIP WHILE COP CAN'T SEE", $0A, "B MID-AIR = SIP 'N' HOP", 0
 ec4: .byte "LEFT/RIGHT TAP: TURN", $0A, "INTO THE WIND? ZIG-ZAG!", $0A, "A HIKE OUT  SURF THE WAKE", 0
 ec5: .byte "UP GAS  DOWN REVERSE", $0A, "BACK IN: DOWN+RIGHT, THEN", $0A, "DOWN+LEFT. A: PARK IT!", 0
-ec6: .byte "D-PAD: KEEP DOT IN RING", $0A, "LEAN THE WAY ARROWS POINT", $0A, "CLEAN LEGS = SURF BONUS", 0
+ec6: .byte "HOLLOW ARROW: GET READY", $0A, "SOLID: D-PAD THAT WAY NOW", $0A, "GOLD DOT STOP-TO-STOP = X3", 0
 ef0: .byte "WIPED OUT!", 0
 ef1: .byte "MISSED THE TRAIN!", 0
 ef2: .byte "TACKLED!", 0
@@ -3282,7 +3282,7 @@ bl_pats:   .byte "PATS", 0
 bl_wipe:   .byte "WIPEOUTS", 0
 bl_spill:  .byte "SPILLS", 0
 bl_tackle: .byte "TACKLES", 0
-bl_fine:   .byte "SPILLS+FINE", 0
+bl_fine:   .byte "COP'S FINE", 0
 bl_bump:   .byte "BUMPS", 0
 bl_dents:  .byte "DENTS+CURBS", 0
 bl_germs:  .byte "GERMS", 0
@@ -3295,16 +3295,18 @@ bl_germs:  .byte "GERMS", 0
 card_fail_note:
     .addr fn_bike,   fn_bike,   fn_bike,   fn_bike      ; bike
     .addr fn_bay,    fn_bay,    fn_bay,    fn_bay       ; bay
-    .addr fn_park,   fn_park,   fn_park,   fn_park      ; park
+    .addr fn_park,   fn_park_t, fn_park_q, fn_park      ; park
     .addr fn_cops,   fn_cops,   fn_cops_q, fn_cops      ; cops
     .addr fn_sail,   fn_sail,   fn_sail,   fn_sail      ; sail
     .addr fn_pk,     fn_pk,     fn_pk_q,   fn_pk        ; parking
     .addr fn_sub,    fn_sub,    fn_sub_q,  fn_sub       ; subway
 fn_bike:   .byte "NO DELIVERY, NO 1000 FEE", 0
 fn_bay:    .byte "NO TRAIN: NO 1000 OR STYLE", 0
-fn_park:   .byte "NO DUNDAS: NO 750 OR STYLE", 0
-fn_cops:   .byte "BUSTED: THE COP TAKES HALF", 0
-fn_cops_q: .byte "QUIT: THE COP TAKES HALF", 0
+fn_park:   .byte "THIRD TACKLE ENDS THE WALK", $0A, "CROSSING PAID BY DISTANCE", 0
+fn_park_t: .byte "CROSSING PAID BY DISTANCE", 0
+fn_park_q: .byte "GAVE UP: PAID BY DISTANCE", 0
+fn_cops:   .byte "COP CAUGHT YOU: FINED 1/4", 0
+fn_cops_q: .byte "GAVE UP: THE COP FINES 1/4", 0
 fn_sail:   .byte "NO FINISH, NO STYLE PAID", 0
 fn_pk:     .byte "PARK ONE SPOT TO FINISH", 0
 fn_pk_q:   .byte "QUITTERS KEEP 450 AT MOST", 0
