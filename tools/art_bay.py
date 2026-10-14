@@ -361,6 +361,13 @@ def beat_ui(sh, d):
     d.rectangle([83, 104, 85, 105], fill=2)
     d.point((84, 98), fill=3)
     sh.outline(80, 96, 8, 8)
+    # floor marks: a shadow under everyone (8x8 at 88,96), a red ring under
+    # whoever is in your way (16x16 at 96,96), a yellow one under you (112,96)
+    d.ellipse([88, 99, 95, 102], fill=6)
+    for x0, col in ((96, 2), (112, 3)):
+        d.ellipse([x0 + 1, 105, x0 + 14, 110], fill=col)
+        d.ellipse([x0 + 3, 107, x0 + 12, 108], fill=0)
+    word(sh, 0, 120, 'DEAD ON', 3)
     word(sh, 0, 112, 'PERFECT', 3)
     word(sh, 48, 112, 'GOOD', 4)
     word(sh, 80, 112, 'EARLY', 14)
@@ -644,6 +651,10 @@ def build_sprites():
     sh.obj('target', 32, 96, 16, 16, 8, 8)
     sh.obj('targetlit', 48, 96, 16, 16, 8, 8)
     sh.obj('wperfect', 0, 112, 48, 8, 0, 0)   # one tile row: the row below is walker
+    sh.obj('wdeadon', 0, 120, 48, 8, 0, 0)
+    sh.obj('shadow', 88, 96, 8, 8, 4, 6)
+    sh.obj('ringred', 96, 96, 16, 16, 8, 13)
+    sh.obj('ringyel', 112, 96, 16, 16, 8, 13)
     sh.obj('wgood', 48, 112, 32, 8, 0, 0)
     sh.obj('wearly', 80, 112, 32, 8, 0, 0)
     sh.obj('wlate', 96, 128, 32, 8, 0, 0)

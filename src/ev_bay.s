@@ -19,11 +19,14 @@
 ; another on the small dot after it (8 steps every 2 s) is a longer stride
 ; and twice the PERFECTs: that is the expert's walk. Consecutive good beats
 ; build the GROOVE (speed); 4 taps inside 19 frames is a mash and trips you.
-; Style: unbroken PERFECT steps build the POWER WALK combo (x2..x5, every
-; PERFECT scores the level); GOOD holds it; anything sloppy, a bump, a
-; double step or an "EXCUSE ME!" breaks it, so weaving through lanes beats
-; asking. PRESTO TAP (Y on a bar's downbeat, PERFECT) adds 10 x level and
-; pushes the combo; a Y anywhere else is CARD DECLINED and breaks it.
+; Style: unbroken GOOD-or-better steps build the POWER WALK combo (a level
+; every 10, x2..x8); every PERFECT scores the level, half again DEAD ON (the
+; beat's two centre frames), twice in DOUBLE TIME. Anything sloppy, a bump,
+; a double step or an "EXCUSE ME!" breaks it, so weaving through lanes beats
+; asking, and leaving a lane with someone right in front of you is a CLOSE
+; SHAVE (5 x level). PRESTO TAP (Y on a bar's downbeat, PERFECT) adds
+; 5 x level and pushes the combo; a Y anywhere else is CARD DECLINED.
+; A bump knocks you to half pace and spills coffee (40), all but the first.
 .p816
 .smart -
 .include "globals.inc"
@@ -44,12 +47,14 @@ TIME_LIMIT = 60*60
 BEAT       = 15             ; frames per 8th note
 ACCEL      = $0010          ; speed approach per frame (8.8 px/frame)
 DECEL      = $0008
-SPD_OFF    = $00C0          ; EARLY / LATE: a short stride
-SPD_STUT   = $0060          ; a double step
-SPD_GOOD   = $0120
+SPD_OFF    = $00D0          ; EARLY / LATE: a short stride
+SPD_STUT   = $0080          ; a double step
+SPD_GOOD   = $0128
 SPD_PERF   = $0130
 SPD_DT     = $0030          ; DOUBLE TIME: the longer stride on top
 GROOVE_MAX = 8              ; streak cap; each step of streak adds 7/256 px/frame
+DECAF_MAX  = 6              ; out of coffee: the groove tops out at 3/4
+BUMP_T     = 16             ; frames a bump knocks you off your stride
 DOORS_T    = 10*60          ; "doors closing" with this many frames left
 
 ST_WALK    = 0
@@ -64,6 +69,7 @@ G_PERFECT = 3
 G_EARLY   = 4
 G_LATE    = 5
 G_MISS    = 6
+G_DEADON  = 7               ; a PERFECT step dead on the beat (display / style)
 
 w_dist   = ev_ram + 0
 w_distf  = ev_ram + 2
@@ -167,6 +173,12 @@ w_jogr   = ev_ram + 614         ; ... how far back (negative)
 w_bgrade = ev_ram + 616         ; grade of this beat's own 8th (0 none)
 w_dt     = ev_ram + 617         ; DOUBLE TIME: stepping every 8th
 w_dtn    = ev_ram + 618         ; double-time steps (word)
+w_deadon = ev_ram + 620         ; this step was DEAD ON (the beat's centre frames)
+w_shaves = ev_ram + 621         ; CLOSE SHAVEs (byte)
+w_bumps  = ev_ram + 622         ; bumps, spilt or not (byte)
+w_same   = ev_ram + 623         ; this step was the same foot again
+w_msg    = ev_ram + 624         ; a popup with points in it (24 bytes; low
+                                ; WRAM, so bank $82 reads it through the mirror)
 
 T_SUIT    = 1
 T_TOURIST = 2
@@ -538,7 +550,7 @@ slot_grade:
     lda #GROOVE_MAX
     ldx w_decaf
     beq @cap
-    lsr a                       ; DECAF: half the groove at most
+    lda #DECAF_MAX              ; DECAF: 3/4 of the groove at most
 @cap:
     sta tmp0
     lda w_streak
@@ -624,9 +636,14 @@ show_grade:
     rts
 
 ; A = tip bit, X = tip: queue it once a run, after the current popup
+; (not while another tip is waiting: that one keeps its turn). Keeps Y.
 tip:
     bit w_tips
     bne @x
+    pha
+    lda w_tipt
+    bne @busy
+    pla
     ora w_tips
     sta w_tips
     stx w_tipm
@@ -634,13 +651,24 @@ tip:
     sta w_tipt
 @x:
     rts
+@busy:
+    pla
+    rts
 
 TIP_LANE  = $01
 TIP_BEAT  = $02
 TIP_DT    = $04
-str_tlane: .byte "TIP: UP/DOWN TO SWITCH LANES", 0
+TIP_SPILL = $08
+TIP_PRESTO= $10
+TIP_FOOT  = $20
+TIP_LAST  = $40
+str_tlane: .byte "RED ! AHEAD? UP/DOWN LANE", 0
 str_tbeat: .byte "TIP: STEP AS BIG DOTS LAND", 0
-str_tdt:   .byte "TIP: STEP SMALL DOTS TOO!", 0
+str_tdt:   .byte "SMALL DOTS TOO: DOUBLE TIME", 0
+str_tspill:.byte "NEXT BUMP SPILLS COFFEE: -40", 0
+str_tlast: .byte "LAST SIP! 1 MORE SPILL: DECAF", 0
+str_tpresto:.byte "Y ON A GOLD DOT: PRESTO!", 0
+str_tfoot: .byte "OTHER FOOT! ", TXT_ARROW_L + $20, " ", TXT_ARROW_R + $20, " ", TXT_ARROW_L + $20, " ", TXT_ARROW_R + $20, 0
 str_dt:    .byte "DOUBLE TIME!", 0
 
 ; X = message (this bank), A = text palette, Y = frames on show.
@@ -653,13 +681,19 @@ popup:
     sta p_pal
     rts
 
-; Popups sit on a dark window strip so they read over any facade.
+; Popups sit centred on row 9 inside a padded 3-row panel (as Tallboy's and
+; Parking's), so they read over any facade.
+; Two frames: the panel, then the text (a busy frame near Union can't take
+; both on top of the train and the crowd).
 popup_flush:
     lda p_pal
     bmi @go
+    asl a
+    bmi @text
     rts
-@go:
-    and #$7F
+@text:
+    lda p_pal
+    and #$3F
     sta p_pal
     ldx p_msg
     stx ptr0
@@ -668,8 +702,125 @@ popup_flush:
     lda #TXT_WIN
     sta txt_bg
     lda p_pal
-    jsl event_popup
+    asl a
+    asl a
+    ora #$20
+    ldx #(9*32)
+    jsl txt_print_centre
     stz txt_bg
+    rts
+@go:
+    and #$3F
+    ora #$40                    ; the text next frame
+    sta p_pal
+    ldx p_msg
+    stx ptr0
+    lda #^popup
+    sta ptr0+2
+    ldy #$0000
+@len:
+    lda [ptr0],y
+    beq @got
+    iny
+    bra @len
+@got:
+    tya
+    clc
+    adc #4                      ; width: the text and two cells a side,
+    cmp #33                     ; one a side for the longest (30 at most)
+    bcc @w
+    lda #32
+@w:
+    sta tmp1
+    lda #32
+    sec
+    sbc tmp1
+    lsr a
+    sta tmp3                    ; first column
+    ; rows 8-10 in one pass, straight into the text map: blanks, the box's
+    ; left edge, its middle, its right edge, blanks
+    A16
+    lda tmp1
+    and #$00FF
+    pha
+    dec a
+    dec a
+    sta tmp5                    ; middle cells
+    lda tmp3
+    and #$00FF
+    sta tmp6                    ; blanks on the left
+    pla
+    clc
+    adc tmp6
+    eor #$FFFF
+    sec
+    adc #32
+    sta tmp7                    ; blanks on the right
+    ldx #(8*32*2)
+    lda #($2000 | TXT_BOX)
+    jsr @row
+    lda #($2000 | (TXT_BOX + 3))
+    jsr @row
+    lda #($2000 | (TXT_BOX + 6))
+    jsr @row
+    A8
+    lda #$01
+    sta txt_dirty
+    rts
+@row:
+    .a16
+    sta tmp4
+    lda #$2000
+    ldy tmp6
+    beq @l1
+@l0:
+    sta f:txt_map,x
+    inx
+    inx
+    dey
+    bne @l0
+@l1:
+    lda tmp4
+    sta f:txt_map,x
+    inx
+    inx
+    inc a
+    ldy tmp5
+    beq @m1
+@m0:
+    sta f:txt_map,x
+    inx
+    inx
+    dey
+    bne @m0
+@m1:
+    inc a
+    sta f:txt_map,x
+    inx
+    inx
+    lda #$2000
+    ldy tmp7
+    beq @r1
+@r0:
+    sta f:txt_map,x
+    inx
+    inx
+    dey
+    bne @r0
+@r1:
+    rts
+    .a8
+
+; blank the popup panel (rows 8-10)
+popup_clear:
+    ldx #(8*32)
+    A16
+    lda #$0320
+    sta tmp1
+    A8
+    stz tmp2
+    lda #$20
+    jsl txt_fill
     rts
 
 ; tmp1 = signed frames from the nearest 8th (0: read the frame after the
@@ -726,7 +877,14 @@ input_steps:
     cmp #$03
     jeq @shuffle                ; both at once
     cmp w_last
-    jeq @shuffle                ; same foot twice
+    bne @alt
+    lda #$01                    ; the same foot twice: a shuffle (a short
+    bra @foot                   ; stride, never a good one)
+@alt:
+    lda #$00
+@foot:
+    sta w_same
+    lda tmp0
     sta w_last
     stz w_since
     lda w_sbest
@@ -739,9 +897,16 @@ input_steps:
     lda #G_OFF
     sta w_sbest
     A16
-    lda #SPD_STUT               ; a stutter: shorter than any stride,
-    sta w_target
-    lsr w_speed                 ; and it checks you on the spot
+    lda #SPD_STUT               ; a stutter: shorter than any stride, and
+    sta w_target                ; it checks you a little on the spot
+    lda w_speed
+    lsr a
+    lsr a
+    sta tmp1
+    lda w_speed
+    sec
+    sbc tmp1
+    sta w_speed
     A8
     jsr beat_offset
     lda tmp1
@@ -752,6 +917,7 @@ input_steps:
     jmp @off
 @first:
     jsr beat_offset
+    sta tmp2                    ; how far off (0: dead on)
     ldy #G_PERFECT
     cmp #3
     bcc @g
@@ -760,8 +926,22 @@ input_steps:
     bcc @g
     dey                         ; -6/-7, +5..+7: EARLY / LATE
 @g:
+    lda w_same
+    beq @g2
+    ldy #G_OFF
+    lda #TIP_FOOT
+    ldx #.loword(str_tfoot)
+    jsr tip
+@g2:
     tya
     sta w_sbest
+    stz w_deadon
+    cmp #G_PERFECT
+    bne @g3
+    lda tmp2
+    bne @g3
+    inc w_deadon                ; the landing frame or the one after
+@g3:
     lda tmp1
     sta w_sd
     sta w_hitd                  ; where the step landed, for the strip
@@ -773,7 +953,10 @@ input_steps:
     cmp #G_OFF
     beq @off
     cmp #G_PERFECT
-    bne @lit                    ; GOOD holds the combo
+    beq @pf
+    jsr combo_good              ; GOOD builds the combo, scores nothing
+    bra @lit
+@pf:
     A16
     inc w_perfect
     A8
@@ -781,6 +964,11 @@ input_steps:
 @lit:
     lda #8
     sta w_flash
+    lda w_deadon
+    beq @nd
+    lda #G_DEADON
+    bra @show
+@nd:
     lda w_sbest
     bra @show
 @off:
@@ -868,20 +1056,33 @@ double_time:
     rts
 
 ; ---- POWER WALK combo -------------------------------------------------
-combo_perfect:
+; every GOOD or better step adds to it; PERFECT ones score
+combo_good:
     lda w_combo
     inc a
     beq @cap
     sta w_combo
 @cap:
-    jsr combo_level
-    lda w_dt                    ; every PERFECT step scores the level,
-    beq @one
-    lda w_level                 ; twice that in DOUBLE TIME
-    asl a
-    bra style_add
-@one:
+    jmp combo_level
+
+combo_perfect:
+    jsr combo_good
+    lda w_level                 ; every PERFECT step scores the level,
+    sta tmp2
+    lda w_deadon                ; half as much again DEAD ON (rounded up),
+    beq @dd
     lda w_level
+    inc a
+    lsr a
+    clc
+    adc tmp2
+    sta tmp2
+@dd:
+    lda w_dt                    ; and twice again in DOUBLE TIME
+    beq @d2
+    asl tmp2
+@d2:
+    lda tmp2
 style_add:
     A16
     and #$00FF
@@ -891,16 +1092,21 @@ style_add:
     A8
     rts
 
-; level = 1 + combo / 8 (max 5); a banner and a ding on the way up
+; level = 1 + combo / 10 (max 8); a banner and a ding on the way up
+COMBO_MAX  = 8
+COMBO_STEP = 10
 combo_level:
     lda w_combo
-    lsr a
-    lsr a
-    lsr a
-    inc a
-    cmp #5
-    bcc @l
-    lda #5
+    ldy #$0001
+@lv:
+    cmp #COMBO_STEP
+    bcc @l0
+    sbc #COMBO_STEP
+    iny
+    cpy #COMBO_MAX
+    bcc @lv
+@l0:
+    tya
 @l:
     cmp w_level
     beq @x
@@ -920,6 +1126,9 @@ combo_level:
     ldy #60
     jsr popup
     SFX SFX_COIN
+    lda #TIP_PRESTO             ; a combo going: the gold dots pay more
+    ldx #.loword(str_tpresto)
+    jmp tip
 @x:
     rts
 
@@ -929,11 +1138,14 @@ combo_break:
     sta w_level
     rts
 
-combo_msg: .addr str_cx2, str_cx3, str_cx4, str_cx5
+combo_msg: .addr str_cx2, str_cx3, str_cx4, str_cx5, str_cx6, str_cx7, str_cx8
 str_cx2: .byte "POWER WALK X2!", 0
 str_cx3: .byte "RUSH HOUR X3!", 0
 str_cx4: .byte "BAY STREAK X4!", 0
 str_cx5: .byte "GO EXPRESS X5!", 0
+str_cx6: .byte "CORNER OFFICE X6!", 0
+str_cx7: .byte "BONUS SEASON X7!", 0
+str_cx8: .byte "KING OF BAY ST X8!", 0
 
 ; Y: PRESTO TAP. One swipe a bar: PERFECT on the bar's downbeat (the gold
 ; tick) scores 10 x level and pushes the combo half a level; anything else
@@ -971,13 +1183,20 @@ input_presto:
     A16
     inc w_presto
     A8
-    ldx #.loword(str_presto)
-    lda #TP_CYAN
-    ldy #40
-    jsr popup
     SFX SFX_COIN
     lda #12
     sta w_flash
+    lda w_level
+    asl a
+    asl a
+    clc
+    adc w_level                 ; level * 5 (the level before the push)
+    sta tmp2
+    jsr style_add
+    ldx #.loword(str_presto)
+    lda #TP_CYAN
+    ldy #40
+    jsr popup_pts
     lda w_combo
     clc
     adc #4
@@ -985,15 +1204,7 @@ input_presto:
     lda #$FF
 @c:
     sta w_combo
-    jsr combo_level             ; (its banner wins over PRESTO)
-    lda w_level
-    asl a
-    sta tmp0
-    asl a
-    asl a
-    clc
-    adc tmp0                    ; level * 10
-    jmp style_add
+    jmp combo_level             ; (its banner wins over PRESTO)
 @declined:
     ldx #.loword(str_declined)
     lda #TP_RED
@@ -1004,7 +1215,7 @@ input_presto:
 @x:
     rts
 
-str_presto:   .byte "PRESTO TAP! *BEEP*", 0
+str_presto:   .byte "PRESTO! *BEEP*", 0
 str_declined: .byte "PRESTO: CARD DECLINED!", 0
 
 spd_base: .word 0, SPD_OFF, SPD_GOOD, SPD_PERF
@@ -1050,15 +1261,24 @@ spill:
     lda #30
     sta w_splash
     lda w_coffee
+    cmp #2
+    bne @nl
+    A8
+    lda #TIP_LAST               ; one spill left in the cup
+    ldx #.loword(str_tlast)
+    jsr tip
+    A16
+@nl:
+    lda w_coffee
     bne @dry
     A8
     lda #$01
     sta w_decaf
     stz w_groove
-    lda w_streak                ; groove drops to half
-    cmp #(GROOVE_MAX / 2)
+    lda w_streak                ; groove drops to 3/4
+    cmp #DECAF_MAX
     bcc @half
-    lda #(GROOVE_MAX / 2)
+    lda #DECAF_MAX
     sta w_streak
 @half:
     ldx #.loword(str_decaf)
@@ -1070,7 +1290,7 @@ spill:
     A8
     rts
 
-str_decaf: .byte "OUT OF COFFEE! HALF GROOVE", 0
+str_decaf: .byte "OUT OF COFFEE! 3/4 GROOVE", 0
 
 approach_speed:
     A16
@@ -1165,7 +1385,7 @@ tick_timers:
     dec w_popup
     bne @c4
     A8
-    jsl event_popup_clear
+    jsr popup_clear
     A16
 @c4:
     A8
@@ -1201,28 +1421,24 @@ check_clock:
     sta w_made
     stz w_lane                  ; head for the doors
     SFX SFX_CHEER
-    LDPTR0 str_made
-    lda #TP_GREEN
     ldx #330
+    stx w_timer
+    ldx #.loword(str_made)
+    lda #TP_GREEN
     bra @end
 @missed:
     A8
     stz w_made
     lda #1
     sta w_trgo                  ; the 5:42 leaves on time
-    LDPTR0 str_missed
-    lda #TP_RED
     ldx #150
-@end:
     stx w_timer
-    pha
-    lda #TXT_WIN
-    sta txt_bg
-    pla
-    jsl event_popup
-    stz txt_bg
-    ldx #300
-    stx w_popup
+    ldx #.loword(str_missed)
+    lda #TP_RED
+@end:
+    ldy #300
+    jsr popup
+    stz w_tipt                  ; no coaching tip over the headline
     lda #ST_FINISH
     sta w_state
     rts
@@ -1256,10 +1472,131 @@ input_lane:
     beq @no
     inc a
 @set:
+    pha
+    jsr close_shave             ; (from the lane you're leaving)
+    pla
     sta w_lane
     SFX SFX_BLIP
 @no:
     rts
+
+; Leaving a lane with someone right in front of you (or a jogger right on
+; your heels): CLOSE SHAVE, 5 x combo level, once a person.
+SHAVE_PX = 24
+close_shave:
+    lda w_state
+    cmp #ST_WALK
+    bne @x
+    ldy #$0000
+@e:
+    lda E_TYPE,y
+    beq @n
+    cmp #T_PIGEON
+    beq @n
+    lda E_LANE,y
+    cmp w_lane
+    bne @n
+    lda E_FLAGS,y
+    and #$1C                    ; bumped us, stepped aside, shaved already
+    bne @n
+    A16
+    lda E_WX,y
+    sec
+    sbc w_dist
+    sta tmp4                    ; how far ahead (signed)
+    A8
+    lda E_TYPE,y
+    cmp #T_JOGGER
+    beq @jog
+    A16
+    lda tmp4
+    bmi @n16
+    cmp #(SHAVE_PX + 1)
+    bcs @n16
+    bra @got
+@jog:
+    A16
+    lda tmp4
+    bpl @n16
+    cmp #($10000 - SHAVE_PX)
+    bcc @n16
+@got:
+    A8
+    lda E_FLAGS,y
+    ora #$10
+    sta E_FLAGS,y
+    inc w_shaves
+    lda w_level
+    asl a
+    asl a
+    clc
+    adc w_level                 ; 5 x level
+    sta tmp2
+    jsr style_add
+    SFX SFX_COIN
+    ldx #.loword(str_shave)
+    lda #TP_CYAN
+    ldy #40
+    jmp popup_pts
+@n16:
+    A8
+@n:
+    iny
+    iny
+    cpy #(NUM_ENT*2)
+    bne @e
+@x:
+    rts
+
+str_shave: .byte "CLOSE SHAVE!", 0
+
+; popup "<X> +<tmp2>" (tmp2 = 0..99), A = text palette, Y = frames on show
+popup_pts:
+    pha
+    phy
+    stx ptr1
+    lda #^popup
+    sta ptr1+2
+    ldy #$0000
+@c:
+    lda [ptr1],y
+    beq @num
+    sta w_msg,y
+    iny
+    bra @c
+@num:
+    lda #' '
+    sta w_msg,y
+    iny
+    lda #'+'
+    sta w_msg,y
+    iny
+    lda tmp2
+    ldx #$0000
+@t:
+    cmp #10
+    bcc @o
+    sbc #10
+    inx
+    bra @t
+@o:
+    pha
+    txa
+    beq @one
+    ora #'0'
+    sta w_msg,y
+    iny
+@one:
+    pla
+    ora #'0'
+    sta w_msg,y
+    iny
+    lda #0
+    sta w_msg,y
+    ply
+    pla
+    ldx #.loword(w_msg)
+    jmp popup
 
 ; lane_free: A = lane, tmp4 = world x, tmp5 = entity to ignore.
 ; Carry set if someone (not a pigeon) stands within 14 px there.
@@ -1455,23 +1792,33 @@ step_aside:
     ply
     rts
 
-; bump: A = type of who we hit (the jogger hits us from behind)
+; bump: A = type of who we hit (the jogger hits us from behind). It knocks
+; you to half pace for a moment and costs three notches of groove (like a
+; skipped beat) and the combo. Every bump but the first spills coffee (40).
 bump_player:
     pha
     lda #ST_STUMBLE
     sta w_state
     stz w_dt
-    ldx #24
+    ldx #BUMP_T
     stx w_timer
-    stz w_streak
+    lda w_streak
+    sec
+    sbc #3
+    bcs @st
+    lda #0
+@st:
+    sta w_streak
     stz w_groove
     jsr combo_break
+    inc w_bumps
     A16
-    stz w_speed
-    stz w_target
+    lsr w_speed
+    lda w_speed
+    sta w_target
     lda w_dist
     sec
-    sbc #6
+    sbc #4
     bcs @d
     lda #$0000
 @d:
@@ -1499,11 +1846,18 @@ bump_player:
     lda #TP_RED
     ldy #60
     jsr popup
-    lda #TIP_LANE
-    ldx #.loword(str_tlane)
-    jsr tip
+    lda w_bumps
+    cmp #1
+    bne @sp
+    lda #TIP_SPILL              ; the first one's a warning: nothing spilt
+    ldx #.loword(str_tspill)
+    jmp tip
+@sp:
     lda #2
-    jmp spill
+    jsr spill
+    lda #TIP_LANE               ; the second: how not to
+    ldx #.loword(str_tlane)
+    jmp tip
 
 bump_tab: .addr str_sorry, str_sorry, str_tourist, str_zombie, str_left, str_sorry, str_cart, str_board
 str_sorry:   .byte "BUMPED A BANKER! SORRY!", 0
@@ -2258,9 +2612,169 @@ bay_draw:
     bne @e
     dec w_dlane
     bpl @lane
+    jsr draw_floor
     jsr draw_train
     ldx oam_idx
     stx w_oamlast
+    rts
+
+;  Floor marks, after everyone (later OAM slots draw underneath them): a
+; yellow ring under your feet, a red one under whoever the '!' is over, and
+; a shadow under everybody else, so the 3/4 view shows which lane each
+; person's feet are in.
+draw_floor:
+    lda w_hide
+    ora w_board
+    bne @ents
+    A16
+    lda w_px
+    sec
+    sbc #8
+    sta spr_x
+    lda w_y
+    sec
+    sbc #12
+    sta spr_y
+    A8
+    ldx #MS_RINGYEL_BASE
+    stx tmp6
+    jsr put_ring
+@ents:
+    lda #$3A
+    sta tmp5
+    ldx #$0000
+@e:
+    lda E_TYPE,x
+    jeq @n
+    cmp #T_PIGEON
+    beq @n
+    cmp #T_CART
+    beq @n                      ; (on wheels)
+    stx w_cur
+    A16
+    lda E_WX,x
+    sec
+    sbc w_dist
+    clc
+    adc #PLAYER_SX
+    sta spr_x                   ; feet, centre
+    clc
+    adc #8
+    cmp #(256 + 8 - 4)          ; ring / shadow wholly on screen (x 8..251)
+    A8
+    bcs @n
+    lda spr_x+1
+    bne @n
+    lda spr_x
+    cmp #8
+    bcc @n
+    lda w_state
+    cmp #ST_FINISH
+    bcs @shadow
+    cpx w_warn
+    beq @ring
+    cpx w_jogw
+    bne @shadow
+@ring:
+    lda E_LY,x
+    sec
+    sbc #12
+    sta spr_y
+    stz spr_y+1
+    A16
+    lda spr_x
+    sec
+    sbc #8
+    sta spr_x
+    A8
+    ldx #MS_RINGRED_BASE
+    stx tmp6
+    jsr put_ring
+    bra @nx
+@shadow:
+    lda E_LY,x
+    sec
+    sbc #5
+    sta spr_y
+    lda spr_x
+    sec
+    sbc #4
+    sta spr_x
+    ldx #MS_SHADOW_BASE
+    stx tmp6
+    jsr put_small
+@nx:
+    ldx w_cur
+@n:
+    inx
+    inx
+    cpx #(NUM_ENT*2)
+    jne @e
+    rts
+
+; a 16x16 floor ring straight into OAM: spr_x (0..255) / spr_y = top-left,
+; tmp6 = tile; props palette, priority 3
+put_ring:
+    ldx oam_idx
+    cpx #(512 - 4)
+    bcs @x
+    lda spr_x
+    sta oam_buf,x
+    lda spr_y
+    sta oam_buf+1,x
+    lda tmp6
+    sta oam_buf+2,x
+    lda tmp6+1
+    and #$01
+    ora #$3A
+    sta oam_buf+3,x
+    A16
+    txa
+    lsr a
+    lsr a
+    pha
+    lsr a
+    lsr a
+    tay                         ; hi-table byte
+    pla
+    and #$0003                  ; which pair of bits
+    tax
+    A8
+    lda f:ring_size,x
+    ora oam_hi,y
+    sta oam_hi,y
+    A16
+    lda oam_idx
+    clc
+    adc #4
+    sta oam_idx
+    A8
+@x:
+    rts
+ring_size: .byte $02, $08, $20, $80     ; "large" for slot 0..3 of the byte
+
+; one 8x8 sprite straight into OAM (x 0..255, so no hi-table bits):
+; spr_x / spr_y = top-left, tmp6 = tile, tmp5 = attr
+put_small:
+    ldx oam_idx
+    cpx #(512 - 4)
+    bcs @x
+    lda spr_x
+    sta oam_buf,x
+    lda spr_y
+    sta oam_buf+1,x
+    lda tmp6
+    sta oam_buf+2,x
+    lda tmp6+1
+    and #$01
+    ora tmp5
+    sta oam_buf+3,x
+    inx
+    inx
+    inx
+    inx
+    stx oam_idx
+@x:
     rts
 
 ; The GO train at Union's platform, seen between the columns (sprite
@@ -2674,8 +3188,8 @@ draw_beat:
 @x:
     rts
 
-grade_lo:   .addr 0, 0, ms_wgood, ms_wperfect, ms_wearly, ms_wlate, ms_wmiss
-grade_base: .word 0, 0, MS_WGOOD_BASE, MS_WPERFECT_BASE, MS_WEARLY_BASE, MS_WLATE_BASE, MS_WMISS_BASE
+grade_lo:   .addr 0, 0, ms_wgood, ms_wperfect, ms_wearly, ms_wlate, ms_wmiss, ms_wdeadon
+grade_base: .word 0, 0, MS_WGOOD_BASE, MS_WPERFECT_BASE, MS_WEARLY_BASE, MS_WLATE_BASE, MS_WMISS_BASE, MS_WDEADON_BASE
 
 ; the red '!' over whoever is in your way (see warn_check)
 draw_warn:
@@ -3323,12 +3837,15 @@ hud_groove:
 @x:
     rts
 
-combo_hud: .addr str_hx1, str_hx2, str_hx3, str_hx4, str_hx5
+combo_hud: .addr str_hx1, str_hx2, str_hx3, str_hx4, str_hx5, str_hx6, str_hx7, str_hx8
 str_hx1: .byte "        ", 0
 str_hx2: .byte "COMBO X2", 0
 str_hx3: .byte "COMBO X3", 0
 str_hx4: .byte "COMBO X4", 0
 str_hx5: .byte "COMBO X5", 0
+str_hx6: .byte "COMBO X6", 0
+str_hx7: .byte "COMBO X7", 0
+str_hx8: .byte "COMBO X8", 0
 
 str_541:    .byte "5:41:", 0
 str_542:    .byte "5:42:00", 0
@@ -3340,15 +3857,17 @@ str_union:  .byte "UNION", 0
 str_grvl:   .byte "GROOVE", 0
 
 ; ------------------------------------------------------------------
-; made it:  1000 + 25/sec to spare + 15/pass + 20/coffee + STYLE
-;           (STYLE: the combo level for every PERFECT step, 10 x level a
-;           PRESTO TAP)
-;           card: WALK (1000 + time + passes + a full cup, 320) + STYLE
-;           - SPILLS (20 a sip of coffee lost)
-; missed:   WALK = distance/5 + 5/pass, + STYLE - SPILLS as above; the
-;           total stays under 1000 (a finish never scores less): past 990
-;           the STYLE row is cut back, below 0 the SPILLS row is. Gave up:
-;           the same, ev_fail 3.
+; The card: WALK + STYLE - SPILLS = SCORE, never below 0.
+;  WALK   made it: 1000 + 40 a second to spare (TIME LEFT on the card);
+;         missed it (or gave up): how far you got, distance / 5 (719 max)
+;  STYLE  the combo level for every PERFECT step, twice that DEAD ON and
+;         twice again in DOUBLE TIME; 10 x level a PRESTO TAP; 5 x level a
+;         CLOSE SHAVE
+;  SPILLS 40 a spill (2 sips of 16; the cup runs dry after 8)
+; The penalty row is always the true cost; a sum below 0 scores 0.
+FIN_BASE  = 1000
+SEC_PTS   = 40              ; (bay_score multiplies by hand)
+SPILL_PTS = 40
 bay_score:
     A16
     lda w_time
@@ -3367,18 +3886,16 @@ bay_score:
     lda w_style
     sta ev_stat+6
     sta ev_break+2              ; + STYLE
-    lda #16
-    sec
-    sbc w_coffee
-    and #$00FF                  ; sips lost
+    lda w_spills                ; - SPILLS: 40 each
     asl a
     asl a
-    sta tmp1
     asl a
+    sta tmp1                    ; *8
     asl a
+    asl a                       ; *32
     clc
-    adc tmp1                    ; *20
-    sta ev_break+4              ; - SPILLS
+    adc tmp1
+    sta ev_break+4
     lda w_made
     and #$00FF
     beq @missed
@@ -3392,22 +3909,10 @@ bay_score:
     sta tmp1                    ; s*8
     asl a
     asl a                       ; s*32
-    sec
-    sbc tmp1                    ; s*24
     clc
-    adc tmp4                    ; s*25
+    adc tmp1                    ; s*40
     clc
-    adc #(1000 + 16*20)         ; and a full cup
-    sta tmp4
-    lda w_passed
-    asl a
-    asl a
-    asl a
-    asl a
-    sec
-    sbc w_passed                ; p*15
-    clc
-    adc tmp4
+    adc #FIN_BASE
     sta ev_break                ; WALK
     jsr @sum
     A8
@@ -3421,28 +3926,8 @@ bay_score:
     lda #5
     jsl div16
     A16
-    lda w_passed
-    asl a
-    asl a
-    clc
-    adc w_passed                ; p*5
-    clc
-    adc tmp0
-    sta ev_break                ; WALK
-    clc
-    adc ev_break+2
-    cmp #990
-    bcc @c0
-    lda #990                    ; under a finish: cut the STYLE row back
-    sec
-    sbc ev_break
-    sta ev_break+2
-    lda #990
-@c0:
-    cmp ev_break+4
-    bcs @c1
-    sta ev_break+4              ; never below 0: cut the SPILLS row back
-@c1:
+    lda tmp0
+    sta ev_break                ; WALK: how far you got
     jsr @sum
     A8
     lda w_quit
@@ -3461,6 +3946,9 @@ bay_score:
     adc ev_break+2
     sec
     sbc ev_break+4
+    bcs @pos
+    lda #$0000                  ; never below 0 (the card says so)
+@pos:
     sta ev_score
     rts
     .a8

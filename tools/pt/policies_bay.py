@@ -25,6 +25,7 @@ TAP = 3             # frames a tap is held
 # event RAM layout (src/ev_bay.s)
 NUM_ENT = 20
 E_TYPE, E_WX, E_LANE = 64, 64 + 40, 64 + 4 * 40
+E_V = 64 + 3 * 40
 E_FLAGS = 64 + 8 * 40
 T_SUIT, T_TOURIST, T_ZOMBIE, T_JOGGER, T_PIGEON, T_CART, T_BOARD = 1, 2, 3, 4, 5, 6, 7
 
@@ -63,14 +64,14 @@ class _Eyes:
                 else self.g.sym['ev_ram']
         ram = self.g.core.peek(self.base, 512)
         w = lambda o: ram[o] | ram[o + 1] << 8
-        me = dict(dist=w(0), lane=ram[6], state=ram[14], cd=w(26))
+        me = dict(dist=w(0), lane=ram[6], state=ram[14], cd=w(26), speed=w(4) / 256.0)
         ents = []
         for i in range(NUM_ENT):
             typ = ram[E_TYPE + 2 * i]
             if not typ or typ == T_PIGEON or typ > T_BOARD:
                 continue
             ents.append(dict(type=typ, wx=w(E_WX + 2 * i), lane=ram[E_LANE + 2 * i],
-                             flags=ram[E_FLAGS + 2 * i]))
+                             flags=ram[E_FLAGS + 2 * i], v=w(E_V + 2 * i) / 256.0))
         return me, ents
 
 
@@ -380,11 +381,15 @@ class bay_ear(bay_hand):
     Lanes: when a red ! shows over someone in its lane (or a jogger behind)
     it moves to the lane with the most room, L frames later; slower hands
     overlook L% of them and lean on EXCUSE ME. Experts (L < 9) walk double
-    time (every dot), swipe PRESTO on the gold dots and weave."""
+    time (every dot), swipe PRESTO on the gold dots and weave, cutting their
+    lane changes fine past walkers for a CLOSE SHAVE. Card readers (L 12-18)
+    try the small dots too, as the card says, and go back to the big dots
+    when their steps keep landing EARLY / LATE."""
     alpha = 0.3
-    double = None       # None: experts only
+    double = None       # None: experts, and card readers while it works
     presto_on = None
     excuse = True
+    shave = None        # None: experts only
 
     def __init__(self):
         super().__init__()
@@ -407,8 +412,11 @@ class bay_ear(bay_hand):
         self.react = 76
         self.p_blind = 0.01 * S if self.blind is None else self.blind
         self.prefer_lanes = S < 9
-        self.dbl = (S < 12) if self.double is None else self.double
+        self.dbl = (S <= 18) if self.double is None else self.double
+        self.try_dbl = self.double is None and 12 <= S <= 18    # gives up if it isn't working
+        self.err = 0.0          # running mean |frames off| of my steps
         self.presto = (S < 12) if self.presto_on is None else self.presto_on
+        self.shaving = (S < 9) if self.shave is None else self.shave
         if not self.excuse:
             self.prefer_lanes = True
 
@@ -446,9 +454,12 @@ class bay_ear(bay_hand):
         return warn
 
     def feedback(self, d):
+        seen = d + self.rng.choice((-1, 0, 0, 1)) * 0.5
+        self.err = 0.85 * self.err + 0.15 * abs(seen + 0.5)
+        if self.try_dbl and self.dbl and self.err > 4.0:
+            self.dbl = False            # "the small dots are too fast for me"
         if not self.alpha:
             return
-        seen = d + self.rng.choice((-1, 0, 0, 1)) * 0.5
         # aim: the landing frame (-1) and the one after (0) are dead centre
         self.corr += self.alpha * (seen + 0.5)
         self.corr = max(-12.0, min(12.0, self.corr))
@@ -518,6 +529,13 @@ class bay_ear(bay_hand):
                       and min(e['rel'] for e in ahead) < (36 if self.S < 9 else 60))
         if room(best) > here + 8 and room(best) >= 28 and (self.prefer_lanes or not can_excuse
                                                           or room(best) > 90):
+            if self.shaving and not jog and abs(best - me['lane']) == 1:
+                # cut it fine past somebody on foot: move when they're 14-24 px
+                # ahead (CLOSE SHAVE), a little sooner the faster we close
+                near = min(ahead, key=lambda e: e['rel'])
+                close = max(0.2, me['speed'] - near['v'])
+                if near['type'] < T_JOGGER and near['rel'] - close * 4 > 21:
+                    return 0
             m = X if best < me['lane'] else B
             if abs(best - me['lane']) == 2:
                 self.second = (t + 7, m)
