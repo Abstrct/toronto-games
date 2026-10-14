@@ -39,13 +39,21 @@ python3 tools/pt/pt.py bug pt3-bay "One-line title" -s major -k design -d "what,
 ```
 
 `-s blocker|major|minor|note`, `-k bug|design|art|audio|ux|toronto|balance`.
+Add `-c "<condition>"` whenever you can say in one line what's true while the bug is present, for example
+`-c "ev_score>2000"` (an exploit still pays), `-c "scene=bike.results"` (you got wiped out), or `-c "ev_fail=3"`.
+`pt.py findings --verify` then re-checks your bug on every new build and reports it PRESENT or GONE.
+Start event sessions with `new SESSION <event>` (a goto). Repros then replay from the event start and keep
+working when menus or cards change.
+
+Keep scripts and notes in your own folder, `build/pt/scratch/<your prefix>/`, because ten testers share this machine.
+Never `pkill` or `killall` by pattern: kill only process ids you started yourself.
 Do this at the moment it happens. The harness saves the screenshot and game
 state, and checks that your session replays to that exact frame. Those bugs
 need no repro script from you.
 
 ## Already known: don't spend time rediscovering these
 
-Run `python3 tools/pt/pt.py findings` and check the latest balance report in
+Run `python3 tools/pt/pt.py findings`, and check the latest balance and curve reports in
 `build/pt/reports/`. The bots cover degenerate strategies, slowdown and crashes.
 Decided, so don't raise these again: the soundtrack (Canadian bands, not only
 Toronto ones) stays as it is.

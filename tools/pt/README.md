@@ -96,6 +96,13 @@ Caveats:
   rhythm events need their own human model (e.g. timing noise around the beat, plus latency only on hazards).
 - Plug-ins choose the bot with `CURVE = {'<event>': 'policy'}`.
 
+## Findings that re-check themselves
+
+`pt.py bug SESSION "title" -c "COND"` stores a repro relative to the session's last `goto` (when it has one),
+and a condition that holds while the bug is present. `pt.py findings --verify [--file F]` replays every finding
+on the current ROM. It reports PRESENT/GONE when there's a condition, REPLAYED when the replay reached the same scene, and DESYNC? when
+an old power-on repro wandered off because the menus changed. Archived rounds live in `build/pt/findings_round*.jsonl`.
+
 ## Robustness
 
 ```bash

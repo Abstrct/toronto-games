@@ -684,7 +684,8 @@ class Session:
             if kind == 'save':
                 p = os.path.join(sess.dir, 'labels', label + '.state')
                 g.core.save(p)
-                sess.meta['labels'][label] = {'tokens': base + r.tokens, 'frames': g.frames, 'held': g.held}
+                sess.meta['labels'][label] = {'tokens': base + r.tokens, 'frames': g.frames, 'held': g.held,
+                                              'anchor': sess.meta.get('anchor')}
                 r.outputs.append({'saved': label, 'frame': g.frames})
             elif kind == 'load':
                 lab = sess.meta['labels'].get(label)
@@ -694,10 +695,13 @@ class Session:
                 g.frames, g.held = lab['frames'], lab['held']
                 g.step(0)
                 base, r.tokens[:] = list(lab['tokens']), []
+                sess.meta['anchor'] = lab.get('anchor')
                 r.outputs.append({'loaded': label, 'frame': g.frames})
             else:
                 toks = goto_target(g, label)
                 base, r.tokens[:] = list(toks), []
+                # repros relative to this goto survive menu/card timing changes
+                sess.meta['anchor'] = {'target': label, 'start': len(toks)}
                 r.outputs.append({'goto': label, 'frame': g.frames})
             r._last_scene = None
             r.scene_check()
@@ -1164,7 +1168,10 @@ def cmd_bug(a):
     Runner(r, d).execute(toks)
     ok = r.core.hash() == h
     r.core.close()
+    anchor = s.meta.get('anchor')
+    rel = {'target': anchor['target'], 'tokens': ' '.join(s.meta['tokens'][anchor['start']:])} if anchor else None
     rec = {'id': fid, 'tester': a.tester or a.session, 'severity': a.severity, 'kind': a.kind,
+           'repro_rel': rel, 'check': a.check,
            'title': a.title, 'detail': a.detail or '', 'scene': st['scene'], 'frame': s.meta['frames'],
            'event': st['event'] if st['scene'].split('.')[0] in EVENTS else None,
            'screen': os.path.relpath(os.path.join(d, 'screen.png'), ROOT), 'repro': toks,
@@ -1174,11 +1181,61 @@ def cmd_bug(a):
     print(json.dumps({k: rec[k] for k in ('id', 'severity', 'scene', 'screen', 'repro_verified')}))
 
 
+def _verify_one(rec):
+    """Replay a finding on the current ROM: event-relative when possible."""
+    g = Game()
+    out = {'id': rec['id']}
+    try:
+        r = Runner(g, os.path.join(PT, 'verify', rec['id']))
+        if rec.get('repro_rel'):
+            r.execute('goto:' + rec['repro_rel']['target'])
+            r.execute(rec['repro_rel']['tokens'])
+            out['mode'] = 'event'
+        else:
+            r.execute(rec['repro'])
+            out['mode'] = 'power-on'
+        st = g.state(full=False)
+        out.update({'scene': st['scene'], 'ev_score': st['ev_score'], 'ev_fail': st['ev_fail']})
+        if rec.get('check'):
+            out['present'] = bool(r.cond(rec['check']))
+        out['same_scene'] = st['scene'] == rec['scene']
+    except Exception as e:
+        out['error'] = str(e)[:120]
+    finally:
+        g.core.close()
+    return out
+
+
 def cmd_findings(a):
-    if not os.path.exists(FINDINGS):
+    path = a.file or FINDINGS
+    if not os.path.exists(path):
         print('no findings yet')
         return
-    rows = [json.loads(l) for l in open(FINDINGS)]
+    rows = [json.loads(l) for l in open(path)]
+    if a.verify:
+        res = {v['id']: v for v in parallel_map(_verify_one, rows, os.cpu_count())}
+        counts = {}
+        for r in rows:
+            v = res[r['id']]
+            if 'error' in v:
+                st = 'ERROR'
+            elif 'present' in v:
+                st = 'PRESENT' if v['present'] else 'GONE'
+            elif not v['same_scene']:
+                st = 'DESYNC?'
+            else:
+                st = 'REPLAYED'
+            counts[st] = counts.get(st, 0) + 1
+            print('%-8s [%s] %-14s %s  (%s replay -> %s score %s)' % (
+                st, r['severity'], r['scene'], r['title'][:70], v.get('mode', '?'), v.get('scene', v.get('error')),
+                v.get('ev_score')))
+        print('\n' + ', '.join('%s %d' % kv for kv in sorted(counts.items())))
+        print('PRESENT/GONE need a --check condition on the finding; REPLAYED = reached the same scene, look at it;'
+              ' DESYNC? = the replay ended somewhere else (the game changed under a power-on repro)')
+        out = os.path.join(PT, 'reports', 'verify_%d.json' % int(time.time()))
+        os.makedirs(os.path.dirname(out), exist_ok=True)
+        json.dump({'rom': rom_id(), 'file': path, 'results': list(res.values())}, open(out, 'w'), indent=1)
+        return
     order = {'blocker': 0, 'major': 1, 'minor': 2, 'note': 3}
     rows.sort(key=lambda r: (order.get(r['severity'], 9), r['scene']))
     if a.json:
@@ -1248,8 +1305,11 @@ def main():
     p.add_argument('-k', '--kind', choices=['bug', 'design', 'art', 'audio', 'ux', 'toronto', 'balance'], default='bug')
     p.add_argument('-d', '--detail')
     p.add_argument('-t', '--tester')
+    p.add_argument('-c', '--check', help='condition that holds while the bug is present, e.g. "ev_score>2000" or "scene=bike.results"; lets findings --verify say PRESENT/GONE')
     p = sub.add_parser('findings', help='list filed findings, most severe first')
     p.add_argument('--json', action='store_true')
+    p.add_argument('--verify', action='store_true', help='replay every finding on the current ROM')
+    p.add_argument('--file', help='a findings .jsonl (default: the live one)')
     sub.add_parser('scenes', help='list goto targets')
     a = ap.parse_args()
 
