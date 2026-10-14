@@ -9,16 +9,21 @@
 ; pushes (40 frames, a gag 30): a sound (three departure beeps, a wheel
 ; squeal, the brake hiss, the horn, a blip), a status line ("CURVE AHEAD")
 ; and a HOLLOW blinking arrow by the ring: get ready. When the push starts
-; the arrow goes SOLID and the status names the button ("CURVE! D-PAD v").
+; the arrow goes SOLID and the status names the verb ("CURVE! HOLD v").
 ; The push then ramps in.
 ; On the hollow arrow a lean is half strength and the rider finds their feet
 ; (the dot settles back), so getting ready early never tips you over; between
-; lurches nothing pushes at all. A lean only goes LEAN_LIM px your way:
-; holding the arrow can't carry you into the rim, only the push (or a late
-; correction) can. Track joints are little kicks you can see and hear.
+; lurches nothing pushes at all. A held lean settles: full strength until the
+; dot is LEAN_LIM px your way, then it fades and braces you back, so holding
+; the arrow's way parks the dot in the white past the middle and never
+; carries it into the rim. Keeping it in the GOLD takes taps. Only the push's
+; own axis tips you over: a wrong or late lean across it rights itself.
+; Track joints are little kicks you can see and hear.
+; Every player in a competition rides the same train (sb_seed).
 ;
 ; The balance ring sits over the rider's head on a dark disc of its own.
-; The dot is the rider's balance: LEFT/RIGHT is the train's go/brake axis,
+; The dot (11 px, gold / white / pulsing red with a !) is the rider's
+; balance: LEFT/RIGHT is the train's go/brake axis,
 ; UP/DOWN the curves. Dot physics are slow and heavily damped with a gentle
 ; tip-over while a push is on. Let the dot reach the red rim and you GRAB
 ; something, and the sprite acts the gag out: the sticky pole (back), a
@@ -70,7 +75,8 @@ DANGER2   = 256             ; dot turns red past 16 px
 SWEET2    = 36              ; sweet spot (the dot turns gold): inside 6 px
 NUM_SEG   = 6
 LEAN      = $0013           ; D-pad lean, 8.8 px/frame^2
-LEAN_LIM  = 8               ; px: no further lean past this your way
+LEAN_LIM  = 4               ; px your way: past this a held lean fades, then braces
+                            ; (4/256 px/frame^2 less per px: lean_amt)
 VMAX      = $0090           ; dot speed cap, 8.8 px/frame
 WARN      = 40              ; frames of telegraph before every lurch
 WARN_GAG  = 30              ; a gag's telegraph (the passengers give less notice)
@@ -169,6 +175,7 @@ w_ppal   = ev_ram + 180
 w_nhq    = ev_ram + 182     ; 1 = a NO HANDS callout waits for the surf one
 w_nohand = ev_ram + 184     ; stops glided into hands-free
 w_gtouch = ev_ram + 186     ; 1 = you leaned the arrow's way during this push
+w_fr     = ev_ram + 188     ; the ride's own frame counter (low byte)
 COLBUF   = ev_ram + 256     ; two 28-word column buffers (256, 320)
 EV_SEED  = ev_ram + 510
 COURSE   = ev_ram + 512     ; this run's course: 4 bytes a lurch (<= 26 lurches)
@@ -190,6 +197,9 @@ ST_SIGP   = 12
 ST_PACKW  = 13
 ST_PACKP  = 14
 ST_TMU    = 15
+
+.segment "BSS"
+sb_seed: .res 2             ; this competition's ride (player 1 draws it)
 
 ; code + tables live in a graphics bank with room to spare (bank $85)
 .segment "GFX0"
@@ -300,20 +310,32 @@ sb_init:
     rts
 
 ; every ride is a little different: the seed comes from rng (which the
-; attract demo fixes), taken again on the ride's first frame
+; attract demo fixes), taken again on the ride's first frame. Within one
+; competition every player rides the same train: player 1 draws the ride and
+; the others get it again (sb_seed outlives ev_ram), so a heat is decided by
+; the riding, never by who drew the kinder ride.
 seed_course:
+    lda cur_player
+    beq @draw
+    A16
+    lda sb_seed
+    bra @set
+@draw:
     A16
     lda rng
     eor #$2E6B
     bne @sd
     lda #$2E6B
 @sd:
+    sta sb_seed
+@set:
     sta EV_SEED
     A8
     jmp build_course
 
 ; ------------------------------------------------------------------
 sb_update:
+    inc w_fr
     lda w_built
     bne @b
     inc w_built
@@ -717,7 +739,8 @@ tr_act:
     cmp #K_SIG
     bne @cruise
     ; signal problems: the emergency brake judders the car to a crawl
-    lda frame
+    ; (on the ride's own clock: the global frame differs player to player)
+    lda w_fr
     and #$03
     bne @tick
     lda #1
@@ -1263,64 +1286,64 @@ balance:
     lsr a
 @full:
     sta tmp4
-    ; a lean only goes so far: past LEAN_LIM px your way, pressing on does
-    ; nothing more (it's the push or a late correction that throws you)
+    ; a held lean settles: full strength until the dot is LEAN_LIM px your
+    ; way, then it fades, and further out holding on braces you back. So
+    ; holding the arrow's way parks the dot in the white, a little past the
+    ; middle, and never carries it into the rim (the gold takes taps)
     lda pad
     bit #PAD_LEFT
     beq @nl
     lda w_bx
+    jsr int_part
+    eor #$FFFF
+    inc a
+    jsr lean_amt
+    eor #$FFFF
+    inc a
     clc
-    adc #(LEAN_LIM << 8)
-    bmi @nl0
-    lda w_vx
-    sec
-    sbc tmp4
+    adc w_vx
     sta w_vx
-@nl0:
-    lda pad
 @nl:
+    lda pad
     bit #PAD_RIGHT
     beq @nr
     lda w_bx
-    sec
-    sbc #(LEAN_LIM << 8)
-    bpl @nr0
-    lda w_vx
+    jsr int_part
+    jsr lean_amt
     clc
-    adc tmp4
+    adc w_vx
     sta w_vx
-@nr0:
-    lda pad
 @nr:
+    lda pad
     bit #PAD_UP
     beq @nu
     lda w_by
+    jsr int_part
+    eor #$FFFF
+    inc a
+    jsr lean_amt
+    eor #$FFFF
+    inc a
     clc
-    adc #(LEAN_LIM << 8)
-    bmi @nu0
-    lda w_vy
-    sec
-    sbc tmp4
+    adc w_vy
     sta w_vy
-@nu0:
-    lda pad
 @nu:
+    lda pad
     bit #PAD_DOWN
     beq @nd
     lda w_by
-    sec
-    sbc #(LEAN_LIM << 8)
-    bpl @nd
-    lda w_vy
+    jsr int_part
+    jsr lean_amt
     clc
-    adc tmp4
+    adc w_vy
     sta w_vy
 @nd:
     ; v += force + offset/256: while a lurch pushes, an upright body tips
-    ; further once it leans; otherwise nothing pushes and the rider finds
-    ; their feet (the same term, the other way)
+    ; further its way once it leans; otherwise (and across the push) the
+    ; rider finds their feet (the same term, the other way)
     lda w_bx
     jsr int_part
+    ldy w_tx
     jsr tip
     clc
     adc w_fx
@@ -1333,6 +1356,7 @@ balance:
     sta w_bx
     lda w_by
     jsr int_part
+    ldy w_ty
     jsr tip
     clc
     adc w_fy
@@ -1392,12 +1416,50 @@ balance:
 ; per lurch kind: the way the solid arrow points (against the push)
 lean_pad: .word PAD_RIGHT, PAD_UP, PAD_DOWN, PAD_LEFT, PAD_LEFT, PAD_RIGHT
 
-; A16: the tip-over term (offset px / 256), negated unless a lurch pushes
+; A16 = how far the dot is the way you press (px, signed) -> A16 = the lean
+; (8.8 px/frame^2): tmp4 up to LEAN_LIM px, then BRACE less per px, down to
+; -tmp4 (holding on pulls you back toward the middle)
+lean_amt:
+    .a16
+    sec
+    sbc #LEAN_LIM
+    bmi @full
+    beq @full
+    asl a
+    asl a                       ; x BRACE (4)
+    sta tmp3
+    lda tmp4
+    sec
+    sbc tmp3
+    bpl @x
+    clc
+    adc tmp4
+    bmi @min
+    sec
+    sbc tmp4
+    rts
+@min:
+    lda tmp4
+    eor #$FFFF
+    inc a
+    rts
+@full:
+    lda tmp4
+@x:
+    rts
+
+; A16: the tip-over term (offset px / 256), Y = the push on this axis.
+; Only the way a lurch pushes tips you over; across it (a wrong lean, a
+; late hold left over from the last arrow) and between lurches the rider
+; finds their feet: the term is negated
 tip:
     .a16
     ldx w_ls
     cpx #LS_ACT
-    beq @x
+    bne @feet
+    cpy #$0000
+    bne @x
+@feet:
     eor #$FFFF
     inc a
 @x:
@@ -1994,8 +2056,13 @@ draw_ring:
     bra @d
 @bad:
     A8
-    LDPTR1 ms_dot_bad
+    LDPTR1 ms_dot_bad               ; red: it pulses, so the danger reads
     ldx #MS_DOT_BAD_BASE
+    lda frame
+    and #$08
+    beq @d
+    LDPTR1 ms_dot_bad2
+    ldx #MS_DOT_BAD2_BASE
 @d:
     stx tmp6
     jsl oam_meta
@@ -2544,17 +2611,17 @@ ss0:  .byte " ", 0
 ss1:  .byte "STAND CLEAR!", 0
 ss2:  .byte "CURVE AHEAD", 0
 ss3:  .byte "STATION AHEAD", 0
-ss4:  .byte "GO! D-PAD ", TXT_ARROW_R + $20, 0
-ss5:  .byte "CURVE! D-PAD ", TXT_ARROW_U + $20, 0
-ss6:  .byte "CURVE! D-PAD ", TXT_ARROW_D + $20, 0
-ss7:  .byte "BRAKES! D-PAD ", TXT_ARROW_L + $20, 0
+ss4:  .byte "GO! HOLD ", TXT_ARROW_R + $20, 0
+ss5:  .byte "CURVE! HOLD ", TXT_ARROW_U + $20, 0
+ss6:  .byte "CURVE! HOLD ", TXT_ARROW_D + $20, 0
+ss7:  .byte "BRAKES! HOLD ", TXT_ARROW_L + $20, 0
 ss8:  .byte "CRUISING", 0
 ss9:  .byte "DOORS OPEN", 0
 ss10: .byte "OUT OF SERVICE", 0
 ss11: .byte "SIGNAL PROBLEMS!", 0
-ss12: .byte "E-BRAKE! D-PAD ", TXT_ARROW_L + $20, 0
+ss12: .byte "E-BRAKE! HOLD ", TXT_ARROW_L + $20, 0
 ss13: .byte "BACKPACK SWING!", 0
-ss14: .byte "BACKPACK! D-PAD ", TXT_ARROW_R + $20, 0
+ss14: .byte "BACKPACK! HOLD ", TXT_ARROW_R + $20, 0
 ss15: .byte "IT'S DUNDAS, BUD", 0
 
 ; ------------------------------------------------------------------
