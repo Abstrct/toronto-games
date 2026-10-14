@@ -1112,3 +1112,93 @@ class bike_gord(bike_commuter):
 
 
 POLICIES.update({c.__name__: c for c in [bike_rider, bike_dana, bike_gord]})
+
+
+# ---------------------------------------------------------------------------
+# bike_obey: a first-timer who reads the card once and then only does what
+# the screen tells them (sprint 7's cue-timing check). It holds A, rides the
+# bike lane, and reacts to nothing but the text that comes up (the harness
+# adds the human's 20-25 frames): HOP ...: B -> taps B; STEER < / > -> holds
+# that way a beat (the 501 warning: until out of its way, which it can see);
+# and like anyone careful it drifts back to the bike lane once nothing has
+# been said for a second. Hazards with no words on them it rides into.
+def screen_text(g):
+    """BG3 text as 28 strings, with the arrow glyphs as < and >."""
+    tm = g.core.peek(g.sym['txt_map'], 2048)
+    rows = []
+    for y in range(28):
+        line = ''
+        for x in range(32):
+            t = tm[(y * 32 + x) * 2] & 0x7F
+            line += chr(t + 32) if 1 <= t <= 63 else ('>' if t == 78 else '<' if t == 79 else ' ')
+        rows.append(line)
+    return rows
+
+
+class bike_obey(_Reader):
+    """Steers by motor program, as a person does: it judges how long to hold
+    the pad for where it wants to be (one lane over: round the stopped car to
+    163, out of the 501's way to the bike lane or 140), lets go, looks where
+    it landed once its own hand has caught up, and touches it up."""
+    trivial = False
+    lag = 22                # what it allows for its own hand when re-checking
+
+    def __init__(self):
+        self.g = None
+        self.seen = ''
+        self.b_until = -1
+        self.move = (0, -1, -1)     # (direction, release at, look again at)
+        self.target = HOME
+        self.quiet_at = 0           # frame of the last order
+        self.warn = False
+        self.was_riding = True
+
+    def go(self, L, x, t):
+        self.target = L
+        d = L - x
+        if abs(d) < 4:
+            return
+        n = min(range(1, 199), key=lambda k: abs(DISP[k] - abs(d)))
+        self.move = (RIGHT if d > 0 else LEFT, t + n, t + n + 12 + self.lag)
+
+    def act(self, t, tel, rng):
+        me, ents = self.read()
+        x = me['x']
+        rows = screen_text(self.g)
+        text = ' / '.join(r.strip() for r in rows[2:24] if r.strip())
+        if me['state'] != 0 and self.was_riding:      # wiped out: back on in the bike lane
+            self.target, self.move, self.warn = HOME, (0, -1, -1), False
+        self.was_riding = me['state'] == 0
+        if text != self.seen:
+            self.seen = text
+            if 'HOP' in text and ': B' in text:
+                self.b_until = t + 3
+            if 'STEER <' in text or 'STEER >' in text:
+                self.quiet_at = t
+                self.warn = '501' in text
+                if '501' in text:
+                    self.go(HOME if 'STEER >' in text else 140, x, t)
+                else:
+                    self.go(163, x, t)
+        if '501' in text:
+            self.quiet_at = t
+        dirn, end, look = self.move
+        if t >= look and abs(self.target - x) >= 5 and me['state'] == 0:
+            self.go(self.target, x, t)       # touch it up
+            dirn, end, look = self.move
+        # nothing said for a second: back to the bike lane, once it can see
+        # nothing beside it there
+        beside = any(e['t'] in (T_PARKED, T_CAR_N, T_TRAM_N) and e['x'] > 150 and -70 < e['rel'] < 80
+                     for e in ents if e['t'] != T_PARKED or e['x'] < 205)
+        if self.target != HOME and t - self.quiet_at > 60 and t >= look and not beside:
+            self.go(HOME, x, t)
+            dirn, end, look = self.move
+        m = A | (dirn if t < end else 0)
+        if t < self.b_until:
+            m |= B
+        return m
+
+
+POLICIES.update({'bike_obey': bike_obey})
+DEFAULTS['bike'].append('bike_obey')
+

@@ -7,6 +7,7 @@ from sprites import Sheet
 
 # road columns (x) -------------------------------------------------
 RAILS = [82, 106, 150, 174]
+GLINT = False      # a glint on each rail every 64 px: 2 more tiles (GFX2 is full)
 
 
 def rgb(h):
@@ -16,7 +17,8 @@ def rgb(h):
 ROAD = {
     'asph': '#45454f', 'asph2': '#3d3d46', 'asph3': '#50505a', 'park': '#4c4c55',
     'white': '#e0e0e0', 'yellow': '#e0b820', 'conc': '#6c6c74', 'seam': '#5a5a62',
-    'steel': '#b8b8c8', 'groove': '#202028', 'hole': '#303038', 'rim': '#68686f',
+    'steel': '#98a0b4', 'groove': '#18181e', 'shine': '#d8e0ec', 'railedge': '#34343c',
+    'glint': '#ffffff', 'hole': '#303038', 'rim': '#68686f',
 }
 SIDE = {
     'sw': '#a8a8b0', 'swseam': '#8c8c98', 'curb': '#d0d0d8', 'curbsh': '#383840',
@@ -189,9 +191,18 @@ def road_image():
             d.line([a, y, b - 1, y], fill=C['seam'])
         d.line([a, 0, a, 255], fill=C['seam'])
         d.line([b - 1, 0, b - 1, 255], fill=C['seam'])
+    # Queen St's in-lane rails, polished by the 501's wheels: the dark
+    # flangeway groove that grabs a bike wheel (2 px), then the rail head,
+    # bright steel catching the light with a darker edge, so they read as
+    # track in the concrete, not as paint
     for r in RAILS:
-        d.rectangle([r, 0, r + 1, 255], fill=C['steel'])
-        d.line([r + 2, 0, r + 2, 255], fill=C['groove'])
+        d.line([r - 2, 0, r - 2, 255], fill=C['groove'])
+        d.line([r - 1, 0, r - 1, 255], fill=C['groove'])
+        d.line([r, 0, r, 255], fill=C['shine'])
+        d.line([r + 1, 0, r + 1, 255], fill=C['steel'])
+        d.line([r + 2, 0, r + 2, 255], fill=C['railedge'])
+        for gy in range(12, 256 if GLINT else 0, 64):
+            d.rectangle([r, gy, r + 1, gy + 2], fill=C['shine'])
     # centre line and parking lines
     for x in (125, 126, 129, 130):
         d.line([x, 0, x, 255], fill=C['yellow'])
@@ -610,8 +621,9 @@ def build_sprites():
     d.line([64, 94, 79, 94], fill=7)
     d.line([71, 82, 71, 93], fill=7)
     for ry in (84, 90):
-        d.line([64, ry, 79, ry], fill=11)
-        d.line([64, ry + 1, 79, ry + 1], fill=9)
+        d.line([64, ry - 1, 79, ry - 1], fill=6)
+        d.line([64, ry, 79, ry], fill=4)
+        d.line([64, ry + 1, 79, ry + 1], fill=11)
         d.line([64, ry + 2, 79, ry + 2], fill=6)
 
     sh.obj('rider_0', 0, 0, 16, 32)
