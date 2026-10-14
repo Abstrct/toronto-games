@@ -1324,7 +1324,7 @@ sty_ostyle: .byte "ROLL TACKS", 0
 
 ; 1 = a failed run forfeits the bonus: the event leaves it in ev_break+2,
 ; keeps it out of ev_score, and the card shows it as a grey FORFEIT row
-card_forfeit: .byte 1, 0, 1, 0, 0, 0, 0    ; bike bay park cops sail parking subway
+card_forfeit: .byte 1, 0, 0, 0, 0, 0, 0    ; bike bay park cops sail parking subway
 ; a forfeit itemised in two rows (forfeit_split): 1 + the ev_stat index
 ; whose count x card_fsrate is the first part (the rest of the bonus is the
 ; second), 0 = one row; card_fslabel = the two rows' labels (after FORFEIT,
@@ -4353,7 +4353,7 @@ eb5: .byte "THREE SPOTS ON BRUNSWICK.", $0A, "PARK IT. DON'T DENT A BMW.", 0
 eb6: .byte "SURF LINE 1 TO UNION.", $0A, "GRAB A POLE, GET GERMS.", 0
 ec0: .byte "D-PAD STEER    A PEDAL", $0A, "B HOP RAILS AND POTHOLES", $0A, "TOKENS 50, WIPEOUT DROPS 2", 0
 ec1: .byte "ALTERNATE ", TXT_ARROW_L+32, " ", TXT_ARROW_R+32, " ON BIG DOTS", $0A, "SMALL DOTS = DOUBLE TIME", $0A, "DODGE +20  Y GOLD = PRESTO", 0
-ec2: .byte "D-PAD WALK   A THROW BALL", $0A, "SAFE: B ON ! = 100 PER DOG", $0A, "BOLD: RED ! 200, LATE 400+", 0
+ec2: .byte "D-PAD WALK   A THROW BALL", $0A, "SAFE: B ON ! = 100 PER DOG", $0A, "RED ! 200, B MID-LEAP 400+", 0
 ec3: .byte "YELLOW CHALK: TAP A", $0A, "RED CHALK: HOLD A", $0A, "HOLD B: SIPS PAY UNSEEN", 0
 ec4: .byte "LEFT/RIGHT: TURN  A: HIKE", $0A, "YELLOW ARROW: NEXT MARK", $0A, "GREEN DIAMONDS: ON COURSE", 0
 ec5: .byte "UP TO THE LINE, A TO PARK", $0A, "BACK IN: HOLD DOWN+RIGHT,", $0A, "ROLL TO DOWN+LEFT AT NOW!", 0
@@ -4421,10 +4421,10 @@ fn_bike_n: .byte "OUT OF TIME. NO DELIVERY", $0A, "SAY THE 501 SHORT-TURNED", 0
 fn_bike_q: .byte "NO DELIVERY, NO TOKENS", $0A, "PAID FOR THE RIDE ONLY", 0
 fn_bike_s: .byte "STOPPED 8 S. NO DELIVERY", $0A, "PAID FOR THE RIDE ONLY", 0
 fn_bay:    .byte "THE 5:42 LEFT WITHOUT YOU", $0A, "WALK PAID BY DISTANCE", 0
-fn_park:   .byte "HEARTS GONE: DOGS FORFEIT", 0
-fn_park_q: .byte "GAVE UP: DOGS FORFEIT", 0
-fn_park_t: .byte "NO DUNDAS, NO DOGS!", 0
-fn_park_n: .byte "NO STEP NORTH IN 10 S", 0
+fn_park:   .byte "HEARTS GONE: HALF THE DOGS", $0A, "DUNDAS PAYS THEM ALL", 0
+fn_park_q: .byte "GAVE UP: HALF THE DOGS", $0A, "DUNDAS PAYS THEM ALL", 0
+fn_park_t: .byte "NO DUNDAS: HALF THE DOGS", $0A, "DUNDAS PAYS THEM ALL", 0
+fn_park_n: .byte "NO STEP NORTH IN 10 S", $0A, "HALF THE DOGS KEPT", 0
 fn_cops:   .byte "COP CAUGHT YOU: FINED 1/4", 0
 fn_cops_q: .byte "THE COP FINES QUITTERS 1/4", 0
 fn_sail:   .byte "15 S GETTING NO CLOSER", $0A, "250 A MARK + PART OF NEXT", 0
@@ -4464,7 +4464,7 @@ card_rate:
 card_rate_fail:
     .addr rt_bike_m, 0, 0       ; bike
     .addr rt_bydist, 0, rt_40each ; bay
-    .addr rt_tenth, 0, 0        ; park
+    .addr rt_tenth, rt_half, 0  ; park
     .addr rt_hurdles, 0, 0      ; cops
     .addr 0, 0, 0               ; sail
     .addr 0, 0, 0               ; parking
@@ -4478,6 +4478,7 @@ rt_bydist:  .byte "BY DISTANCE", 0
 rt_40each:  .byte "40 EACH", 0
 rt_sub_leg: .byte "40 A LEG", 0
 rt_sub_pen: .byte "X40", 0
+rt_half:    .byte "HALF KEPT", 0
 rt_park_walk: .byte "500+25/S", 0
 rt_tenth:   .byte "50 A TENTH", 0
 rt_hurdles: .byte "50 A HURDLE", 0
