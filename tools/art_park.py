@@ -101,10 +101,11 @@ def tree(d, cd, cx, cy, r=14, kind='oak', var=0):
     d.rectangle([cx - 2, cy, cx + 2, foot], fill=COL['trunk'])
     d.line([cx + 2, cy + 2, cx + 2, foot], fill=COL['wood2'])
     mark_solid(cx - 3, foot - 6, cx + 3, foot)
-    # feet anywhere north of the trunk's foot and under the canopy (or a body's
-    # width to its side) are behind the tree; from a few px above its top edge
-    # so a dog stood just behind it can't paint its legs over the leaves
-    mark_behind(cx - r - 6, cy - r - 6, cx + r + 6, foot - 1)
+    # feet anywhere north of the trunk's foot and under the canopy (or half a
+    # dog's 32 px body to its side: the leaves reach 1.1 r) are behind the
+    # tree; from a few px above its top edge so a dog stood just behind it
+    # can't paint its legs over the leaves
+    mark_behind(cx - r - 16, cy - r - 6, cx + r + 16, foot - 1)
     if kind == 'spruce':
         for i in range(4):
             w = 4 + i * 3
