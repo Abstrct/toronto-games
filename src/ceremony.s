@@ -5,7 +5,7 @@
 .include "globals.inc"
 .include "screens.inc"
 
-.import c_order, c_place, c_champs, champ_names, why_line
+.import c_order, c_place, c_champs, champ_names, why_line, podium_line
 
 NUM_FW  = 8
 FW_LIFE = 56                    ; frames: rocket, small burst, big burst, sparkle
@@ -34,6 +34,7 @@ cer_k:    .res 1
 cer_n:    .res 1                ; athletes on the podium (0-8)
 cer_pr:   .res 1                ; PRESS A shown
 cer_wide: .res 1                ; 1 = the podium is one wide gold step (a mass tie)
+cer_prow: .res 1                ; the row PRESS A goes on (under the podium's names)
 pod_step: .res MAX_PLAYERS      ; 0 gold step, 1 silver, 2 bronze
 pod_x:    .res MAX_PLAYERS*2
 pod_y:    .res MAX_PLAYERS*2
@@ -76,6 +77,8 @@ podium_scene:
     lda #$80
     sta hdma_sh
     ; headline in the marquee, the rest on dark strips (the towers are white)
+    lda #11
+    sta cer_prow
     lda num_players
     cmp #$01
     bne @multi
@@ -104,10 +107,13 @@ podium_scene:
     jsr strip_line
     lda #$00                    ; "TIED ON 13 PTS AND MEDALS"
     jsl why_line
-    bcc @titled
+    bcc @co
     ldx #(7*32)
     lda #($20 | (TP_CYAN << 2))
     jsr strip_line
+@co:
+    lda #9                      ; whoever took bronze under them
+    jsr podium_rows
     jmp @titled
 @one:
     LDPTR0 str_champ
@@ -115,10 +121,13 @@ podium_scene:
     jsr champ_lines
     lda #$01                    ; why: "13 PTS TO 8", "TIED ON 13 PTS: MORE GOLD"
     jsl why_line
-    bcc @titled
+    bcc @sb
     ldx #(9*32)
     lda #($20 | (TP_CYAN << 2))
     jsr strip_line
+@sb:
+    lda #11                     ; silver and bronze by name
+    jsr podium_rows
     jmp @titled
 @solo:
     ; going solo: no "champion" over nobody, just the haul
@@ -169,7 +178,16 @@ podium_scene:
     bne @in
     inc cer_pr
     LDPTR0 str_press
-    ldx #(11*32)
+    lda cer_prow
+    A16
+    and #$00FF
+    asl a
+    asl a
+    asl a
+    asl a
+    asl a
+    tax
+    A8
     lda #($20 | (TP_YELLOW << 2))
     jsr strip_line
 @in:
@@ -219,6 +237,47 @@ champ_lines:
     ldx #(7*32)
     lda #($20 | (TP_CYAN << 2))
     jsr strip_line
+    rts
+
+; A = row: the podium's silver and bronze (podium_line), one line each in
+; its medal's colour, 16 px apart; cer_prow = the row after them
+podium_rows:
+    sta cer_prow
+    lda #$01
+    sta cer_m                   ; place: 1 silver, 2 bronze
+@pl:
+    lda cer_m
+    jsl podium_line
+    bcc @next
+    lda cer_prow
+    A16
+    and #$00FF
+    asl a
+    asl a
+    asl a
+    asl a
+    asl a
+    tax
+    A8
+    phx
+    lda cer_m
+    TAXB
+    lda f:haul_tp,x
+    plx
+    jsr strip_line
+    inc cer_prow
+    inc cer_prow
+@next:
+    inc cer_m
+    lda cer_m
+    cmp #$03
+    bcc @pl
+    lda cer_prow
+    cmp #11
+    bcs @x
+    lda #11                     ; PRESS A never higher than it always was
+    sta cer_prow
+@x:
     rts
 
 ; solo: "[gold] 2  [silver] 1  [bronze] 0" on row 9, cols 9..22

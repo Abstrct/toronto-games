@@ -9,6 +9,9 @@
 
 R_QMAX = 12                     ; presses kept for the name grid
 R_ALOCK = 30                    ; frames A must be up before a full roster's START! takes it
+R_LEAVE_LOCK = 16               ; leave confirm: A ignored this long (like the TITLE confirm)...
+R_LEAVE_REL  = 20               ; ...and until every button has been up this many frames
+R_QUIET = PAD_A | PAD_B | PAD_X | PAD_Y | PAD_START | PAD_SELECT | PAD_L | PAD_R
 
 .segment "BSS"
 r_cx:       .res 1      ; grid cursor
@@ -24,6 +27,8 @@ r_rm:       .res 1      ; remove confirm: 0 NO, 1 YES
 r_qn:       .res 1      ; presses queued on the way into the name grid
 r_q:        .res R_QMAX
 r_alock:    .res 1      ; roster: frames before A on START! counts (a full roster)
+r_lk:       .res 1      ; leave confirm: frames before A counts
+r_rq:       .res 1      ; leave confirm: quiet frames still needed before A counts
 
 .segment "SCREENS"
 .a8
@@ -325,12 +330,29 @@ roster_live:
     lda #$FF
     rts
 
-; "LEAVE AND LOSE n PLAYERS?  A YES  B NO" on the action bar.
+; "LOSE ALL n PLAYERS?   NO   YES" on the action bar, the cursor on NO, as
+; REMOVE does: LEFT / RIGHT (or UP / DOWN) move it, B or START is no. A only
+; counts after a short lockout and a let-go (like the TITLE confirm), so a
+; stray B and a mash of A can never throw a full sign-up away.
 ; Carry set = yes, leave; clear = stay (the bar and hint are redrawn).
 roster_confirm:
+    stz r_rm                    ; NO
+    lda #R_LEAVE_LOCK
+    sta r_lk
+    lda #R_LEAVE_REL
+    sta r_rq
     jsr roster_bar_clear
-    LDPTR0 str_leave
+    lda num_players
+    cmp #2
+    bcs @all
+    LDPTR0 str_leave_1          ; "LOSE 1 PLAYER?"
     ldx #(21*32 + 3)
+    lda #($20 | (TP_YELLOW << 2))
+    jsl txt_print
+    bra @asked
+@all:
+    LDPTR0 str_leave            ; "LOSE ALL "
+    ldx #(21*32 + 2)
     lda #($20 | (TP_YELLOW << 2))
     jsl txt_print
     lda num_players
@@ -338,40 +360,69 @@ roster_confirm:
     and #$00FF
     sta tmp1
     A8
-    ldx #(21*32 + 18)
+    ldx #(21*32 + 11)
     ldy #1
     lda #($20 | (TP_RED << 2))
     jsl txt_num
-    LDPTR0 str_leave_pl
-    lda num_players
-    cmp #2
-    bcs @pl
-    LDPTR0 str_leave_1
-@pl:
-    ldx #(21*32 + 19)
+    LDPTR0 str_leave_pl         ; " PLAYERS?"
+    ldx #(21*32 + 12)
     lda #($20 | (TP_YELLOW << 2))
     jsl txt_print
+@asked:
     stz txt_bg
     PRINTC 26, TP_GREY, str_wipe30
-    PRINTC 26, TP_YELLOW, str_yes_no
+    PRINTC 26, TP_GREY, str_leave_hint
+    jsr rm_draw
 @w:
     jsl wait_frame
     jsl menu_backdrop_tick
     A16
     lda pad_new
-    bit #PAD_A
-    bne @yes
+    bit #(PAD_LEFT | PAD_RIGHT | PAD_UP | PAD_DOWN)
+    bne @flip
     bit #(PAD_B | PAD_START)
     bne @no
+    bit #PAD_A
+    beq @quiet
     A8
+    lda r_lk                    ; A: only once the lockout and the let-go
+    ora r_rq                    ; are both over
+    beq @pick
+    A16
+@quiet:
+    lda pad
+    and #R_QUIET
+    A8
+    beq @up
+    lda #R_LEAVE_REL            ; something held: the let-go starts again
+    sta r_rq
+    bra @lock
+@up:
+    lda r_rq
+    beq @lock
+    dec r_rq
+@lock:
+    lda r_lk
+    beq @w
+    dec r_lk
     bra @w
-@yes:
+@flip:
     A8
+    lda r_rm
+    eor #$01
+    sta r_rm
+    SFX SFX_BLIP
+    jsr rm_draw
+    bra @w
+@pick:
+    lda r_rm
+    beq @no8
     SFX SFX_SELECT
     sec
     rts
 @no:
     A8
+@no8:
     SFX SFX_BLIP
     jsr roster_bar_clear
     stz txt_bg
@@ -631,10 +682,10 @@ str_competitors: .byte "COMPETITORS", 0
 str_roster_hint: .byte "A SELECT  START GO  B MENU", 0
 str_roster_full: .byte "ROSTER FULL: 8 PLAYERS MAX", 0
 str_sam_short:   .byte "SAM THE REC MAN", 0   ; a cell clear of the frame
-str_leave:       .byte "LEAVE AND LOSE", 0
+str_leave:       .byte "LOSE ALL", 0
 str_leave_pl:    .byte " PLAYERS?", 0
-str_leave_1:     .byte " PLAYER?", 0
-str_yes_no:      .byte "A YES, LEAVE    B NO, STAY", 0
+str_leave_1:     .byte "LOSE 1 PLAYER?", 0
+str_leave_hint:  .byte "TO THE MENU?  A PICK  B NO", 0
 str_wipe30:      .byte "                              ", 0
 str_remove_q:    .byte "REMOVE", 0
 str_remove_hint: .byte "A PICK     B NO", 0
