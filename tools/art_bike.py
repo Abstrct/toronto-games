@@ -690,6 +690,15 @@ def build():
     data += bytes(32 * (6 - len(pals)))
     out('bike_pal.bin', data)
     build_sprites()
+    # where the rails' two steel colours sit in CGRAM (the BG palettes load
+    # at colour 32), so the event can light them up as a cue: only the rails
+    # use these two, and each is in one palette only
+    with open('build/bike_meta.inc', 'a') as f:
+        for name in ('shine', 'steel'):
+            col = C[name][:3]
+            hits = [32 + 16 * pi + ci for pi, p in enumerate(pals) for ci, c in enumerate(p) if ci and c == col]
+            assert len(hits) == 1, (name, hits)
+            f.write('RAIL_%s_CG = %d\n' % (name.upper(), hits[0]))
     preview(road, 'bike_road.png')
     return '%d tiles, %d pals' % (len(ts), len(pals))
 

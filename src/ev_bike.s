@@ -6,26 +6,37 @@
 ; Controls: D-pad steers (the bike goes where you point it and settles the
 ; moment you let go), A or UP pedals, DOWN brakes, B or Y bunny-hops.
 ; STYLE (all of it earned with the hop button or a risk):
-;   TRACK HOP    hop, and be in the air as you cross a streetcar rail
+;   TRACK HOP    hop, and be in the air as you cross a rail along Queen
+;                (50; one per HOP_GAP of road)
+;   RAILS HOPPED the tracks across Queen (80; HOP THE RAILS: B! says when)
 ;   POTHOLE HOP  hop clean over a pothole
 ;   CLOSE CALL   in the way of a car or the 501, slip out just in time
 ;   DRAFTING     tuck in behind the 501: it pulls you along
 ;   TTC TRANSFER clear both rails of a track in one hop (on no card: steer
 ;                first, hop a beat later, so the hop lasts over both). It
-;                pays 120 x the chain its TRACK HOP set (never raises it),
+;                pays 100 x the chain its TRACK HOP set (never raises it),
 ;                and is good for one ride: the next needs another kind of
-;                trick first (CLOSE CALL, POTHOLE HOP, DRAFT): no zig-zag farm
-; Mix different ones inside 2.5 s of each other and they chain, x2 .. x8
+;                trick first (CLOSE CALL, POTHOLE HOP, DRAFT): no zig-zag farm.
+;                Its tell: the rails crackle white/blue while a hop now would do
+;                it (cue_rails), ~9 frames before the near rail and on till
+;                LATE_T frames after it (a rail steered over hard counts as
+;                hopped if B comes that soon after)
+; Mix different ones inside 2 s of each other and they chain, x2 .. x4
 ; (the same one again pays at the chain but doesn't keep it going). Cross a
 ; rail on the ground and the groove grabs your wheel: RAIL WOBBLE, a quarter
 ; of your speed and the chain; a rail along Queen is safe if you steer over
 ; it hard. Sit in one line too long and Queen St comes for you: a fresh
-; pothole in your lane, or the 501 up the tracks behind you.
+; pothole in your lane (never under a car, nor near the tracks across), or
+; the 501 up the tracks behind you.
 ; Everyone crosses the streetcar tracks that cut across Queen (XING_AT), the
-; first ~7 s in. Orders come when a human can act on them: HOP THE RAILS: B!
-; and POTHOLE! HOP IT: B ~32 frames out (B in the next ~28 frames clears
-; it), 501 BEHIND! STEER > beside you while you're in its way, and the car
-; in the bike lane says which way round.
+; first ~7 s in. Orders come when a human can act on them, only to a rider
+; in the path of what they name, and only when nothing else in that path
+; comes first (path_blocked; tools/pt/policies_bike.py audit checks it):
+; HOP THE RAILS: B! RHINT_F (34) frames out (B any time till you reach
+; them), POTHOLE! HOP IT: B ~32 frames out (B in the next ~20 clears it, a
+; bit early only bumps), 501 BEHIND! STEER > beside you while you're in its
+; way (the way you're already sliding, else the nearer side), and CAR IN
+; BIKE LANE. AGAIN. to a rider in the bike lane with time to steer round.
 ; A wipeout drops 2 of your TTC tokens (no points fee on the card).
 .p816
 .smart -
@@ -52,16 +63,17 @@ STEER_REL   = $0080         ; let go / reverse: stops in 4
 HOP_SPD     = $0140         ; a hop needs this much forward speed
 HOP_T       = 20            ; frames in the air
 HOP_CD      = 10            ; frames on the ground before the next hop
-HOP_GAP     = 240           ; road between two scoring track hops
+HOP_GAP     = 360           ; road between two scoring track hops (~2 s)
 WOB_T       = 24
-LAND_T      = 10            ; rails crossed this soon after a hop lands still count as hopped
+LAND_T      = 16            ; rails crossed this soon after a hop lands still count as hopped
+LATE_T      = 8             ; ...and a rail along Queen steered over hard this soon before B
 SHARP_VX    = $0100         ; steering over a rail along Queen at least this fast: no wobble
 BIKE_LANE   = 186           ; start / respawn here (clear of the 501 and the doors)
 INV_GETUP   = 120           ; blink frames after getting back on
 DROP_TOK    = 2             ; tokens a wipeout drops
 XING_HINT   = 340           ; the tracks across Queen are spawned this far ahead
-CHAIN_WIN   = 150           ; 2.5 s to land the next style move
-CHAIN_MAX   = 8
+CHAIN_WIN   = 120           ; 2 s to land the next style move (the coach line says 2 S)
+CHAIN_MAX   = 4
 STYLE_CAP   = 50000         ; (out of reach: keeps RIDE + TOKENS+STYLE in 16 bits)
 DELIVERY_FEE = 1500         ; RIDE on delivery: this + 20 a whole second left
 CAMP_T      = 300           ; 5 s in one line...
@@ -96,6 +108,7 @@ SM_CLOSE = 1
 SM_DRAFT = 2
 SM_BUNNY = 3
 SM_XFER  = 4                ; TTC TRANSFER: both rails of a track, one hop
+SM_RAILS = 5                ; RAILS HOPPED: the tracks across Queen (HOP THE RAILS: B!)
 
 ; run state (words)
 b_px     = ev_ram + 0
@@ -165,6 +178,11 @@ b_warn   = ev_ram + 479     ; (byte) 1 = the rider panel is the 501 warning
 b_xhint  = ev_ram + 480     ; (byte) 1 = the callout panel is a HOP order
 b_rkind  = ev_ram + 481     ; (byte) rail_cross: 0 a rail along Queen, 1 tracks across
 b_pnrow  = ev_ram + 482     ; (byte) the rider panel's top row
+b_sorg   = ev_ram + 483     ; (byte) x where the last steer began (settle: not back to it)
+b_xent   = ev_ram + 484     ; (byte) the pothole a HOP order is for (entity index + 1)
+b_late   = ev_ram + 485     ; (byte) frames a rail just steered over on the ground can still be hopped
+b_lrail  = ev_ram + 486     ; (byte) ...which rail (0-3)
+b_cue    = ev_ram + 487     ; (byte) 1 = the rails are lit (cue_rails)
 
 ; entities: one word per entity per field, X = index * 2
 NUM_ENT = 16
@@ -234,6 +252,7 @@ ev_bike:
     bne @loop
 @over:
     jsl music_stop
+    jsr cue_off
     jsr bike_score
     jsl score_card
     plb
@@ -280,6 +299,7 @@ bike_init:
 
 ; ------------------------------------------------------------------
 bike_update:
+    jsr cue_rails
     lda b_state
     cmp #ST_RIDE
     beq @ride
@@ -318,6 +338,7 @@ bike_update:
     stx b_still
     ldx #BIKE_LANE
     stx b_campx
+    stz b_sorg
     jsr clear_ahead
     bra @common
 @finish:
@@ -434,6 +455,10 @@ bike_update:
     A16
 @nofin:
     A8
+    lda b_late
+    beq @nolate
+    dec b_late
+@nolate:
     jsr spawn_ahead
     jsr ents_update
     rts
@@ -595,9 +620,23 @@ steer_and_pedal:
     stz b_hopsc
     A8
     SFX SFX_JUMP
+    lda b_late                  ; B a beat after steering hard over a rail
+    beq @nolate                 ; along Queen: that rail counts as hopped
+    stz b_late
+    stz b_rkind
+    jsr rail_cross
+@nolate:
     A16
 @nohop:
     ; steering: the bike goes where the pad points and settles on release
+    lda pad_new                 ; a fresh press: where this steer began
+    and #(PAD_LEFT | PAD_RIGHT)
+    beq @noorg
+    A8
+    lda b_px+1
+    sta b_sorg
+    A16
+@noorg:
     lda pad
     bit #PAD_LEFT
     bne @left
@@ -789,6 +828,8 @@ rail_cross:
     cmp #1
     beq @second
     stz b_hopok
+    lda b_rkind                 ; the tracks across Queen: the order said
+    bne @rails                  ; hop them, and a hop over them always pays
     A16
     lda b_dist
     sec
@@ -803,6 +844,18 @@ rail_cross:
     sta b_tracks
     phy
     lda #SM_HOP
+    jsr style_award
+    ply
+    rts
+@rails:
+    A16
+    lda b_dist
+    sta b_hopd
+    A8
+    lda #$01
+    sta b_tracks
+    phy
+    lda #SM_RAILS
     jsr style_award
     ply
     rts
@@ -828,7 +881,12 @@ rail_cross:
 @vp:
     cmp #SHARP_VX
     A8
-    bcs @x
+    bcc @wobble8
+    lda #LATE_T                 ; no wobble: and a B in the next few
+    sta b_late                  ; frames still counts it as hopped
+    tya
+    sta b_lrail
+    rts
 @wobble8:
     A16
 @wobble:
@@ -878,8 +936,12 @@ rail_cross:
 
 ; Hands off the pad and not sliding: ease into the nearest riding line
 ; (within SETTLE_W px) at half a px a frame, so a tap that ends a few px
-; off still lands you in the lane. A16 in/out: A = b_px -> A = new b_px.
+; off still lands you in the lane, but never more than SETTLE_BACK px back
+; to the line the last steer began on (steer off a line to get round
+; something and let go short of the next one: you stay where you let go,
+; not drift back into it; overshoot a line and you still ease back to it). A16 in/out: A = b_px -> A = new b_px.
 SETTLE_W = 7
+SETTLE_BACK = 2
 settle:
     .a16
     ldx b_vx
@@ -907,6 +969,11 @@ settle:
     bcs @n
     cmp #$0081
     bcc @snap
+    cmp #(SETTLE_BACK * 256 + 1)
+    bcc @r                      ; (right by it: in you go)
+    jsr @origin
+    bcs @keep
+@r:
     txa
     clc
     adc #$0080
@@ -916,6 +983,11 @@ settle:
     bcs @n
     cmp #$0081
     bcc @snap
+    cmp #(SETTLE_BACK * 256 + 1)
+    bcc @lft
+    jsr @origin
+    bcs @keep
+@lft:
     txa
     sec
     sbc #$0080
@@ -931,6 +1003,25 @@ settle:
     txa
 @x:
     rts
+; carry set if line tmp1 is the one the last steer began on (within
+; SETTLE_W of b_sorg). A16, keeps X, Y.
+@origin:
+    lda b_sorg
+    and #$00FF
+    xba
+    sec
+    sbc tmp1
+    bpl @op
+    eor #$FFFF
+    inc a
+@op:
+    cmp #((SETTLE_W + 1) * 256)
+    bcs @notorg
+    sec
+    rts
+@notorg:
+    clc
+    rts
 
 ; the riding lines: the left parking lane, the southbound lane, between
 ; the southbound rails, by the yellow line, the northbound lane, between
@@ -945,6 +1036,205 @@ str_wob_x:  .byte "HOP THE RAILS: B", 0
 
 rails:
     .byte 83, 107, 151, 175
+
+; The rails crackle white and blue while a hop now would carry you over both rails
+; of a track in one go (the move that pays as the chain's own, see the top):
+; it has to be on (a different trick since the last one, a TRACK HOP's worth
+; of road since the last), you on the ground and able to hop, and steering
+; at a track's near rail with it about CUE_F frames off (cue_dist), or just
+; over it (b_late) with its partner still to come. A8.
+CUE_F    = 9
+CUE_SPARK  = $7FFF              ; white
+CUE_BLUE   = $7F30              ; #80c8ff: a pantograph's spark
+CUE_BLUE2  = $7A88              ; #40a0f0
+cue_rails:
+    jsr cue_wanted
+    lda #$00
+    rol a
+    cmp b_cue
+    beq @same
+    sta b_cue
+    cmp #$00
+    beq cue_off1
+    bra @paint
+@same:
+    cmp #$00
+    beq @x
+    lda frame                   ; on: it crackles, white / blue every 4 frames
+    and #$03
+    bne @x
+@paint:
+    A16
+    lda frame
+    and #$0004
+    bne @b
+    lda #CUE_SPARK
+    sta pal_buf + 2 * RAIL_SHINE_CG
+    lda #CUE_BLUE
+    sta pal_buf + 2 * RAIL_STEEL_CG
+    bra @d
+@b:
+    lda #CUE_BLUE
+    sta pal_buf + 2 * RAIL_SHINE_CG
+    lda #CUE_BLUE2
+    sta pal_buf + 2 * RAIL_STEEL_CG
+@d:
+    A8
+    lda #$01
+    sta pal_dirty
+@x:
+    rts
+cue_off:
+    lda b_cue
+    beq cue_x
+    stz b_cue
+cue_off1:
+    A16
+    lda f:bike_pal + 2 * (RAIL_SHINE_CG - 32)
+    sta pal_buf + 2 * RAIL_SHINE_CG
+    lda f:bike_pal + 2 * (RAIL_STEEL_CG - 32)
+    sta pal_buf + 2 * RAIL_STEEL_CG
+    A8
+    lda #$01
+    sta pal_dirty
+cue_x:
+    rts
+
+; carry set if the cue should be on (see cue_rails)
+cue_wanted:
+    lda b_state
+    jne @no
+    A16
+    lda b_hop
+    ora b_hopcd
+    jne @no16
+    lda b_xok
+    jeq @no16
+    lda b_speed
+    cmp #HOP_SPD
+    jcc @no16
+    lda b_dist
+    sec
+    sbc b_hopd
+    cmp #HOP_GAP
+    jcc @no16
+    A8
+    ; just steered over a near rail: its partner still to come
+    lda b_late
+    beq @steer
+    lda b_lrail
+    and #$01                    ; (rails 1, 3 are a pair's right one)
+    bne @lr
+    ; crossed a left rail (83 / 151): going right, partner +24 still ahead?
+    lda b_vx+1
+    jmi @no
+    lda b_lrail
+    TAXB
+    lda f:rails,x
+    clc
+    adc #24
+    cmp b_px+1
+    jeq @no
+    jcs @yes
+    jmp @no
+@lr:
+    lda b_vx+1
+    jpl @no
+    lda b_lrail
+    TAXB
+    lda f:rails,x
+    sec
+    sbc #24
+    cmp b_px+1
+    jcc @yes
+    jmp @no
+@steer:
+    ; |vx| / 32, if it's the way the pad points (else from a standstill)
+    stz tmp1
+    A16
+    lda pad
+    bit #PAD_LEFT
+    bne @gl
+    bit #PAD_RIGHT
+    beq @no16
+    lda b_vx
+    bmi @d0
+    bra @dv
+@gl:
+    lda b_vx
+    bpl @d0
+    eor #$FFFF
+    inc a
+@dv:
+    lsr a
+    lsr a
+    lsr a
+    lsr a
+    lsr a
+    cmp #17
+    bcc @di
+    lda #16
+@di:
+    tax
+    lda f:cue_dist,x
+    and #$00FF
+    sta tmp1
+@d0:
+    lda tmp1
+    bne @dk
+    lda f:cue_dist
+    and #$00FF
+    sta tmp1
+@dk:
+    lda pad
+    bit #PAD_LEFT
+    A8
+    bne @left
+    ; right: the near rail is 83 or 151, and you're short of it
+    ldx #$0000
+@rr:
+    lda f:rails,x
+    sec
+    sbc b_px+1
+    beq @rn
+    bcc @rn
+    cmp tmp1
+    bcc @yes
+    beq @yes
+@rn:
+    inx
+    inx
+    cpx #4
+    bcc @rr
+    bra @no
+@left:
+    ldx #$0001
+@ll:
+    lda b_px+1                  ; (on the rail going left: not over it yet)
+    sec
+    sbc f:rails,x
+    bcc @ln
+    cmp tmp1
+    bcc @yes
+    beq @yes
+@ln:
+    inx
+    inx
+    cpx #4
+    bcc @ll
+    bra @no
+@no16:
+    A8
+@no:
+    clc
+    rts
+@yes:
+    sec
+    rts
+
+; px a steer covers in CUE_F frames from |vx| / 32 (0 .. 16), holding on
+cue_dist: .byte 11, 11, 12, 13, 14, 14, 15, 16, 16, 16, 17, 17, 17, 17, 18, 18, 18
+.assert CUE_F = 9, error, "cue_dist is for 9 frames"
 
 ; crash: A = cause. Only while riding and not invulnerable.
 crash:
@@ -1312,7 +1602,7 @@ str_drop1: .byte "DROPPED 1 TOKEN", 0
 
 ; ------------------------------------------------------------------
 ; style_award: A = SM_ move. A different move inside CHAIN_WIN frames
-; raises the chain (x2..x8) and restarts its clock; the same move again
+; raises the chain (x2..x4) and restarts its clock; the same move again
 ; pays at the chain but leaves the clock running (one trick repeated
 ; doesn't hold a chain up); points = base * chain. Banner "TRACK HOP! X3 +45".
 style_award:
@@ -1320,6 +1610,8 @@ style_award:
     cmp #SM_HOP                 ; any trick but a hop re-arms the TRANSFER
     beq @arm
     cmp #SM_XFER
+    beq @arm
+    cmp #SM_RAILS
     beq @arm
     lda #$01
     sta b_xok
@@ -1350,7 +1642,14 @@ style_award:
     lda #CHAIN_WIN
     sta b_chaint
 @same:
-    ; points = base * chain
+    ; points = base * chain (at least x1: a TRANSFER whose TRACK HOP's
+    ; clock ran out in the air, or the same move again as the clock ran
+    ; out, mustn't multiply by 0 - that loop ran 65536 times)
+    lda b_chain
+    bne @ch
+    inc a
+    sta b_chain
+@ch:
     lda b_kind
     and #$00FF
     tax
@@ -1427,6 +1726,11 @@ style_award:
     sta b_pbuf,x
     inx
     stz b_pbuf,x
+    lda b_xhint                 ; a HOP order still to obey keeps the panel
+    beq @banner                 ; (the points are in, the chime says so)
+    SFX SFX_COIN
+    rts
+@banner:
     LDPTR0 b_pbuf
     ; the first trick of the run: the coach line says how chains work
     ldy #50
@@ -1479,13 +1783,15 @@ style_award:
     pla
     rts
 
-sm_base:  .byte 60, 100, 60, 80, 120    ; x the chain (x8 max: 960, three digits)
-sm_names: .addr smn0, smn1, smn2, smn3, smn4
+sm_base:  .byte 50, 100, 60, 80, 100, 80  ; x the chain (three digits at most)
+.assert CHAIN_MAX * 120 < 1000, error, "style banner prints three digits"
+sm_names: .addr smn0, smn1, smn2, smn3, smn4, smn5
 smn0: .byte "TRACK HOP!", 0
 smn1: .byte "CLOSE CALL!", 0
 smn2: .byte "DRAFTING THE 501", 0
 smn3: .byte "POTHOLE HOP!", 0
 smn4: .byte "TTC TRANSFER!", 0
+smn5: .byte "RAILS HOPPED!", 0
 str_coach: .byte "ANOTHER TRICK IN 2 S = X2", 0
 
 ; ------------------------------------------------------------------

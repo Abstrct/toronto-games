@@ -37,6 +37,7 @@ STEER_ACC = 0x40 / 256      # vx change per frame while held
 STEER_REL = 0x80 / 256      # let go / reverse: vx change per frame
 STEER_SPD = 0x200 / 256
 DRAFT_NEAR, DRAFT_FAR = 58, 124
+HOP_GAP = 360               # src/ev_bike.s: road between two scoring track hops
 
 
 def s16(v):
@@ -565,7 +566,7 @@ class bike_ace(bike_courier):
     def read(self):
         me, ents = bike_courier.read(self)
         r = self.g.core.peek(self.ev + 402, 2)
-        me['hop_ready'] = ((me['dist'] - (r[0] | r[1] << 8)) & 0xFFFF) >= 240
+        me['hop_ready'] = ((me['dist'] - (r[0] | r[1] << 8)) & 0xFFFF) >= HOP_GAP
         self.last_read = (me, ents)
         return self.last_read
 
@@ -623,7 +624,7 @@ class bike_stylist(bike_courier):
         me, ents = bike_courier.read(self)
         r = self.g.core.peek(self.ev + B_HOP, 12)
         w = lambda o: r[o - B_HOP] | r[o - B_HOP + 1] << 8
-        me['hop_ready'] = ((me['dist'] - w(B_HOPD)) & 0xFFFF) >= 240
+        me['hop_ready'] = ((me['dist'] - w(B_HOPD)) & 0xFFFF) >= HOP_GAP
         me['chain'] = w(B_CHAIN) if w(B_CHAINT) else 0
         me['hop'] = w(B_HOP)
         me['xok'] = self.g.core.peek(self.ev + B_XOK, 1)[0]
@@ -1152,8 +1153,13 @@ class bike_obey(_Reader):
         self.quiet_at = 0           # frame of the last order
         self.warn = False
         self.was_riding = True
+        self.home = HOME
+        self.wander = False
+        self.wander_at = 0
 
     def go(self, L, x, t):
+        if L == self.target and t < self.move[2]:
+            return                  # already on its way there
         self.target = L
         d = L - x
         if abs(d) < 4:
@@ -1168,6 +1174,7 @@ class bike_obey(_Reader):
         text = ' / '.join(r.strip() for r in rows[2:24] if r.strip())
         if me['state'] != 0 and self.was_riding:      # wiped out: back on in the bike lane
             self.target, self.move, self.warn = HOME, (0, -1, -1), False
+            self.home = HOME
         self.was_riding = me['state'] == 0
         if text != self.seen:
             self.seen = text
@@ -1182,16 +1189,26 @@ class bike_obey(_Reader):
                     self.go(163, x, t)
         if '501' in text:
             self.quiet_at = t
+        elif self.warn:
+            # the warning's gone: out of its way, so stop where you are
+            self.warn = False
+            self.target = min(LANES, key=lambda L: abs(L - x))
         dirn, end, look = self.move
         if t >= look and abs(self.target - x) >= 5 and me['state'] == 0:
             self.go(self.target, x, t)       # touch it up
             dirn, end, look = self.move
         # nothing said for a second: back to the bike lane, once it can see
         # nothing beside it there
-        beside = any(e['t'] in (T_PARKED, T_CAR_N, T_TRAM_N) and e['x'] > 150 and -70 < e['rel'] < 80
+        beside = any(e['t'] in (T_PARKED, T_CAR_N, T_TRAM_N) and e['x'] > 150 and
+                     -70 < e['rel'] < (190 if e['t'] == T_PARKED else 80)
                      for e in ents if e['t'] != T_PARKED or e['x'] < 205)
-        if self.target != HOME and t - self.quiet_at > 60 and t >= look and not beside:
-            self.go(HOME, x, t)
+        home = self.home
+        if self.wander and t >= self.wander_at and t >= look and t - self.quiet_at > 60:
+            # (the audit's wanderer: rides a different line every few seconds)
+            self.home = rng.choice((66, 117, 140, 163, 186))
+            self.wander_at = t + rng.randint(180, 420)
+        if self.target != home and t - self.quiet_at > 60 and t >= look and not beside:
+            self.go(home, x, t)
             dirn, end, look = self.move
         m = A | (dirn if t < end else 0)
         if t < self.b_until:
@@ -1202,3 +1219,337 @@ class bike_obey(_Reader):
 POLICIES.update({'bike_obey': bike_obey})
 DEFAULTS['bike'].append('bike_obey')
 
+
+
+# ---------------------------------------------------------------------------
+# Coach audit (sprint 8: "the coach is never wrong"). bike_obey rides with a
+# 20-25 frame hand (the harness's latency model) on many seeds; every time an
+# order comes up we check it against the road:
+#  * the hazard it names is in the rider's path (their column, ahead, coming
+#    at them), and nothing else in that path gets there first;
+#  * after the rider obeys, they don't wipe out on something else (advice
+#    that steers you into a worse hazard).
+#     python3 tools/pt/policies_bike.py audit [-n RUNS] [-l 20,25]
+ORDERS = (('POTHOLE! HOP IT', 'hole'), ('CAR IN BIKE LANE. AGAIN', 'stopped'),
+          ('HOP THE RAILS', 'xing'), ('501 BEHIND', 'tram'))
+CRASH_WORDS = (('DOORED', 'door'), ('PARKED CAR', 'parked'), ('CAR IN BIKE LANE', 'stopped'),
+               ('ONCOMING', 'oncoming'), ('RAN INTO A CAR', 'car'), ('HIT BY THE 501', 'tram'),
+               ('KISSED THE 501', 'tram'), ('JAYWALKER', 'ped'), ('POTHOLE!', 'hole'))
+
+
+def path_hazards(me, ents):
+    """[(frames to contact, kind)] for everything in the rider's column if
+    they hold their line at their speed (doors by their box)"""
+    out = []
+    x, sp = me['x'], max(me['speed'], 0.5)
+    for e in ents:
+        t = e['t']
+        if t in (T_TOKEN, 10):
+            continue
+        kind = {T_HOLE: 'hole', T_PED: 'ped', T_TRAM_N: 'tram', T_TRAM_S: 'tram',
+                T_CAR_N: 'car', T_CAR_S: 'oncoming'}.get(t, 'parked')
+        if t == T_PARKED and e['x'] < 200:
+            kind = 'stopped'
+        boxes = [(e['x'], HW[t], HH[t], e['rel'])]
+        if t == T_PARKED and e['x'] > 200 and (e['flags'] & 2 or e['timer']):
+            boxes.append((e['x'] - 20, 10, 13, e['rel'] + 6))
+        if t == T_HOLE and e['flags'] & 4:
+            continue                # hit or hopped already
+        for (bx, hw, hh, rel) in boxes:
+            if abs(bx - x) >= hw:
+                continue
+            close = sp - e['vy']
+            if abs(rel) < hh:
+                ta = 0
+            elif rel > 0 and close > 0.05:
+                ta = (rel - hh) / close
+            elif rel < 0 and close < -0.05:
+                ta = (rel + hh) / close
+            else:
+                continue
+            out.append((ta, 'door' if bx != e['x'] else kind))
+    return sorted(out)
+
+
+def audit_run(seed, latency, trace=None, wander=False):
+    import random
+    import pt
+    pol = bike_obey()
+    pol.wander = wander
+    g = pt.Game()
+    pol.game = g
+    pt.goto_target(g, 'bike')
+    rng = random.Random(seed)
+    hrng = random.Random(seed * 7919 + 1)
+    jitter = latency // 4
+    t, hold, want, pending = 0, 0, 0, []
+    seen = ''
+    issues, orders, crashes = [], [], []
+    obeyed = []                 # (frame, kind) of orders, for the advice check
+    outcome = {}                # (frame, kind) of a HOP order -> 'ok' / 'miss'
+    while t < 60 * 120:
+        m = pol.act(t, g.last, rng)
+        if m != want:
+            want = m
+            due = t + max(0, latency + hrng.randint(-jitter, jitter))
+            if pending:
+                due = max(due, pending[-1][0] + 1)
+            pending.append((due, m))
+        while pending and pending[0][0] <= t:
+            hold = pending.pop(0)[1]
+        g.step(1, hold)
+        t += 1
+        if trace and trace[0] <= t <= trace[1]:
+            me, ents = pol.read()
+            print(t, 'x=%.0f vx=%.2f hold=%x tgt=%s' % (me['x'], me['vx'], hold, pol.target),
+                  ' '.join('%d@%.0f,%d' % (e['t'], e['x'], e['rel']) for e in ents if e['t'] in (1, 3, 5, 7) and -60 < e['rel'] < 260),
+                  '|', ' / '.join(r.strip() for r in screen_text(g)[2:24] if r.strip()))
+        rows = screen_text(g)
+        text = ' / '.join(r.strip() for r in rows[2:24] if r.strip())
+        if text != seen:
+            for (ft, k) in obeyed[-4:]:
+                if 0 < t - ft <= 70 and (ft, k) not in outcome:
+                    if k == 'hole' and 'POTHOLE HOP' in text:
+                        outcome[(ft, k)] = 'ok'
+                    elif k == 'xing' and 'RAILS HOPPED' in text:
+                        outcome[(ft, k)] = 'ok'
+                    elif k == 'xing' and 'WOBBLE' in text:
+                        outcome[(ft, k)] = 'miss'
+                    elif k == 'hole' and 'POTHOLE!' in text and 'HOP IT' not in text:
+                        outcome[(ft, k)] = 'miss'
+            me, ents = pol.read()
+            for (phrase, kind) in ORDERS:
+                if phrase in text and phrase not in seen:
+                    orders.append(kind)
+                    obeyed.append((t, kind))
+                    ph = path_hazards(me, ents)
+                    if kind == 'xing':
+                        tx = (me['xing'] - 0) / max(me['speed'], 0.5) if me['xing'] else None
+                        first = [h for h in ph if tx is None or h[0] < tx]
+                        if first:
+                            issues.append((t, text, 'before the rails: %s in %.0f f' % (first[0][1], first[0][0])))
+                    elif kind == 'tram':
+                        tram = [e for e in ents if e['t'] == T_TRAM_N and e['rel'] < 0]
+                        if not tram or abs(tram[0]['x'] - me['x']) >= 22:
+                            issues.append((t, text, 'not in the 501\'s path'))
+                    else:
+                        if not ph or ph[0][1] != kind:
+                            issues.append((t, text, 'first in path: %s' % ('%s in %.0f f' % (ph[0][1], ph[0][0]) if ph else 'nothing')))
+                    # where a STEER order sends you must be clear (of
+                    # anything but what it names) for the next 2 s
+                    esc = {'STEER >': HOME, 'STEER <': 140 if kind == 'tram' else 163}
+                    for k2, L in esc.items():
+                        if k2 in text and kind in ('tram', 'stopped'):
+                            # (as things will be when a 22-frame hand gets there)
+                            there = dict(me, x=L)
+                            later = [dict(e, rel=e['rel'] + (e['vy'] - me['speed']) * 22) for e in ents]
+                            bad = [h for h in path_hazards(there, later) if h[1] != kind and h[0] < 100]
+                            if bad:
+                                issues.append((t, text, 'steers into %s in %.0f f' % (bad[0][1], bad[0][0])))
+            if g.core.peek(g.sym['ev_ram'] + B_STATE, 1)[0] == 1 and (not crashes or t - crashes[-1][0] > 60):
+                cause = next((c for w, c in CRASH_WORDS if w in text), '?')
+                last = [ft for (ft, k) in obeyed if k == cause]
+                crashes.append((t, cause, t - last[-1] if last else None))
+                warned = any(k == cause and 0 < t - ft <= 120 for (ft, k) in obeyed)
+                for (ft, k) in obeyed:
+                    # (a wipeout the coach warned of on its own isn't the hop's doing)
+                    if 0 < t - ft <= 60 and k in ('hole', 'xing') and k != cause and not warned and not (k == 'xing' and cause == 'hole'):
+                        issues.append((t, text, 'wiped out (%s) %d f after %s' % (cause, t - ft, k)))
+            seen = text
+        if t % 15 == 0 and not g.scene().startswith('bike.play'):
+            break
+    for _ in range(240):
+        g.step(1, 0)
+        if g.scene().startswith('bike.results'):
+            break
+    g.step(20, 0)
+    st = g.state(full=False)
+    g.core.close()
+    hops = [outcome.get((ft, k), '-') for (ft, k) in obeyed if k in ('hole', 'xing') and t - ft > 70]
+    return {'hops': hops, 'seed': seed, 'latency': latency, 'wander': wander, 'score': st['ev_score'], 'fail': st['ev_fail'],
+            'stats': st['ev_stat'], 'orders': orders, 'crashes': crashes, 'issues': issues}
+
+
+def _audit_job(j):
+    return audit_run(*j)
+
+
+def audit_main(argv):
+    import argparse
+    import collections
+    import os
+    import sys
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    import pt
+    ap = argparse.ArgumentParser()
+    ap.add_argument('-n', '--runs', type=int, default=24)
+    ap.add_argument('-l', '--latencies', default='20,22,25')
+    ap.add_argument('-j', '--jobs', type=int, default=4)
+    ap.add_argument('-v', '--verbose', action='store_true')
+    a = ap.parse_args(argv)
+    pt._warm(['bike'])
+    lats = [int(x) for x in a.latencies.split(',')]
+    # half the runs keep to the bike lane (the first-timer), half wander
+    # from line to line (orders for a rider anywhere on the road)
+    jobs = [(s, lats[s % len(lats)], None, s % 2 == 0) for s in range(1, a.runs + 1)]
+    rows = pt.parallel_map(_audit_job, jobs, a.jobs)
+    orders = collections.Counter(k for r in rows for k in r['orders'])
+    bad = [(r['seed'], i) for r in rows for i in r['issues']]
+    crashes = collections.Counter(c[1] for r in rows for c in r['crashes'])
+    sc = sorted(r['score'] for r in rows)
+    print('bike_obey, %d runs at %s f: orders %s' % (len(rows), a.latencies, dict(orders)))
+    print('  wrong or harmful orders: %d' % len(bad))
+    for s, (t, text, why) in bad[:40]:
+        print('   seed %d f%d: %s  [%s]' % (s, t, why, text))
+    print('  wipeouts by cause: %s' % dict(crashes))
+    hc = collections.Counter(h for r in rows for h in r['hops'])
+    print('  HOP orders obeyed: %d paid, %d missed (wobble / pothole), %d neither' % (hc['ok'], hc['miss'], hc['-']))
+    for wnd, name in ((False, 'bike lane'), (True, 'wandering')):
+        rs = [r for r in rows if r['wander'] == wnd]
+        sc = sorted(r['score'] for r in rs)
+        print('  %s: delivered %d/%d, bronze (>= 2500) %d/%d, scores %s' % (
+            name, sum(r['fail'] == 0 for r in rs), len(rs), sum(r['score'] >= 2500 for r in rs), len(rs), sc))
+    if a.verbose:
+        for r in rows:
+            print(r['seed'], r['latency'], 'W' if r['wander'] else ' ', r['score'], r['stats'], r['crashes'])
+    return len(bad)
+
+
+if __name__ == '__main__':
+    import sys
+    if sys.argv[1:2] == ['audit']:
+        sys.exit(1 if audit_main(sys.argv[2:]) else 0)
+
+
+# ---------------------------------------------------------------------------
+# The undocumented trick's tell: the rails crackle white and blue while a hop now would
+# clear both rails of the track you're steering at. bike_cue watches only for
+# that (the rails' colour on screen, never the trick's state) and taps B when
+# it sees it; it steers between the bike lane and the yellow line across the
+# northbound tracks and back when the road there is clear.
+#     python3 tools/pt/policies_bike.py cue [-n RUNS] [-l 10,11,12]
+# The check re-arms the trick after each landing (as another trick would),
+# so every crossing is a try.
+def rail_cg(name):
+    import os
+    meta = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'build', 'bike_meta.inc')
+    return int(open(meta).read().split('RAIL_%s_CG = ' % name)[1].split()[0])
+
+
+CUE_LIT = (0x7FFF, 0x7F30)   # src/ev_bike.s cue_rails: the rail head, white or blue
+
+
+class bike_cue(_Reader):
+    trivial = False
+
+    def __init__(self):
+        self.g = None
+        self.next_at = 120
+        self.dirn = 0
+        self.b_until = -1
+        self.lit = False
+        self.cues = 0
+
+    def rails_lit(self):
+        if not hasattr(self, 'cg'):
+            self.cg = self.g.sym['pal_buf'] + 2 * rail_cg('SHINE')
+        c = self.g.core.peek(self.cg, 2)
+        return (c[0] | c[1] << 8) in CUE_LIT
+
+    def act(self, t, tel, rng):
+        me, ents = self.read()
+        x = me['x']
+        lit = self.rails_lit()
+        if lit and not self.lit:
+            self.cues += 1
+            self.b_until = t + 3            # seen it: B
+        self.lit = lit
+        if me['state'] != 0:
+            self.dirn = 0
+            return A
+        # a crossing: hold the pad till about the far line, then let go
+        if self.dirn:
+            goal = 140 if self.dirn == LEFT else HOME
+            if (self.dirn == LEFT and x <= goal + 14) or (self.dirn == RIGHT and x >= goal - 14):
+                self.dirn = 0
+                self.next_at = t + rng.randint(50, 90)
+        elif t >= self.next_at and me['speed'] > 2.0:
+            clear = not any(e['t'] not in (T_TOKEN,) and 130 < e['x'] < 215 and -80 < e['rel'] < 200 for e in ents)
+            if clear:
+                self.dirn = LEFT if x > 163 else RIGHT
+            else:
+                self.next_at = t + 10
+        m = A | self.dirn
+        if t < self.b_until:
+            m |= B
+        return m
+
+
+def cue_run(seed, latency):
+    import random
+    import pt
+    pol = bike_cue()
+    g = pt.Game()
+    pol.game = g
+    pt.goto_target(g, 'bike')
+    ev = g.sym['ev_ram']
+    rng = random.Random(seed)
+    hrng = random.Random(seed * 7919 + 1)
+    jitter = max(1, latency // 4)
+    t, hold, want, pending = 0, 0, 0, []
+    xfers = 0
+    seen = ''
+    while t < 60 * 80:
+        m = pol.act(t, g.last, rng)
+        if m != want:
+            want = m
+            due = t + max(0, latency + hrng.randint(-jitter, jitter))
+            if pending:
+                due = max(due, pending[-1][0] + 1)
+            pending.append((due, m))
+        while pending and pending[0][0] <= t:
+            hold = pending.pop(0)[1]
+        g.step(1, hold)
+        t += 1
+        g.core.poke(ev + B_XOK, bytes([1, 0]))       # (the check's re-arm)
+        text = ' '.join(screen_text(g))
+        if 'TTC TRANSFER' in text and 'TTC TRANSFER' not in seen:
+            xfers += 1
+        seen = text
+        if t % 15 == 0 and not g.scene().startswith('bike.play'):
+            break
+    g.core.close()
+    return {'seed': seed, 'latency': latency, 'cues': pol.cues, 'xfers': xfers}
+
+
+def _cue_job(j):
+    return cue_run(*j)
+
+
+def cue_main(argv):
+    import argparse
+    import os
+    import sys
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    import pt
+    ap = argparse.ArgumentParser()
+    ap.add_argument('-n', '--runs', type=int, default=6)
+    ap.add_argument('-l', '--latencies', default='10,11,12')
+    ap.add_argument('-j', '--jobs', type=int, default=4)
+    a = ap.parse_args(argv)
+    pt._warm(['bike'])
+    lats = [int(x) for x in a.latencies.split(',')]
+    rows = pt.parallel_map(_cue_job, [(s, L) for L in lats for s in range(1, a.runs + 1)], a.jobs)
+    ok = True
+    for L in lats:
+        rs = [r for r in rows if r['latency'] == L]
+        c, x = sum(r['cues'] for r in rs), sum(r['xfers'] for r in rs)
+        print('  %2d f hand: %3d cues, %3d landed (%d%%)' % (L, c, x, round(100 * x / max(c, 1))))
+        ok = ok and x * 2 > c
+    return ok
+
+
+if __name__ == '__main__':
+    import sys
+    if sys.argv[1:2] == ['cue']:
+        sys.exit(0 if cue_main(sys.argv[2:]) else 1)
