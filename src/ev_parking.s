@@ -18,13 +18,18 @@
 ;   base:  PARKED 200 + CURB 300/150/50 + ANGLE 200/100/40 + SPACE 100/60/30
 ;          (half in / crooked: HALF IN 150 plus the lamps that aren't red)
 ;   style: ONE-MOVE +150 (never drove forward after backing in),
+;          NONSTOP +300 / SMOOTH +150 (stood still at most 10 / 20 frames
+;          from moving off to A: brake on DOWN and roll straight into
+;          reverse, A as it stops; on a cyclist's spot, time your approach),
 ;          TIME LEFT +10 a second, to the tenth the HUD clock shows,
 ;          DEAD CENTRE +100, ZERO ANGLE +150 (straight to half a degree),
 ;          CURB KISS by the pixel without touching the curb: KISSED IT
 ;          (0 px) +300, CLOSE KISS (1) +200, CURB KISS (2) +100,
 ;          PERFECT x2 +400 / x3 +800 (all-GREAT spots in a row),
-;          CLOSE SHAVE +200 (backing in right behind the cyclist, 1-3 px
-;          from her line: the coach never mentions it, it says WAIT)
+;          BIKE SHAVE +200 (backing in right behind the cyclist, 0-3 px
+;          from her line: the coach never mentions it, it says WAIT; her
+;          second bell, rung and shown over her as she comes level with
+;          your nose, is the tell: roll to DOWN+RIGHT about 11 frames later)
 ;   penalties: each bump into a parked car 150, curb 50, sidewalk 100,
 ;          hydrant 200, hedge 100, clipping a cyclist 150, the $75 TICKET 75
 ;   not in the spot when time runs out: TOWED, 0.
@@ -45,7 +50,8 @@
 ; Ten seconds without touching the d-pad (and not in the spot) gets you towed
 ; and ends the run (ev_fail 4).
 ; Run = sum of spots; ev_break = base / style / penalties, exactly the sum of
-; the result boxes. No spot parked = ev_fail 1.
+; the result boxes. No spot parked = ev_fail 1. The HUD never shows a minus
+; score: below 0 it reads OWED (red), and at the end the run's score.
 ; Calling it a day (pause menu) = ev_fail 3, scored like a failed run.
 .p816
 .smart -
@@ -177,7 +183,7 @@ k_dents  = ev_ram + 120
 k_curbx  = ev_ram + 122     ; rightmost corner - curb (signed)
 k_shown  = ev_ram + 124     ; message line as last drawn (address)
 k_style  = ev_ram + 126     ; style earned this spot: 1 one-move 2 time left 4 zero angle 8 kiss
-                            ; $10 streak $20 centre $40 shave
+                            ; $10 streak $20 centre $40 shave $80 nonstop / smooth
 k_bx     = ev_ram + 128     ; cyclist
 k_by     = ev_ram + 130     ; 8.8
 k_bst    = ev_ram + 132     ; 0 none, 1 waiting, 2 riding, 3 gone
@@ -214,7 +220,7 @@ k_bdrew  = ev_ram + 212
 k_react  = ev_ram + 214     ; the coach's idea of your reaction time (frames)
 k_rt     = ev_ram + 216     ; timing an answer to "BACK IN"
 k_rtst   = ev_ram + 218     ; 0 not yet, 1 timing, 2 done this spot
-k_nowb   = ev_ram + 220     ; NOW! / GET READY gap thresholds (biased by $80)
+k_nowb   = ev_ram + 220     ; NOW! / KEEP HOLDING gap thresholds (biased by $80)
 k_rdyb   = ev_ram + 222
 k_stuck  = ev_ram + 224     ; frames the car has been blocked while you drive it
 k_stuckv = ev_ram + 226     ; the gear it was blocked in: 1 forward, $FF reverse
@@ -251,6 +257,11 @@ k_ntm    = ev_ram + 304
 k_over   = ev_ram + 306     ; this far past the line still counts as on it (px)
 k_lead   = ev_ram + 308     ; frames ahead the coach is judging (scratch)
 k_skiss  = ev_ram + 310     ; this spot's CURB KISS: px from the curb (0-2)
+k_still  = ev_ram + 312     ; frames the car has stood still since it first moved (NONSTOP)
+k_moved  = ev_ram + 314     ; 1 = the car has moved this spot
+k_cue    = ev_ram + 316     ; the cyclist's second bell: 1 = rung this spot
+k_cuet   = ev_ram + 318     ;   frames her bell still flashes
+k_sflow  = ev_ram + 320     ; this spot's NONSTOP / SMOOTH bonus
 k_hdma   = ev_ram + 512     ; result box: BG3VOFS HDMA table (<= 160 bytes)
 
 .segment "EVENTS2"             ; with Off-Leash and Tallboy (GFX0 is full with TTC Surfing)
@@ -313,6 +324,10 @@ ev_parking:
     lda #$03
     sta ev_fail
 @card:
+    ; the HUD's total as the card has it (never below 0)
+    ldx ev_score
+    stx k_score
+    jsr hud_top
     jsl oam_clear               ; nothing pokes through the results card
     jsl hdma_off                ; the panel's row gaps
     jsl score_card
@@ -427,6 +442,11 @@ spot_setup:
     stz k_sstrk
     stz k_rtst
     stz k_stuck
+    stz k_still
+    stz k_moved
+    stz k_cue
+    stz k_cuet
+    stz k_sflow
     lda #$FFFF
     sta k_shown
     A8
@@ -618,8 +638,10 @@ ph_drive:
 @awake8:
     jsr steer_slew
     jsr move_car
+    jsl flow_count
     jsr soft_hazards
     jsr bike_update
+    jsl bike_cue
     jsr maid_update
     jsr spot_eval
     jsr react_time
@@ -1699,7 +1721,7 @@ bike_update:
 
 ; no clip this frame: how close did the car come? A corner level with her
 ; (within 12 px) while the car is moving and turned in, 1 to SHAVE_PX px
-; clear of her line, is a CLOSE SHAVE: called out once she's past the nose,
+; clear of her line, is a BIKE SHAVE: called out once she's past the nose,
 ; paid with the spot's style if you park
 SHAVE_PX = 3
 bike_shave:
@@ -1775,8 +1797,9 @@ bike_shave:
 @x:
     rts
 
-str_shave: .byte "CLOSE SHAVE! SHE DIDN'T BLINK", 0
+str_shave: .byte "BIKE SHAVE! SHE DIDN'T BLINK", 0
 str_bell: .byte "DING DING! BIKE COMING UP!", 0
+str_ding: .byte "*DING DING*", 0
 str_bike: .byte "HEY! WATCH THE BIKE LANE -150", 0
 
 ; the meter maid walks down the sidewalk in the last 10 seconds
@@ -1980,7 +2003,7 @@ EASE_AIM = 8                ; pull out until the swing would end this far from t
 TGT_Y = A_REAR + 3          ; ideal rear axle y before backing in (bumpers level);
                             ; the tight spot wants it 4 px further up (k_tgt)
 ; coach: NOW! when the predicted gap is under 7 + 3/8 of your reaction time
-; (12 px for a quarter second), GET READY 10 px before that (react_time),
+; (12 px for a quarter second), KEEP HOLDING 10 px before that (react_time),
 ; and only once the swing in will clear the car ahead (bmw_clear). Stuck
 ; against something, it says how to get out.
 coach:
@@ -2716,7 +2739,7 @@ react_time:
 @set:
     sta k_reacts
 @aim:
-    ; NOW! when the gap you'll get (gap_ahead) is NOW_AIM, GET READY 10 px
+    ; NOW! when the gap you'll get (gap_ahead) is NOW_AIM, KEEP HOLDING 10 px
     ; before; wider until the coach has seen you answer a steering cue
     lda #($80 + NOW_AIM)
     ldy k_reacts
@@ -2872,7 +2895,7 @@ co_strr:   .byte "HOLD DOWN+RIGHT: STRAIGHTEN", 0
 co_lock:   .byte "HOLD DOWN+RIGHT: BACK IN", 0
 co_back:   .byte "HOLD DOWN+RIGHT: BACK IN", 0
 co_wait:   .byte "WAIT! LET THE BIKE GO BY", 0
-co_ready:  .byte "HOLD DOWN+RIGHT: GET READY", 0
+co_ready:  .byte "KEEP HOLDING DOWN+RIGHT...", 0
 co_now:    .byte "NOW! ROLL TO DOWN+LEFT", 0
 co_clear:  .byte "MIND THE BMW: HOLD DOWN ONLY", 0
 co_swing:  .byte "HOLD DOWN+LEFT: SWING IN", 0
@@ -3050,7 +3073,10 @@ park_result:
     sta k_sbonus
     A8
 @nq:
-    ; CLOSE SHAVE: backed in right behind the cyclist without clipping her
+    ; NONSTOP / SMOOTH: the car hardly stood still from the moment it moved
+    ; off to A (no stop on the line, no wait, A as it stops)
+    jsl flow_pts
+    ; BIKE SHAVE: backed in right behind the cyclist without clipping her
     lda k_shave+1
     beq @nsh
     lda #$40
@@ -3233,7 +3259,11 @@ ONE_MOVE = 150
 KISS     = 300                  ; CURB KISS at 0 px; 100 less a pixel out
 ZERO     = 150                  ; ZERO ANGLE
 ZERO_TH  = $0060                ; |heading| under this (half a degree)
-SHAVE    = 200                  ; CLOSE SHAVE (the coach never mentions it)
+SHAVE    = 200                  ; BIKE SHAVE (the coach never mentions it)
+NONSTOP  = 300                  ; stood still at most NONSTOP_F frames, moving off to A
+SMOOTH   = 150                  ;   ... at most SMOOTH_F
+NONSTOP_F = 10
+SMOOTH_F = 20
 STREAK   = 400                  ; PERFECT x2 +400, x3 +800
 pts_curb:  .word 300, 150, 50, 0, 0
 pts_ang:   .word 200, 100, 40, 0, 0
@@ -3666,6 +3696,147 @@ update_total:
     A8
     rts
 
+; NONSTOP: frames the car stands still, counted from the moment it first
+; moves this spot (A as it stops, with |speed| under 9, adds none)
+.a8
+.i16
+flow_count:
+    A16
+    lda k_v
+    beq @still
+    A8
+    lda #1
+    sta k_moved
+    rtl
+@still:
+    .a16
+    A8
+    lda k_moved
+    beq @x
+    A16
+    lda k_still
+    inc a
+    beq @sat                    ; (saturates)
+    sta k_still
+@sat:
+    A8
+@x:
+    rtl
+
+; park_result's style: NONSTOP (stood still NONSTOP_F frames at most from
+; moving off to A) or SMOOTH (SMOOTH_F): k_sflow, k_sbonus, k_style $80
+.a8
+.i16
+flow_pts:
+    A16
+    lda k_still
+    cmp #(NONSTOP_F + 1)
+    bcs @sm
+    lda #NONSTOP
+    bra @pay
+@sm:
+    cmp #(SMOOTH_F + 1)
+    bcs @no
+    lda #SMOOTH
+@pay:
+    sta k_sflow
+    clc
+    adc k_sbonus
+    sta k_sbonus
+    A8
+    lda #$80
+    tsb k_style
+    rtl
+@no:
+    .a16
+    A8
+    rtl
+
+; The cyclist's second bell (spots 2 and 3). While you wait for her on the
+; line (WAIT! LET THE BIKE GO BY, not yet backing up), she rings it and it
+; flashes over her head as she comes level with your nose: CUE_RT frames
+; after it, a roll to DOWN+RIGHT from a standstill swings your nose out
+; right behind her back wheel (the middle of an 11-13 frame window,
+; whatever her speed). The coach never says why.
+CUE_D  = 8                      ; px, her front wheel to your front-left corner
+CUE_RT = 11                     ; frames: a practised hand
+CUE_T  = 24                     ; frames the bell flashes
+.a8
+.i16
+bike_cue:
+    lda k_cuet
+    beq @t
+    dec k_cuet
+@t:
+    lda k_cue
+    bne @x
+    lda k_bst
+    cmp #2
+    bne @x
+    lda k_flags
+    and #F_REV
+    bne @x
+    ldx k_coach
+    cpx #.loword(co_wait)
+    bne @x
+    ; her lead on your nose now vs CUE_D + CUE_RT x her speed (8.8)
+    A16
+    lda k_bspd
+    asl a
+    asl a
+    sta k_t0                    ; x4
+    asl a                       ; x8
+    clc
+    adc k_t0                    ; x12
+    sec
+    sbc k_bspd                  ; x11 (CUE_RT)
+    xba
+    and #$00FF
+    clc
+    adc #CUE_D
+    sta k_t0
+    lda k_by
+    xba
+    and #$00FF
+    sec
+    sbc CY+4                    ; front-left corner
+    bmi @late16
+    cmp k_t0
+    bcc @now16
+    beq @now16
+    A8
+@x:
+    rtl
+@now16:
+    .a16
+    ; (only on the way in: if WAIT went up with her already well inside
+    ; it, the moment has gone and the bell stays quiet)
+    clc
+    adc #4
+    cmp k_t0
+    bcs @go16
+@late16:
+    A8
+    lda #1
+    sta k_cue
+    rtl
+@go16:
+    A8
+    lda #1
+    sta k_cue
+    lda #CUE_T
+    sta k_cuet
+    SFX SFX_BELL
+    ldx #.loword(str_ding)
+    stx k_msg
+    lda #TP_CYAN
+    sta k_msgcol
+    lda #20                     ; a quick one: gone as the coach moves on
+    sta k_msgt
+    ldx k_coach
+    stx k_saycoach
+    rtl
+
 .segment "EVENTS2"
 box_titles: .addr bt0, bt1, bt2, bt3, bt4, bt5, bt6, bt6, bt6
 bt0: .byte "PERFECT PARK!", 0
@@ -3740,6 +3911,18 @@ box_items:
     lda #TP_GREEN
     jsr bi_plus
 @s2:
+    lda k_style
+    and #$80
+    beq @s2b
+    ldx #.loword(bl_smooth)
+    ldy k_sflow
+    cpy #NONSTOP
+    bne @s2a
+    ldx #.loword(bl_nonstop)
+@s2a:
+    lda #TP_GREEN
+    jsr bi_plus
+@s2b:
     lda k_style
     and #$02
     beq @s3
@@ -3891,12 +4074,14 @@ bl_curb:    .byte "CURB", 0
 bl_ang:     .byte "ANGLE", 0
 bl_space:   .byte "SPACE", 0
 bl_one:     .byte "ONE-MOVE", 0
+bl_nonstop: .byte "NONSTOP", 0
+bl_smooth:  .byte "SMOOTH", 0
 bl_left:    .byte "TIME LEFT", 0
 bl_kiss0:   .byte "KISSED IT", 0      ; 0 px off the curb
 bl_kiss1:   .byte "CLOSE KISS", 0     ; 1 px
 bl_kiss2:   .byte "CURB KISS", 0      ; 2 px
 bl_zero:    .byte "ZERO ANGLE", 0
-bl_shave:   .byte "CLOSE SHAVE", 0
+bl_shave:   .byte "BIKE SHAVE", 0
 bl_streak2: .byte "PERFECT X2", 0
 bl_streak3: .byte "PERFECT X3", 0
 bl_dent:    .byte "DENT", 0
@@ -4291,6 +4476,7 @@ hud_full:
 str_spot:  .byte "SPOT  /3", 0
 str_time:  .byte "TIME", 0
 str_score: .byte "SCORE", 0
+str_owed:  .byte "OWED ", 0
 str_lamps: .byte "CURB   ANGLE   SPACE    WHEEL", 0
 
 ; HDMA channel 7 -> BG3VOFS (one register, written twice)
@@ -4385,7 +4571,18 @@ hud_top:
     ldx #(1*32 + 18)
     ldy #1
     jsl txt_num
-    ; the running total, red with a minus sign while it's below 0
+    ; the running total: SCORE, or OWED in red while the spots so far add up
+    ; below 0 (never a minus score: the run's score stops at 0, and a later
+    ; spot's box pays the debt off first)
+    LDPTR0 str_score
+    lda #(HUD_ATTR | (TP_WHITE << 2))
+    bit k_score+1
+    bpl @lab
+    LDPTR0 str_owed
+    lda #(HUD_ATTR | (TP_RED << 2))
+@lab:
+    ldx #(1*32 + 20)
+    jsl txt_print
     A16
     lda k_score
     bpl @sp
@@ -4399,33 +4596,9 @@ hud_top:
     bpl @sc
     lda #(HUD_ATTR | (TP_RED << 2))
 @sc:
-    sta k_t1
     ldx #(1*32 + 26)
     ldy #5
     jsl txt_num
-    bit k_score+1
-    bpl @sx
-    ldx #(1*32 + 29)            ; the sign goes just left of the digits
-    A16
-    lda k_score
-    eor #$FFFF
-    inc a
-    cmp #10
-    bcc @sg
-    dex
-    cmp #100
-    bcc @sg
-    dex
-    cmp #1000
-    bcc @sg
-    dex
-@sg:
-    A8
-    lda #('-' - $20 + TXT_WIN)
-    sta tmp2
-    lda k_t1
-    jsl txt_char
-@sx:
     stz txt_bg
     rts
 
@@ -4877,6 +5050,31 @@ draw_bike:
 @f:
     stx tmp6
     jsl oam_meta
+    ; her bell flashing over her head (bike_cue)
+    lda k_cuet
+    beq @x
+    and #$04
+    beq @x
+    A16
+    lda k_bx
+    sec
+    sbc #13
+    sta spr_x
+    lda k_by
+    xba
+    and #$00FF
+    sec
+    sbc #8
+    sta spr_y
+    A8
+    lda #$3A
+    sta tmp5
+    stz tmp5+1
+    LDPTR1 ms_ding
+    ldx #MS_DING_BASE
+    stx tmp6
+    jsl oam_meta
+@x:
     rts
 
 ; meter maid (and her ticket), tow truck, sparkles
