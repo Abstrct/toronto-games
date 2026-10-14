@@ -31,12 +31,13 @@ FERRY_X = 356        # Jack Layton terminal slip (scenery)
 # wake is a beam reach both ways: dip south after mark 3 to ride it to the line
 FERRY_Y = 440
 FERRY_X0, FERRY_X1 = 154, 444
-# leg 1 is a reach (one tap left from the start heading, mark 1 in view), leg 2
-# the beat (tacking), leg 3 the run, leg 4 a reach to the line past the ferry lane
-MARKS = [(280, 236), (224, 144), (408, 368)]   # reach, windward, leeward
+# leg 1 is a reach (one tap right from the start heading, mark 1 in view; left
+# alone the boat passes 68 px north of its ring), leg 2 a long beat (two or
+# three tacks), leg 3 the run, leg 4 a reach to the line past the ferry lane
+MARKS = [(300, 330), (224, 144), (408, 368)]   # reach, windward, leeward
 LINE_X, LINE_Y, LINE_HALF = 184, 380, 40
 AIM_R = 16                                       # the arrow aims this far off the buoy
-START = (112, 282)                               # open water, sea room all round
+START = (112, 262)                               # open water, sea room all round
 FREIGHTER = (456, 168, 479, 327)
 
 
@@ -263,7 +264,7 @@ def harbour():
 
 # ---------------------------------------------------------------- sprites
 SP_MARKS = ['#000000', '#101018', '#f87818', '#c04808', '#f8f8f8', '#f8e040', '#283048', '#a0a0b0',
-            '#d03030', '#60a0e0', '#f8b878', '#202020']
+            '#d03030', '#60a0e0', '#f8b878', '#202020', '#40e040']
 SP_FERRY = ['#000000', '#101018', '#f0f0f0', '#b8b8c8', '#2850a0', '#182c60', '#e8c040', '#d03030',
             '#383848', '#f8b080', '#7890b0']
 SP_CRITTERS = ['#000000', '#101018', '#8c7458', '#5c4834', '#f0f0f0', '#181818', '#f8d020', '#e83820',
@@ -513,6 +514,8 @@ def build_sprites():
     # heading dots (bow line), 8x8 at (120,144): white diamonds with a dark rim
     # (the no-go ticks are squares)
     d.polygon([(123, 144), (126, 147), (123, 150), (120, 147)], fill=4, outline=1)
+    # ... and green ones (a size up) when the bow is on the course to steer, 8x8 at (72,152)
+    d.polygon([(75, 152), (78, 155), (75, 158), (72, 155)], fill=12, outline=1)
     # (96,224)-(127,255) spare
     for n in range(2 * BOAT_FRAMES):
         sh.obj('boat%d' % n, (n % 4) * 32, (n // 4) * 32, 32, 32)
@@ -544,6 +547,7 @@ def build_sprites():
     sh.obj('fwake1', 64, 224, 16, 32, 0, 16)
     sh.obj('hdot', 120, 144, 8, 8)
     sh.obj('rdot', 64, 152, 8, 8)
+    sh.obj('hdotg', 72, 152, 8, 8)
     out('sail_obj.bin', sh.tiles())
     with open(os.path.join(BUILD, 'sail_meta.inc'), 'w') as f:
         f.write(sh.meta_inc())
