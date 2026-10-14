@@ -3504,7 +3504,7 @@ fh1: .byte "MADE THE 5:42!", 0
 fh2: .byte "MADE IT TO DUNDAS!", 0
 fh3: .byte "SPADINA! YOU LOST HIM!", 0
 fh4: .byte "CROSSED THE LINE!", 0
-fh5: .byte "PARKED!", 0
+fh5: .byte "PARKED ON BRUNSWICK!", 0
 fh6: .byte "UNION! EVERYBODY OFF!", 0
 eb0: .byte "DELIVER THE PACKAGE TO", $0A, "SPADINA. PREFERABLY ALIVE.", 0
 eb1: .byte "MAKE THE 5:42 GO TRAIN.", $0A, "RED ! AHEAD? CHANGE LANES.", 0
@@ -3589,7 +3589,7 @@ fn_sail:   .byte "NOBODY STEERED FOR 10 S", 0
 fn_sail_t: .byte "250 PER MARK ROUNDED", 0
 fn_pk:     .byte "HALF IN OR TOWED, ALL 3", 0
 fn_pk_i:   .byte "10 S WITHOUT DRIVING", 0
-fn_pk_q:   .byte "QUITTERS KEEP 450 AT MOST", 0
+fn_pk_q:   .byte "QUIT: FINISHED SPOTS COUNT", 0
 fn_sub:    .byte "20 GERMS: STYLE IS VOID", $0A, "ONLY LEGS YOU LEANED PAY", 0
 fn_sub_q:  .byte "GAVE UP: STYLE IS VOID", $0A, "ONLY LEGS YOU LEANED PAY", 0
 
