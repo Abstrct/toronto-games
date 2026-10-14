@@ -21,17 +21,21 @@ the event's physics (src/ev_cops.s):
               cop's well back, and sips through the jump for SIP 'N' HOPs.
               No physics model, no look into RAM's future; `pt curve` adds
               the hand's latency on top.
-  cops_pro    the expert: cops_eyes with perfect anticipation, cutting it
-              fine with the cop and the BUZZ budget
+  cops_pro    the expert: cops_eyes with a frame of anticipation error,
+              cutting it fine with the cop and the BUZZ budget
+  cops_ace    the best run we know: cops_pro with perfect anticipation that
+              rides the BUZZ high for LIQUID COURAGE (the undocumented trick)
+  cops_firstgo  cops_noob who never sips (Dana's chalk-only first go)
   cops_noob   an honest first-timer: +-5 frames off the chalk, freezes on one
               hurdle in four, sips without minding the BUZZ (run it through
               `pt curve -p cops_noob -l 15,24`: it should outlast the 30 s
               warm-up and bank a few hundred points when it's busted)
 
-Taking off ON THE CHALK (-12..+6 px of the mark) triples that hop's SIP 'N'
-HOP, so the curve's top end is anticipation: at 0 frames cops_eyes is on the
-chalk every time, by ~9 frames of hand latency it hardly ever is. A late hand
-that runs into a hurdle stops against it and its A scrambles over (no spill).
+Every take-off pays up to 30 (minus a point per 1.6 px from the chevron,
+nothing 48 px past it), and ON THE CHALK (8 px short .. 20 px past) doubles a
+SIP 'N' HOP, DEAD ON triples it. So the curve slopes all the way from 0 to
+~20 frames of hand latency. A late hand that runs into a hurdle stops against
+it for 24 frames, and its A (on seeing the stop) scrambles over (no spill).
 
 The no-skill exploit detectors (idle, hold_a, hold_b, mash_a) come from
 policies.py; `hold_b_mash_a` (sip + bunny-hop forever) and `tap_a` (a short
@@ -71,7 +75,7 @@ def _w(b, o, signed=False):
 class _State:
     def __init__(self, g):
         base = g.sym['ev_ram']
-        b = g.core.peek(base, 216)
+        b = g.core.peek(base, 344)
         self.dist, self.distf, self.speed = _w(b, 0), _w(b, 2), _w(b, 4)
         self.h, self.vy = _w(b, 6), _w(b, 8, True)
         self.air, self.state, self.prog = b[10], b[12], b[18]
@@ -80,6 +84,8 @@ class _State:
         self.hold = _w(b, 46)
         self.t = _w(b, 52)
         self.chain, self.chaint = b[54], _w(b, 56)
+        self.bump = b[268]          # up against a hurdle (you see the runner stop dead)
+        self.style = _w(b, 258)
         self.ents = []
         for i in range(10):
             t = _w(b, 64 + 2 * i)
@@ -144,9 +150,11 @@ class _Runner(Policy):
     miss = 0.0          # chance to fluff a hurdle entirely
     ground_buzz = 60    # BUZZ below this: room for a ground sip (save the rest for SIP 'N' HOPs)
     air_buzz = 120      # ...for a SIP 'N' HOP (176+ is TIPSY: the cop closes in)
+    react = 12          # frames to notice you've stopped dead against a hurdle
 
     def __init__(self):
         self.g = None
+        self.bumped = 0
         self.a_until = -1
         self.b_air = False
         self.fate = {}      # entity slot -> (timing error, fluffed?) rolled once per hurdle
@@ -165,6 +173,14 @@ class _Runner(Policy):
         m = 0
         if t < self.a_until:
             m |= A
+        # stopped dead against a hurdle: hit A once you've noticed
+        if s.bump and not s.air:
+            self.bumped = self.bumped or t
+            if t - self.bumped >= self.react and t >= self.a_until:
+                self.a_until = t + 6
+                return A
+            return m
+        self.bumped = 0
         if s.air:
             if self.b_air:
                 m |= B
@@ -378,6 +394,7 @@ class cops_eyes(Policy):
     careless = 0.1
     miss = 0.0                  # chance to freeze on a hurdle and not jump at all
     sips = True
+    scramble = True             # hits A when the runner stops dead against a hurdle
 
     def __init__(self):
         self.g = None
@@ -418,6 +435,10 @@ class cops_eyes(Policy):
             m |= A
         if t < self.b_until:
             m |= B
+        # stopped dead against a hurdle: anyone hits A (it lands a hand's latency later)
+        if s.bump and not s.air and t >= self.a_until and self.scramble:
+            self.a_until = t + 6
+            return m | A
         if s.air or t < self.a_until:
             return m
         for to_mark, rel, e in ahead:
@@ -474,15 +495,29 @@ class cops_noob(cops_eyes):
         return super().act(t, tel, rng)
 
 
+class cops_firstgo(cops_noob):
+    """Dana's first go: cops_noob who never touches B (run it with a 15-20 frame hand)."""
+    sips = False
+
+
 class cops_pro(cops_eyes):
-    """The expert: cops_eyes with perfect anticipation, cutting it fine with
-    the cop (sips the moment he's out of sight) and the buzz."""
-    ERR = 0
+    """The expert: cops_eyes with an expert's anticipation (a frame either
+    way), cutting it fine with the cop (sips the moment he's out of sight) and
+    the buzz."""
+    ERR = 1
     ground_q, air_q = 4, 6
     ground_buzz, air_buzz, air_buzz_big = 2, 6, 9
 
 
-POLICIES = {c.__name__: c for c in [cops_safe, cops_pro, cops_pro_rt, cops_human, cops_rookie, cops_human15, cops_eyes, cops_noob,
+class cops_ace(cops_pro):
+    """The best run we know: cops_pro who knows the undocumented trick. A SIP
+    'N' HOP's base is 8 + a point for every 16 BUZZ you had before the sip
+    (LIQUID COURAGE from 128 up), so it rides the meter just under the red."""
+    ERR = 0
+    ground_buzz, air_buzz, air_buzz_big = 4, 10, 10
+
+
+POLICIES = {c.__name__: c for c in [cops_safe, cops_pro, cops_pro_rt, cops_human, cops_rookie, cops_human15, cops_eyes, cops_noob, cops_firstgo, cops_ace,
                                     hold_b_mash_a, tap_a]}
 DEFAULTS = {'cops': ['idle', 'hold_b', 'hold_a', 'mash_a', 'hold_b_mash_a', 'tap_a', 'cops_jump', 'cops_safe',
                      'cops_pro', 'cops_human', 'cops_human15', 'cops_eyes', 'cops_rookie', 'random_input']}
