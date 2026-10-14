@@ -906,11 +906,11 @@ rec_sig: .byte REC_SIG
 
 default_records:
     ; EV_BIKE  Bike Courier
-    REC 6500, "COURIER"
-    REC 5400, "FIXIE"
-    REC 4400, "TTC GUS"
-    REC 3500, "PEDICAB"
-    REC 2600, "SALMON"
+    REC 6000, "COURIER"
+    REC 5000, "FIXIE"
+    REC 4100, "TTC GUS"
+    REC 3300, "PEDICAB"
+    REC 2500, "SALMON"
     ; EV_BAY   Bay St Power Walk
     REC 3000, "SUITGUY"
     REC 2600, "BAYBANKR"

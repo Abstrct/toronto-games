@@ -3499,21 +3499,21 @@ ev_controls: .addr ec0, ec1, ec2, ec3, ec4, ec5, ec6
 ev_fails:    .addr ef0, ef1, ef2, ef3, ef4, ef5_1, ef6
 ; the header of a finished run (green), 28 characters at most
 card_finish: .addr fh0, fh1, fh2, fh3, fh4, fh5, fh6
-fh0: .byte "DELIVERED!", 0
+fh0: .byte "DELIVERED! SIGN HERE.", 0
 fh1: .byte "MADE THE 5:42!", 0
 fh2: .byte "MADE IT TO DUNDAS!", 0
 fh3: .byte "SPADINA! YOU LOST HIM!", 0
 fh4: .byte "CROSSED THE LINE!", 0
 fh5: .byte "PARKED ON BRUNSWICK!", 0
 fh6: .byte "UNION! EVERYBODY OFF!", 0
-eb0: .byte "DELIVER THE PACKAGE TO", $0A, "SPADINA. PREFERABLY ALIVE.", 0
+eb0: .byte "GET THE PACKAGE TO SPADINA", $0A, "IN TIME. PREFERABLY ALIVE.", 0
 eb1: .byte "MAKE THE 5:42 GO TRAIN.", $0A, "RED ! AHEAD? CHANGE LANES.", 0
 eb2: .byte "QUEEN GATE TO DUNDAS GATE.", $0A, "DODGE DOGS, THEN PAT THEM!", 0
 eb3: .byte "THE BIKE COP SAW THAT", $0A, "TALLBOY. RUN TO SPADINA!", 0
 eb4: .byte "ROUND MARKS 1, 2 AND 3,", $0A, "THEN CROSS THE LINE.", 0
 eb5: .byte "THREE SPOTS ON BRUNSWICK.", $0A, "PARK IT. DON'T DENT A BMW.", 0
 eb6: .byte "SURF LINE 1 TO UNION.", $0A, "GRAB A POLE, GET GERMS.", 0
-ec0: .byte "D-PAD STEER    A PEDAL", $0A, "B HOP          DOWN BRAKE", $0A, "HOP RAILS, DODGE LATE: X8", 0
+ec0: .byte "D-PAD STEER    A PEDAL", $0A, "B HOP RAILS AND POTHOLES", $0A, "TOKENS PAY 50 ON DELIVERY", 0
 ec1: .byte "ALTERNATE ", TXT_ARROW_L+32, " ", TXT_ARROW_R+32, " ON BIG DOTS", $0A, "SMALL DOTS = DOUBLE TIME", $0A, "UP/DOWN LANE  A EXCUSE ME", 0
 ec2: .byte "D-PAD WALK   A THROW BALL", $0A, "SAFE: B WHEN ! SHOWS: 50", $0A, "BOLD: B AS HE LUNGES: 150+", 0
 ec3: .byte "YELLOW CHALK: TAP A", $0A, "RED CHALK: HOLD A", $0A, "B: SIP WHILE COP CAN'T SEE", 0
@@ -3542,7 +3542,7 @@ card_break_labels:
     .addr bl_course, bl_style, bl_bump      ; sail
     .addr bl_park,  bl_style, bl_dings      ; parking
     .addr bl_ride,  bl_style, bl_germs      ; subway
-bl_tips:   .byte "TIPS+STYLE", 0
+bl_tips:   .byte "TIPS, STYLE", 0
 bl_walk:   .byte "WALK", 0
 bl_course: .byte "COURSE", 0
 bl_arrive: .byte "ARRIVAL", 0
@@ -3568,7 +3568,7 @@ bl_germs:  .byte "GERMS", 0
 ; own fail), 2 (out of time), 3 (called it a day), 4 (its second fail);
 ; 0 = none. A base of 0 in a card_still event shows card_still_ln instead.
 card_fail_note:
-    .addr fn_bike,   fn_bike_n, fn_bike_n, fn_bike_s    ; bike
+    .addr fn_bike,   fn_bike_n, fn_bike_q, fn_bike_s    ; bike
     .addr fn_bay,    fn_bay,    fn_bay_q,  fn_bay       ; bay
     .addr fn_park,   fn_park_t, fn_park_q, fn_park      ; park
     .addr fn_cops,   fn_cops,   fn_cops_q, fn_cops      ; cops
@@ -3577,6 +3577,7 @@ card_fail_note:
     .addr fn_sub,    fn_sub,    fn_sub_q,  fn_sub       ; subway
 fn_bike:   .byte "THIRD WIPEOUT. NO TIPS!", 0
 fn_bike_n: .byte "NOT DELIVERED. NO TIPS!", 0
+fn_bike_q: .byte "GAVE UP. NO TIPS!", 0
 fn_bike_s: .byte "STOPPED 8 SECONDS. NO TIPS", 0
 fn_bay:    .byte "THE 5:42 LEFT WITHOUT YOU", $0A, "WALK PAID BY DISTANCE", 0
 fn_bay_q:  .byte "GAVE UP: THE 5:42 LEFT", $0A, "WALK PAID BY DISTANCE", 0
@@ -3597,7 +3598,7 @@ fn_sub_q:  .byte "GAVE UP: STYLE IS VOID", $0A, "ONLY LEGS YOU LEANED PAY", 0
 ; reason line, for the ev_fail codes in card_still (bit n = ev_fail n: $1E all
 ; four, $02 the event's own fail only, 0 never). For events where only not
 ; playing earns a base of 0.
-card_still:    .byte $1E, $0A, $1E, 0, $02, 0, $1E   ; bike bay park cops sail parking subway
+card_still:    .byte $18, $0A, $1E, 0, $02, 0, $1E   ; bike bay park cops sail parking subway
 card_still_ln: .addr sti0, sti1, sti2, 0, sti4, 0, sti6
 sti0: .byte "STANDING STILL PAYS 0", 0
 sti1: .byte "STANDING STILL PAYS 0", 0
