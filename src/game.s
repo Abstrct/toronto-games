@@ -918,11 +918,11 @@ default_records:
     REC 1800, "INTERN"
     REC 1400, "DECAF"
     ; EV_PARK  Off-Leash Alert
-    REC 4200, "DOODLE"
-    REC 3400, "GOLDIE"
-    REC 2600, "FRISBEE"
-    REC 1900, "HIPSTER"
-    REC 1300, "SQUIRREL"
+    REC 6000, "DOODLE"
+    REC 4700, "GOLDIE"
+    REC 3600, "FRISBEE"
+    REC 2700, "HIPSTER"
+    REC 1900, "SQUIRREL"
     ; EV_COPS  Tallboy Trot
     REC 3600, "RACCOON"
     REC 3000, "BIKE COP"

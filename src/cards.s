@@ -3501,7 +3501,7 @@ ev_fails:    .addr ef0, ef1, ef2, ef3, ef4, ef5_1, ef6
 card_finish: .addr fh0, fh1, fh2, fh3, fh4, fh5, fh6
 fh0: .byte "DELIVERED!", 0
 fh1: .byte "MADE THE 5:42!", 0
-fh2: .byte "MADE THE DUNDAS GATE!", 0
+fh2: .byte "MADE IT TO DUNDAS!", 0
 fh3: .byte "MADE SPADINA!", 0
 fh4: .byte "CROSSED THE LINE!", 0
 fh5: .byte "PARKED!", 0
@@ -3515,7 +3515,7 @@ eb5: .byte "THREE SPOTS ON BRUNSWICK.", $0A, "PARK IT. DON'T DENT A BMW.", 0
 eb6: .byte "SURF LINE 1 TO UNION.", $0A, "GRAB A POLE, GET GERMS.", 0
 ec0: .byte "D-PAD STEER    A PEDAL", $0A, "B HOP          DOWN BRAKE", $0A, "HOP RAILS, DODGE LATE: X8", 0
 ec1: .byte "LEFT, RIGHT ON BIG DOTS", $0A, "UP/DOWN LANE  A EXCUSE ME", $0A, "Y ON A GOLD DOT: PRESTO!", 0
-ec2: .byte "D-PAD WALK   A THROW BALL", $0A, "B WHEN ! SHOWS: SIDESTEP", $0A, "B AS HE LUNGES: BONUS!", 0
+ec2: .byte "D-PAD WALK   A THROW BALL", $0A, "SAFE: B WHEN ! SHOWS: 50", $0A, "BOLD: B AS HE LUNGES: 150+", 0
 ec3: .byte "TAP A AT CHALK. RED: HOLD", $0A, "B: SIP WHILE COP CAN'T SEE", $0A, "B MID-AIR = SIP 'N' HOP", 0
 ec4: .byte "LEFT/RIGHT: TURN  A: HIKE", $0A, "WIND FROM TOP: ZIG-ZAG UP", $0A, "SURF THE FERRY'S WAKE!", 0
 ec5: .byte "UP: REAR BUMPER TO LINE", $0A, "BACK IN: DOWN+RIGHT, THEN", $0A, "DOWN+LEFT. A: PARK IT!", 0
@@ -3537,7 +3537,7 @@ ef2_0: .byte "YOU'RE FIRED!", 0
 card_break_labels:
     .addr bl_ride,  bl_tips,  bl_wipe       ; bike
     .addr bl_walk,  bl_style, bl_spill      ; bay
-    .addr bl_cross, bl_style, bl_tackle     ; park
+    .addr bl_cross, bl_dogs,  bl_tack150    ; park
     .addr bl_run,   bl_style, bl_fine       ; cops
     .addr bl_course, bl_style, bl_bump      ; sail
     .addr bl_park,  bl_style, bl_dings      ; parking
@@ -3552,10 +3552,11 @@ bl_race:   .byte "RACE", 0
 bl_park:   .byte "PARKING", 0
 bl_ride:   .byte "RIDE", 0
 bl_style:  .byte "STYLE", 0
+bl_dogs:   .byte "DOGS", 0
+bl_tack150: .byte "TACKLES X150", 0
 bl_pats:   .byte "PATS", 0
 bl_wipe:   .byte "WIPEOUT X200", 0
 bl_spill:  .byte "SPILLS", 0
-bl_tackle: .byte "TACKLES", 0
 bl_fine:   .byte "COP'S FINE", 0
 bl_bump:   .byte "BUMPS", 0
 bl_dings:  .byte "DINGS+FINES", 0
@@ -3579,9 +3580,9 @@ fn_bike_n: .byte "NOT DELIVERED. NO TIPS!", 0
 fn_bike_s: .byte "STOPPED 8 SECONDS. NO TIPS", 0
 fn_bay:    .byte "THE 5:42 LEFT WITHOUT YOU", 0
 fn_bay_q:  .byte "GAVE UP: THE 5:42 LEFT", 0
-fn_park:   .byte "THIRD TACKLE ENDS THE WALK", $0A, "CROSSING PAID BY DISTANCE", 0
-fn_park_t: .byte "CROSSING PAID BY DISTANCE", 0
-fn_park_q: .byte "GAVE UP: PAID BY DISTANCE", 0
+fn_park:   .byte "THIRD TACKLE ENDS THE WALK", $0A, "75 FOR EVERY TENTH WALKED", 0
+fn_park_t: .byte "75 FOR EVERY TENTH WALKED", 0
+fn_park_q: .byte "GAVE UP: 75 A TENTH WALKED", 0
 fn_cops:   .byte "COP CAUGHT YOU: FINED 1/4", 0
 fn_cops_q: .byte "GAVE UP: THE COP FINES 1/4", 0
 fn_sail:   .byte "NOBODY STEERED FOR 10 S", 0
@@ -3600,7 +3601,7 @@ card_still:    .byte $1E, $1E, $1E, 0, $02, 0, $1E   ; bike bay park cops sail p
 card_still_ln: .addr sti0, sti1, sti2, 0, sti4, 0, sti6
 sti0: .byte "STANDING STILL PAYS 0", 0
 sti1: .byte "STANDING STILL PAYS 0", 0
-sti2: .byte "STANDING STILL PAYS 0", 0
+sti2: .byte "NOT ONE STEP, NO POINTS", 0
 sti4: .byte "NO STEERING, NO POINTS", 0
 sti6: .byte "NO LEANING, NO POINTS", 0
 
