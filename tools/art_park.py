@@ -153,8 +153,10 @@ def blanket(d, cx, cy, c1, c2, owner_shirt):
     d.rectangle([cx - 5, cy - 2, cx + 5, cy], fill=COL['pants'])
 
 
-def gate(d, y, top):
-    """Trinity Bellwoods gate: stone pillars, iron arch, fence either side."""
+def gate(d, y, top, cd=None):
+    """Trinity Bellwoods gate: stone pillars, iron arch, fence either side.
+    cd: the canopy layer, for the Dundas gate you walk out under: the arch
+    goes there too, and feet in or past the gateway are behind it"""
     for x in range(0, W, 6):
         d.rectangle([x, y, x + 1, y + 14], fill=COL['iron'])
     d.rectangle([0, y + 2, W - 1, y + 3], fill=COL['iron'])
@@ -167,6 +169,10 @@ def gate(d, y, top):
         d.rectangle([px_ - 2, y - 26, px_ + 14, y - 22], fill=COL['stone2'])
     d.arc([gx - 32, y - 40, gx + 32, y + 8], 180, 360, fill=COL['iron'], width=3)
     d.arc([gx - 26, y - 34, gx + 26, y + 2], 180, 360, fill=COL['iron'], width=1)
+    if cd is not None:
+        cd.arc([gx - 32, y - 40, gx + 32, y + 8], 180, 360, fill=COL['iron'], width=3)
+        cd.arc([gx - 26, y - 34, gx + 26, y + 2], 180, 360, fill=COL['iron'], width=1)
+        mark_behind(gx - 36, 0, gx + 36, y + 14)
     mark_solid(0, y, gx - 33, y + 14)
     mark_solid(gx + 33, y, W - 1, y + 14)
     mark_solid(gx - 44, y - 6, gx - 32, y + 18)
@@ -354,7 +360,7 @@ def park_image():
         c1, c2, sh = blankets[i % 3]
         blanket(d, x, y, c1, c2, sh)
     gate(d, H - 60, False)
-    gate(d, 52, True)
+    gate(d, 52, True, cd)
     return img, can, court, dc
 
 
@@ -676,7 +682,10 @@ def build_sprites():
     for n in ('doodle', 'lab', 'husky', 'corgi'):
         data += pal_bytes(dog_pal(n), 16)
     data += pal_bytes([hexrgb(c) for c in MISC], 16)
-    out('park_spr_pal.bin', data)        # sprite palettes 1..5
+    red = list(MISC)                     # 6: the red "!" over a crouched dog
+    red[5], red[6] = MISC[6], MISC[5]    # (red bubble, white mark)
+    data += pal_bytes([hexrgb(c) for c in red], 16)
+    out('park_spr_pal.bin', data)        # sprite palettes 1..6
     return sh
 
 
