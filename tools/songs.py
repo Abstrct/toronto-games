@@ -7,8 +7,8 @@ Tempo is frames per 16th note at 60 Hz: 900 / BPM (a pair alternates)."""
 from audio import song, fill, tr, chan
 
 # instrument ids (see audio.INSTRUMENTS)
-LEAD25, LEAD50, BASS, DRUMS, ARP12, SAW, BELL, PAD = range(8)
-PLUCK, STAB, THIN, FLUTE, SAWPLUCK, SOFTPLUCK, STRUM, HARM = range(8, 16)
+LEAD25, LEAD50, BASS, DRUMS, ARP12, SAW, SAIL_LICK, PAD = range(8)
+PLUCK, STAB, THIN, FLUTE, SAIL_STRUM, SOFTPLUCK, STRUM, SAIL_LEAD = range(8, 16)
 
 
 def rest(bars):
@@ -362,7 +362,7 @@ def brother_downwind():
     groove2 = 'k . h . s . h k h . k . s . h .'
     beat4 = groove + ' ' + groove2 + ' ' + groove + ' ' + groove2
     dcgg = fill([dm, c, g, g], strum)
-    intro = sec('intro', rest(4), '@14 ' + dcgg, rest(2) + ' ' + bg + ' ' + bg,
+    intro = sec('intro', rest(4), '@12 ' + dcgg, rest(2) + ' ' + bg + ' ' + bg,
                 rep('. . h . . . h . . . h . . . h .', 3) + ' k . h . s . h k s . s . s s s s')
     verse = sec('verse',
                 'A4 A4 A4 A4 C5:2 A4:2 D5 C5 A4:2 G4:4 A4 A4 A4 A4 C5:2 D5:2 E5:4 D5:4 '
@@ -374,7 +374,7 @@ def brother_downwind():
                 'x . h . s . h k k . h . s . h . ' + groove2 + ' ' + groove + ' ' + groove2 + ' ' +
                 groove + ' ' + groove2 + ' ' + groove + ' k . h . s . h k s . s . T . t .')
     chorus = sec('chorus',
-                 '@0 -:4 A4:4 C5:2 D5:4 E5:2 .:6 D5:2 C5:4 A4:4 '
+                 '@15 -:4 A4:4 C5:2 D5:4 E5:2 .:6 D5:2 C5:4 A4:4 '
                  '-:4 A4:4 C5:2 D5:4 E5:2 .:6 G5:2 E5:4 D5:4 '
                  '-:4 A4:4 C5:2 D5:4 E5:2 .:6 D5:2 C5:4 A4:4 '
                  '-:4 B4:4 D5:2 E5:4 G5:2 .:4 E5:2 D5:4 C5:2 A4:4',
@@ -383,13 +383,13 @@ def brother_downwind():
                  'x . h . s . h k k . h . s . h . ' + groove2 + ' ' + beat4 + ' ' +
                  groove + ' k . h . s . h k s . s s s s s s')
     lick = sec('lick',
-               '@1 F5:6 E5:6 D5:4 F5:6 E5:6 C5:4 B4:6 C5:6 D5:4 B4:6 C5:6 D5:4 '
+               '@6 F5:6 E5:6 D5:4 F5:6 E5:6 C5:4 B4:6 C5:6 D5:4 B4:6 C5:6 D5:4 '
                'F5:6 E5:6 D5:4 F5:6 E5:6 D5:4 A5:6 G5:6 F5:4 A5:6 G5:6 F5:2 - .',
                rep(dcgg, 2),
                rep(' '.join([bd, bc, bg, bg]), 2),
                'x . h . s . h k k . h . s . h . ' + groove2 + ' ' + beat4 + ' ' +
                groove + ' k . h . s . h k s . s . s s s s')
-    return song(9, [LEAD25, STRUM, BASS, DRUMS], join(intro, verse, chorus, lick), loop=64)
+    return song(9, [SAIL_LEAD, SAIL_STRUM, BASS, DRUMS], join(intro, verse, chorus, lick), loop=64)
 
 
 

@@ -136,16 +136,16 @@ INSTRUMENTS = [
     (5, 0xFF, 0xE0, 0x49),   # 3 drums
     (2, 0xFF, 0x8C, 0x18),   # 4 arpeggio, 12% square
     (4, 0xCE, 0xB0, 0x4C),   # 5 saw lead
-    (3, 0xFF, 0x6E, 0x36),   # 6 bell
+    (0, 0xCE, 0xB0, 0x50),   # 6 regatta lick, 50% square (louder: the song is sparse)
     (0, 0x8A, 0xE0, 0x1A),   # 7 soft pad
     (1, 0xFF, 0x70, 0x41),   # 8 pluck, 25% square
     (0, 0xFF, 0x74, 0x41),   # 9 stab, 50% square
     (2, 0xCE, 0xB0, 0x31),   # 10 thin lead, 12% square
     (3, 0xCE, 0xB0, 0x44),   # 11 flute, triangle
-    (4, 0xFF, 0x4E, 0x29),   # 12 saw pluck
+    (2, 0xFF, 0x72, 0x50),   # 12 regatta strum, 12% square
     (1, 0xFF, 0x8E, 0x2C),   # 13 soft pluck, 25% square
     (2, 0xFF, 0x72, 0x36),   # 14 strum, 12% square
-    (0, 0xCE, 0xB0, 0x24),   # 15 harmony, 50% square
+    (1, 0xCE, 0xB0, 0x58),   # 15 regatta lead, 25% square
 ]
 
 NOTE = {'C': 0, 'D': 2, 'E': 4, 'F': 5, 'G': 7, 'A': 9, 'B': 11}
