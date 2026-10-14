@@ -127,6 +127,8 @@ class _Parker(Policy):
             return A if st['anim'] > 100 and t % 20 < 10 else 0
         if st['phase'] != 0:
             return 0
+        if st['ay'] == 0:
+            return 0            # the car isn't on the road yet (a demo's first frame)
         if st['spot'] != self.spot or self.stage is None:
             self.spot = st['spot']
             self.stage = 'up'
