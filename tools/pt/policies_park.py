@@ -104,6 +104,8 @@ class park_ace(_Peeker):
             return self.done(_toward(me, sit))
         threat = None
         for d in dogs:
+            if d['st'] == DS_CHARGE:
+                m &= ~UP                              # he's on his way: let him come (no outrunning him to Dundas)
             if d['st'] not in WINDOW:
                 continue
             dist = abs(d['x'] - me['x']) + abs(d['y'] - me['y'])
@@ -353,12 +355,12 @@ class park_hand(_Peeker):
     It stands still while a dog is on it, and goes back for a pat when the
     dog it dodged sits within easy reach."""
 
-    KNOWN = {0: 25, 1: 21, 2: 19, 3: 29}   # crouch frames by kind, from earlier walks
+    KNOWN = {0: 29, 1: 26, 2: 25, 3: 33}   # crouch frames by kind, from earlier walks
 
     O0 = 10.0                # first guess at its own lag (frames): it leads a little
     safe = False             # park_safe: gets set on every "!" (the safe line)
     nice_only = False        # park_nice: never tries the shave
-    SHAVE_AIM = 17           # px between him and me when the step should go (early = NICE, late = tackled)
+    SHAVE_AIM = 18           # px between him and me when the step should go (28-10 is the shave: early = NICE, late = tackled)
     LUNGE = 2.5              # px a frame he closes in the lunge (by eye)
 
     def __init__(self):
@@ -515,6 +517,46 @@ class park_hand(_Peeker):
         return self.done(m)
 
 
+class leash_prompt(_Peeker):
+    """Does only what the screen says, as a first-timer who read the card once
+    (run it at 20-25 frames of latency: pt.py curve park -p leash_prompt).
+    Holds UP (the walk is north). B when the callout says PRESS B or B NOW,
+    and B whenever a "!" shows over a dog (the card: SAFE: B ON !); the bold
+    variant waits for the red "!" instead (BOLD: B ON RED !). It never pats,
+    throws or steers: a prompt-follower must still finish and medal."""
+    red = False
+
+    def __init__(self):
+        super().__init__()
+        self.said = ''
+        self.seen = set()
+
+    def act(self, t, tel, rng):
+        me, dogs = self.view()
+        m = UP
+        line = self.game.text_rows()[4].strip(' .')
+        if line != self.said:
+            self.said = line
+            if 'PRESS B' in line or 'B NOW' in line:
+                m = self.press(m, B)
+        for d in dogs:
+            st = d['st']
+            want = DS_CROUCH if self.red else DS_ALERT
+            if st == want and d['i'] not in self.seen:
+                self.seen.add(d['i'])
+                m = self.press(m, B)
+            elif st not in THREAT:
+                self.seen.discard(d['i'])
+        if self.prev & B and not (m & B):
+            pass
+        return self.done(m)
+
+
+class leash_prompt_red(leash_prompt):
+    """leash_prompt on the bold line: B on every red "!" (BOLD: B ON RED !)"""
+    red = True
+
+
 class _blind(Policy):
     """No skill: hold UP and tap B on a metronome, never looking at a dog
     (round 5: once a second crossed with 0 tackles for a solo bronze)."""
@@ -555,7 +597,14 @@ class park_nice(park_hand):
     nice_only = True
 
 
-POLICIES = {c.__name__: c for c in [park_ace, park_fetcher, park_sloppy, park_timing, leash_human, leash_nervous, park_hand, park_safe, park_nice, leash_dana,
+class park_bold(park_hand):
+    """park_hand that goes for the CLOSE SHAVE on every dog it has a read on,
+    tackled or not (Lena's question: does the bold verb pay for my hand?)"""
+    def shaky(self):
+        return False
+
+
+POLICIES = {c.__name__: c for c in [park_ace, park_fetcher, park_sloppy, park_timing, leash_human, leash_nervous, park_hand, park_safe, park_nice, park_bold, leash_prompt, leash_prompt_red, leash_dana,
                                      up_mash_b, up_mash_ab] + BLIND + DAWDLE}
 DEFAULTS = {'park': ['idle', 'hold_up', 'up_mash_b', 'up_mash_ab', 'up_blind_b40', 'up_blind_b60', 'random_input',
                      'park_timing', 'park_sloppy', 'leash_human', 'leash_nervous', 'park_fetcher', 'park_safe',
