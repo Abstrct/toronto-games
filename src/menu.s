@@ -1,4 +1,4 @@
-; Main menu, event picker, records table
+; Main menu and event picker (the records board is cards.s records_board)
 .p816
 .smart -
 .include "globals.inc"
@@ -6,7 +6,7 @@
 
 .global roster_resume           ; register.s
 .global t_demo                  ; title.s
-.global reg_fade_out_q          ; register.s: fade out, keeping d-pad taps
+.global reg_fade_out_q          ; register.s: fade out, keeping presses for the grid
 
 .segment "BSS"
 m_sel:      .res 1
@@ -184,7 +184,7 @@ main_menu:
     lda m_sel
     cmp #3
     beq @plain
-    jsr reg_fade_out_q          ; on to sign-up: taps carry into the name grid
+    jsr reg_fade_out_q          ; on to sign-up: presses carry into the name grid
     bra @out
 @plain:
     jsl fade_out
@@ -199,7 +199,7 @@ mi1: .byte "COMPETE IN SOME", 0
 mi2: .byte "PRACTICE ONE EVENT", 0
 mi3: .byte "TORONTO RECORDS", 0
 str_title: .byte "TORONTO GAMES", 0
-str_sub:   .byte "THE CITY IS YOUR ARENA", 0
+str_sub:   .byte "THE OLYMPICS WE CAN AFFORD", 0
 str_hint:  .byte "A SELECT    ", TXT_ARROW_U+32, TXT_ARROW_D+32, " MOVE", 0
 
 ; ------------------------------------------------------------------
@@ -486,146 +486,3 @@ str_pick_wipe: .byte "                        ", 0
 str_pick_count: .byte " OF 7 EVENTS ON", 0
 str_on:        .byte "ON ", 0
 str_off:       .byte "OFF", 0
-
-
-; ------------------------------------------------------------------
-; Toronto Records: two lines per event, three rows apart
-;   EVENT NAME                 SCORE
-;   LOCATION                  HOLDER
-records_screen:
-    jsr menu_setup
-    PRINTC 1, TP_YELLOW, str_records
-    ldx #(3*32 + 1)
-    A16
-    lda #$161E                  ; 30 x 22
-    sta tmp1
-    A8
-    lda #$20
-    jsl txt_box
-    lda #TXT_WIN
-    sta txt_bg
-    stz tmp7                    ; event
-@ev:
-    ; tmp5 = cell of the first line: (4 + ev*3) * 32
-    lda tmp7
-    A16
-    and #$00FF
-    sta tmp1
-    asl a
-    clc
-    adc tmp1
-    clc
-    adc #4
-    asl a
-    asl a
-    asl a
-    asl a
-    asl a
-    sta tmp5
-    ; event name
-    lda tmp7
-    and #$00FF
-    asl a
-    tax
-    lda f:ev_names,x
-    sta ptr0
-    lda tmp5
-    clc
-    adc #3
-    tax
-    A8
-    lda #^ev_names
-    sta ptr0+2
-    lda #($20 | (TP_CYAN << 2))
-    jsl txt_print
-    ; score, right edge at column 28
-    lda tmp7
-    A16
-    and #$00FF
-    asl a
-    asl a
-    asl a
-    asl a
-    tax
-    lda records,x
-    sta tmp1
-    lda tmp5
-    clc
-    adc #24
-    tax
-    A8
-    ldy #5
-    lda #($20 | (TP_YELLOW << 2))
-    jsl txt_num
-    ; location under the name
-    lda tmp7
-    A16
-    and #$00FF
-    asl a
-    tax
-    lda f:ev_places,x
-    sta ptr0
-    lda tmp5
-    clc
-    adc #(1*32 + 3)
-    tax
-    A8
-    lda #^ev_places
-    sta ptr0+2
-    lda #($20 | (TP_GREY << 2))
-    jsl txt_print
-    ; holder under the score, right-aligned to column 28
-    lda tmp7
-    A16
-    and #$00FF
-    asl a
-    asl a
-    asl a
-    asl a
-    clc
-    adc #.loword(records + 2)
-    sta ptr0
-    A8
-    stz ptr0+2
-    ldy #$0000
-@len:
-    lda [ptr0],y
-    beq @got
-    iny
-    cpy #8
-    bne @len
-@got:
-    sty tmp1
-    A16
-    lda tmp5
-    clc
-    adc #(1*32 + 29)
-    sec
-    sbc tmp1
-    tax
-    A8
-    lda #($20 | (TP_WHITE << 2))
-    jsl txt_print
-    inc tmp7
-    lda tmp7
-    cmp #NUM_EVENTS
-    beq @shown
-    jmp @ev
-@shown:
-    stz txt_bg
-    PRINTC 26, TP_GREY, str_back
-    jsl fade_in
-@w:
-    jsl wait_frame
-    jsl menu_backdrop_tick
-    A16
-    lda pad_new
-    and #(PAD_A | PAD_B | PAD_START)
-    A8
-    beq @w
-    SFX SFX_BACK
-    jsl fade_out
-    rtl
-
-str_records: .byte "TORONTO RECORDS", 0
-str_back:    .byte "PRESS A", 0

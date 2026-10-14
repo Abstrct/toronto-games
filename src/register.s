@@ -7,7 +7,7 @@
 .global roster_resume           ; menu.s: B on the event picker comes back here
 .global reg_fade_out_q          ; menu.s: the main menu's way into sign-up
 
-R_QMAX = 8                      ; d-pad taps kept for the name grid
+R_QMAX = 12                     ; presses kept for the name grid
 
 .segment "BSS"
 r_cx:       .res 1      ; grid cursor
@@ -20,7 +20,7 @@ r_btmr:     .res 1      ; frames since the last delete: B on a blank name
 r_rsel:     .res 1      ; roster cursor, kept between visits
 r_keep:     .res 1      ; name_entry: keep the name (back from the sponsors)
 r_rm:       .res 1      ; remove confirm: 0 NO, 1 YES
-r_qn:       .res 1      ; d-pad taps queued on the way into the name grid
+r_qn:       .res 1      ; presses queued on the way into the name grid
 r_q:        .res R_QMAX
 
 .segment "SCREENS"
@@ -247,7 +247,7 @@ roster_live:
     SFX SFX_SELECT
     lda m_sel
     bne @plain_out
-    jsr reg_fade_out_q          ; ADD PLAYER: d-pad taps carry into the grid
+    jsr reg_fade_out_q          ; ADD PLAYER: presses carry into the grid
     lda #$00
     rts
 @plain_out:
@@ -843,10 +843,11 @@ name_entry:
     clc
     rts
 
-; reg_fade_out_q: fade_out (17 frames) that keeps the d-pad taps made on
-; the way out, for the name grid: a quick hand that taps RIGHT before the
-; grid is up still moves the cursor. A / B / START are never kept, so a
-; button held over from this screen can't type.
+; reg_fade_out_q: fade_out (17 frames) that keeps every press made on the
+; way out, in order, for the name grid: a quick hand that types B, C (RIGHT
+; A RIGHT A) before the grid is up gets "BC". Only fresh presses count
+; (pad_new is edge-triggered), so the A that picked this screen, still held,
+; types nothing.
 reg_fade_out_q:
     stz r_qn
     lda #$0F
@@ -864,10 +865,25 @@ reg_fade_out_q:
     jsr q_pad
     rts
 
-; this frame's new d-pad tap onto the back of the queue
-q_pad:
+; this frame's presses as one queue entry (0 = none):
+; bits 0-3 d-pad, $10 START, $40 B, $80 A
+q_entry:
     lda pad_new+1
-    and #$0F                    ; UP DOWN LEFT RIGHT
+    and #$1F                    ; START + d-pad
+    sta tmp0
+    lda pad_new+1
+    and #$80                    ; B -> $40
+    lsr a
+    ora tmp0
+    sta tmp0
+    lda pad_new
+    and #$80                    ; A
+    ora tmp0
+    rts
+
+; this frame's presses onto the back of the queue (a full queue drops them)
+q_pad:
+    jsr q_entry
     beq @x
     pha
     lda r_qn
@@ -883,40 +899,16 @@ q_pad:
 @x:
     rts
 
-; name grid, each frame. While taps from the way in are still queued, this
-; frame's presses (d-pad, A, B, START) join the back of the queue and the
-; oldest entry becomes this frame's press, so order is kept: RIGHT RIGHT A
-; types the letter two to the right even when the A lands mid-drain.
-; Entry: bits 0-3 d-pad, $10 START, $40 B, $80 A.
+; name grid, each frame. While presses from the way in are still queued,
+; this frame's presses join the back of the queue and the oldest entry
+; becomes this frame's press, so order is kept: RIGHT A RIGHT A types the
+; letters one and two to the right even when they land mid-drain.
 q_take:
     lda r_qn
     bne @queued
     rts
 @queued:
-    lda pad_new+1
-    and #$1F                    ; START + d-pad
-    sta tmp0
-    lda pad_new+1
-    and #$80                    ; B -> $40
-    lsr a
-    ora tmp0
-    sta tmp0
-    lda pad_new
-    and #$80                    ; A
-    ora tmp0
-    beq @take
-    pha
-    lda r_qn
-    cmp #R_QMAX
-    bcs @drop
-    TAXB
-    pla
-    sta r_q,x
-    inc r_qn
-    bra @take
-@drop:
-    pla
-@take:
+    jsr q_pad
     ; this frame's press = the oldest entry
     lda r_q
     and #$80
@@ -1224,12 +1216,49 @@ sponsor_select:
     bra @find
 @free:
     jsr set_sponsor
+    ; "KENJI, PICK A SPONSOR" centred on row 3 (24 scanlines down, clear
+    ; of the overscan), the name in white
+    lda num_players
+    jsl player_offset
+    ldy #$0000
+@nlen:
+    lda players+PL_NAME,x
+    beq @ngot
+    inx
+    iny
+    cpy #8
+    bne @nlen
+@ngot:
+    tya
+    sta tmp5                    ; name length
+    stz tmp5+1
+    lda #SP_HEAD_LEN
+    sec
+    sbc tmp5
+    lsr a
+    sta tmp7                    ; first column: (32 - length - 16) / 2
+    stz tmp7+1
     lda #($20 | (TP_WHITE << 2))
     sta tmp6
+    A16
+    lda tmp7
+    clc
+    adc #(3*32)
+    tax
+    A8
     lda num_players
-    ldx #(1*32 + 5)
     jsl print_player_name
-    PRINTC 3, TP_YELLOW, str_choose
+    A16
+    lda tmp7
+    clc
+    adc tmp5
+    adc #(3*32)
+    tax
+    A8
+    LDPTR0 str_choose
+    lda #($20 | (TP_YELLOW << 2))
+    jsl txt_print
+    ; the info box, with your athlete standing in its right end
     ldx #(21*32 + 1)
     A16
     lda #$061E
@@ -1237,6 +1266,17 @@ sponsor_select:
     A8
     lda #$20
     jsl txt_box
+    ; the athlete's cells: window tiles WITHOUT the priority bit, so he
+    ; stands in front of them (BG3 priority tiles cover every sprite)
+    ldx #(22*32 + SP_ATH_COL)
+    A16
+    lda #$0402                  ; 2 x 4
+    sta tmp1
+    A8
+    lda #(TXT_SPACE + TXT_WIN)
+    sta tmp2
+    lda #$00
+    jsl txt_fill
     jsr draw_taken_tags
     jsr draw_sponsor_info
     jsl fade_in
@@ -1335,10 +1375,10 @@ set_sponsor:
 draw_sponsor_info:
     lda #TXT_WIN
     sta txt_bg
-    ; clear the two lines
+    ; clear the two lines, short of the athlete's cells
     ldx #(22*32 + 2)
     A16
-    lda #$031C
+    lda #($0300 | (SP_ATH_COL - 2))
     sta tmp1
     A8
     lda #(TXT_SPACE + TXT_WIN)
@@ -1574,12 +1614,13 @@ draw_sponsor_cursor:
     jsl oam_put
     rts
 
-; athlete in the chosen colours, bottom right
+; athlete in the chosen colours, standing in the right end of the info box
+; (inside rows 22-25: scanlines 176-207)
 draw_athlete:
     A16
-    lda #16
+    lda #(SP_ATH_COL*8)
     sta spr_x
-    lda #0
+    lda #175
     sta spr_y
     lda #32
     sta spr_tile
@@ -1590,7 +1631,7 @@ draw_athlete:
     sta spr_size
     jsl oam_put
     A16
-    lda #16
+    lda #191
     sta spr_y
     lda #64
     sta spr_tile
@@ -1602,7 +1643,9 @@ sp_col:  .byte 0,1,2, 0,1,2, 0,1,2, 0,1,2
 sp_row:  .byte 0,0,0, 1,1,1, 2,2,2, 3,3,3
 badge_x: .byte 16, 96, 176
 badge_y: .byte 40, 72, 104, 136
-str_choose: .byte "CHOOSE YOUR SPONSOR", 0
+str_choose: .byte ", PICK A SPONSOR", 0
+SP_HEAD_LEN = 32 - 16           ; the row less ", PICK A SPONSOR"
+SP_ATH_COL  = 28                ; first of the athlete's two cells in the box
 str_taken:  .byte "TAKEN BY", 0
 
 ; ------------------------------------------------------------------
