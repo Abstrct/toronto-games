@@ -84,7 +84,7 @@ class _Parker(Policy):
 
     def gap_pred(self, st, th=None):
         th = st['th'] if th is None else th
-        return CURB - 11 - st['ax'] - 32 * (1 - math.cos(th)) - 5
+        return CURB - 11 - st['ax'] - 32 * (1 - math.cos(th)) - 3
 
     LEAD_MAX = None     # None: a fixed LEAD; else LEAD = min(measured lag, LEAD_MAX)
 
@@ -279,7 +279,7 @@ class park_human(_Parker):
 
     def plan(self, st, prev, rng):
         # a sure hand aims for the curb kiss; a slower one leaves margin
-        self.SWAP_GAP = min(3.5, 1.0 + self.lag() / 4.0)
+        self.SWAP_GAP = min(3.5, 0.6 + max(0, self.lag() - 5) * 0.4)
         return super().plan(st, prev, rng)
 
 
@@ -316,19 +316,22 @@ class park_coach(Policy):
         txt = g.sym.rom[off:off + 32].split(b'\0')[0].decode('latin-1')
         name = None
         for pre, k in (('GAS ', 'co_up'), ('LET GO!', 'co_brake'), ('PAST IT!', 'co_toofar'),
-                       ('HOLD DOWN+RIGHT', 'co_back'), ('NOW!', 'co_now'), ('GET READY', 'co_ready'),
-                       ('HOLD DOWN+LEFT', 'co_swing'), ('STRAIGHT! LET', 'co_stop'), ('A: PARK', 'co_park'), ('TOO FAR OUT', 'co_fix'),
-                       ('WAIT!', 'co_wait'), ('DING DING', 'co_wait'), ('HOLD UP+LEFT', 'co_nosein'),
-                       ('UP ON THE CURB.', 'co_fix')):
+                       ('HOLD DOWN+RIGHT', 'co_back'), ('KEEP DOWN+RIGHT', 'co_ready'), ('NOW!', 'co_now'),
+                       ('HOLD DOWN+LEFT', 'co_swing'), ('STRAIGHT! LET', 'co_stop'), ('A: PARK', 'co_park'),
+                       ('TOO FAR OUT', 'co_fix'), ('OVER THE CURB', 'co_fix'), ('WAIT!', 'co_wait'),
+                       ('DING DING', 'co_wait'), ('HOLD UP+LEFT', 'co_nosein'), ('MIND THE BMW', 'co_clear'),
+                       ('TOO SOON', 'co_early'), ('PINNED', 'co_pinned'), ('STUCK! HOLD UP', 'co_pullup'),
+                       ('STUCK! HOLD DOWN', 'co_backup')):
             if txt.startswith(pre):
                 name = k
         if name is None or name == self.last:
             if name is None:
                 return getattr(self, 'last_hold', 0)
         self.last = name
-        hold = {'co_up': UP, 'co_brake': 0, 'co_toofar': DOWN, 'co_lock': DOWN | RIGHT, 'co_back': DOWN | RIGHT,
+        hold = {'co_up': UP, 'co_brake': 0, 'co_toofar': DOWN, 'co_back': DOWN | RIGHT,
                 'co_ready': DOWN | RIGHT, 'co_now': DOWN | LEFT, 'co_swing': DOWN | LEFT, 'co_stop': 0,
-                'co_fix': 0, 'co_nosein': UP | LEFT}.get(name, 0)
+                'co_fix': 0, 'co_nosein': UP | LEFT, 'co_clear': DOWN, 'co_early': DOWN | RIGHT,
+                'co_pinned': DOWN, 'co_pullup': UP, 'co_backup': DOWN}.get(name, 0)
         if name in ('co_park', 'co_fix'):
             self.prog = [A] * 6 + [0] * 30
             return 0
