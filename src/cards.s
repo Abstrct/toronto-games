@@ -19,6 +19,18 @@ c_rank:       .res 1            ; score_card: place on the Toronto board, $FF = 
 c_brk:        .res 1            ; score_card: 1 = ev_break adds up, show the sum
 c_si:         .res 1            ; score_card: ev_stat index of the line being drawn
 c_margin:     .res 2            ; score_card: lead over the old record
+c_y:          .res 1            ; score_card: row being drawn
+c_nst:        .res 1            ; score_card: stat lines shown (card_plan)
+c_note:       .res 1            ; score_card: reason lines shown (0-2, c_noteptr)
+c_noteptr:    .res 2
+c_short:      .res 1            ; score_card: 1 = no room for WE THE NORTH!
+c_rr1:        .res 1            ; score_card: rows that flash for a new record (0 = none)
+c_rr2:        .res 1
+c_n:          .res 1            ; card_plan rows / card_nav option count
+c_cell:       .res 2
+c_val:        .res 2
+c_li:         .res 2
+c_fdef:       .res 1            ; final_table: where the cursor starts
 c_order:      .res MAX_PLAYERS  ; final_sort: players by medal points, golds, total
 c_place:      .res MAX_PLAYERS  ; final_sort: 0-based place, shared by equal keys
 c_champs:     .res 1            ; players sharing first place (0 = nobody medalled)
@@ -37,6 +49,7 @@ c_bg:         .res 1            ; txt_bg for the prompt
 c_blink:      .res 1            ; single prompt blinks
 c_lock:       .res 1            ; frames of lockout left
 c_relc:       .res 1            ; quiet frames still needed before arming
+c_relq:       .res 1            ; quiet frames a card needs (card_setup: REL_FRAMES)
 c_hint:       .res 1            ; LET GO OF THE BUTTONS is showing
 c_def:        .res 1            ; c_opts: the choice the cursor starts on
 c_prompt:     .res 2            ; single prompt string (this bank)
@@ -222,6 +235,12 @@ event_card:
     sta c_blink
     lda #TXT_WIN
     sta c_bg
+    lda num_players
+    cmp #$02
+    bcc @w
+    lda #REL_NEXT               ; and the last one's rhythm of taps must stop
+    sta c_relq
+@w:
     jsl card_wait
     jsl txt_clear
     rtl
@@ -241,6 +260,8 @@ card_setup:
     stz c_def
     stz c_blink
     stz c_bg
+    lda #REL_FRAMES
+    sta c_relq
     rts
 
 ; X = byte offset of records[event_idx]
@@ -325,13 +346,27 @@ str_solo:        .byte "SOLO", 0
 ; lands after the run was already over (won or lost) changes nothing.
 ; A score that makes the event's top 5 goes on the Toronto board; a new #1
 ; gets the full moment.
-; When ev_break adds up (base + bonus - penalty = ev_score, not all zero) the
-; card shows the sum under the stats:
-;     DISTANCE      2000
-;   + STYLE          600
-;   - WIPEOUTS       200
-;   = SCORE         2400
-; otherwise the stats sit on every other row with SCORE under them.
+; Every text row sits 16 px apart (rows 3, 5, then CARD_TOP.. in steps of 2,
+; PRESS A on 23), whatever the result, a 0 included:
+;     WIPED OUT!                  (red: why the run ended)
+;     PLAYER 1
+;     TTC TOKENS           4      (the event's picked stats, card_stat_pick)
+;     WIPEOUTS             3
+;     RIDE               220      (ev_break: base, always shown)
+;   + TIPS                60      (bonus / penalty rows only when not 0)
+;   = SCORE              280
+;   NO DELIVERY, NO 1000 FEE      (a failed run: card_fail_note)
+;     #3 ON THE TORONTO BOARD!    (and who fell off it, or a new record)
+; When ev_break doesn't add up to ev_score the sum rows are left out and
+; SCORE stands alone under the stats. The board lines need the room first:
+; one stat instead of two, then WE THE NORTH! goes.
+CARD_TOP  = 7                   ; first content row
+CARD_ROWS = 8                   ; content rows 7, 9 .. 21
+COL_L = 4                       ; stat labels and the + - = signs
+COL_S = 6                       ; sum labels
+COL_V = 23                      ; numbers, 5 wide (ends in column 27)
+REL_NEXT = 45                   ; quiet frames before a card hands over to the next player
+
 score_card:
     stz pause_ok
     stz ev_giveup
@@ -340,9 +375,19 @@ score_card:
     lda #$00
     rol a
     sta c_brk                   ; 1 = show the arithmetic
-    ldx #(2*32 + 2)
+    ; the card hides the event's text edge to edge on its rows, so no HUD
+    ; letters peek out beside the box
+    ldx #(2*32)
     A16
-    lda #$181C                  ; 28 x 24
+    lda #$1820                  ; 32 x 24
+    sta tmp1
+    A8
+    stz tmp2
+    lda #$00
+    jsl txt_fill
+    ldx #(2*32 + 1)
+    A16
+    lda #$181E                  ; 30 x 24
     sta tmp1
     A8
     lda #$20
@@ -377,26 +422,21 @@ score_card:
     lda #($20 | (TP_YELLOW << 2))
     sta tmp6
     lda cur_player
-    ldx #(5*32 + 5)
+    ldx #(5*32 + COL_L)
     jsl print_player_name
-    ; stat lines at a 16 px pitch (a label of 0 = unused): all four on rows
-    ; 7..13, or, when the arithmetic needs the room, the event's two picks
-    ; (card_stat_pick) on rows 7 and 9
+    jsr card_plan               ; -> c_y: the block sits in the middle
+    ; the event's picked stats, c_nst of them (a label of 0 = unused)
     stz tmp7
 @stat:
-    lda c_brk
-    beq @all
+    lda tmp7
+    cmp c_nst
+    bcs @stats_done
     lda event_idx
     asl a
     clc
     adc tmp7
     TAXB
-    A8
     lda f:card_stat_pick,x
-    bra @si
-@all:
-    lda tmp7
-@si:
     sta c_si
     lda event_idx
     asl a
@@ -410,81 +450,88 @@ score_card:
     lda f:card_stat_labels,x
     beq @nostat
     sta ptr0
-    lda tmp7
-    and #$00FF
-    asl a
-    asl a
-    asl a
-    asl a
-    asl a                       ; row * 32
-    asl a                       ; every other row
-    sta tmp0
-    lda tmp0
-    clc
-    adc #(7*32 + 5)
-    tax
     A8
     lda #^card_stat_labels
     sta ptr0+2
-    phx
+    lda #COL_L
+    jsr cy_cell
     lda #($20 | (TP_WHITE << 2))
     jsl txt_print
-    plx
-    A16
-    txa
-    clc
-    adc #16
-    tax
     lda c_si
-    and #$00FF
     asl a
-    tay
+    TAYB
+    A16
     lda ev_stat,y
     sta tmp1
     A8
+    lda #COL_V
+    jsr cy_cell
     ldy #5
     lda #($20 | (TP_CYAN << 2))
     jsl txt_num
+    jsr next_row
 @nostat:
     A8
     inc tmp7
-    lda c_brk
-    beq @four
-    lda tmp7
-    cmp #2
-    jne @stat
-    bra @stats_done
-@four:
-    lda tmp7
-    cmp #4
-    jne @stat
+    bra @stat
 @stats_done:
     lda c_brk
     beq @plain
-    jsr break_lines
-    PRINT 7, BRK_ROW + 3, TP_YELLOW, str_score
-    A16
-    lda ev_score
-    sta tmp1
-    A8
-    ldx #((BRK_ROW + 3)*32 + 21)
-    bra @total
+    jsr break_lines             ; base, then bonus / penalty unless 0
+    lda #('=' - 32 + TXT_WIN)
+    sta tmp2
+    lda #COL_L
+    jsr cy_cell
+    lda #($20 | (TP_YELLOW << 2))
+    jsl txt_char
+    lda #COL_S
+    bra @score
 @plain:
-    PRINT 5, 15, TP_WHITE, str_score
+    lda #COL_L
+@score:
+    jsr cy_cell
+    LDPTR0 str_score
+    lda #($20 | (TP_YELLOW << 2))
+    jsl txt_print
     A16
     lda ev_score
     sta tmp1
     A8
-    ldx #(15*32 + 21)
-@total:
+    lda #COL_V
+    jsr cy_cell
     ldy #5
     lda #($20 | (TP_YELLOW << 2))
     jsl txt_num
+    jsr next_row
+    ; a failed run: why it scored what it did (one or two lines)
+    lda c_note
+    beq @rec
+    A16
+    lda c_noteptr
+    sta ptr0
+    A8
+    lda #^card_fail_note
+    sta ptr0+2
+    ldy #$0000
+    jsr note_line
+    lda c_note
+    cmp #$02
+    bcc @rec
+    jsr note_line
+@rec:
     ; the Toronto board
+    stz c_rr1
+    stz c_rr2
     lda c_rank
     jmi @sfx
-    bne @board
-    PRINTC 17, TP_PINK, str_new_record
+    jne @board
+    lda c_y
+    sta c_rr1
+    jsr row_cell
+    LDPTR0 str_new_record
+    lda #($20 | (TP_PINK << 2))
+    jsl txt_print_centre
+    jsr next_row
     ; "+214 OVER SUITGUY": the old #1 is now #2
     jsr buf_reset
     lda #'+'
@@ -506,12 +553,21 @@ score_card:
     stz ptr0+2
     jsr buf_str
     jsr buf_term
+    lda c_y
+    jsr row_cell
     LDPTR0 c_buf
-    ldx #(19*32)
     lda #($20 | (TP_CYAN << 2))
     jsl txt_print_centre
-    PRINTC 21, TP_YELLOW, str_we_north
-    bra @sfx
+    jsr next_row
+    lda c_short
+    jne @sfx
+    lda c_y
+    sta c_rr2
+    jsr row_cell
+    LDPTR0 str_we_north
+    lda #($20 | (TP_YELLOW << 2))
+    jsl txt_print_centre
+    jmp @sfx
 @board:
     ; "#3 ON THE TORONTO BOARD!" and whoever fell off it
     jsr buf_reset
@@ -523,10 +579,12 @@ score_card:
     LDPTR0 str_on_board
     jsr buf_str
     jsr buf_term
+    lda c_y
+    jsr row_cell
     LDPTR0 c_buf
-    ldx #(17*32)
     lda #($20 | (TP_GREEN << 2))
     jsl txt_print_centre
+    jsr next_row
     lda f:c_bumped
     beq @sfx
     jsr buf_reset
@@ -537,8 +595,9 @@ score_card:
     lda #'!'
     jsr buf_ch
     jsr buf_term
+    lda c_y
+    jsr row_cell
     LDPTR0 c_buf
-    ldx #(19*32)
     lda #($20 | (TP_GREY << 2))
     jsl txt_print_centre
 @sfx:
@@ -570,34 +629,251 @@ score_card:
     jsr card_setup
     lda #TXT_WIN
     sta c_bg
+    ; someone else is up next: a rhythm of taps from this run must stop
+    ; before the card goes (the next one asks the same)
+    lda cur_player
+    inc a
+    cmp num_players
+    bcs @last
+    lda #REL_NEXT
+    sta c_relq
+@last:
     jsl card_wait
     jsl fade_out
     rtl
 
-BRK_ROW = 11                    ; first row of the BASE / + BONUS / - PENALTY / = SCORE lines
+; card_plan: how many rows the sum, the note and the board lines take, so
+; c_nst (stats shown: 2, or 1 when space is short), c_note / c_noteptr,
+; c_short (1 = no room for WE THE NORTH!)
+card_plan:
+    lda #$01                    ; the SCORE row
+    sta c_n
+    lda c_brk
+    beq @note
+    inc c_n                     ; the base
+    A16
+    lda ev_break+2
+    A8
+    beq @nb
+    inc c_n
+@nb:
+    A16
+    lda ev_break+4
+    A8
+    beq @note
+    inc c_n
+@note:
+    stz c_note
+    lda ev_fail
+    jeq @board
+    ; nothing earned by an event that pays for moving: say so
+    lda c_brk
+    beq @own
+    A16
+    lda ev_break
+    A8
+    bne @own
+    lda event_idx
+    TAXB
+    lda f:card_still,x
+    beq @own
+    A16
+    lda #.loword(str_still)
+    sta c_noteptr
+    A8
+    bra @lines
+@own:
+    lda ev_fail
+    dec a
+    and #$03
+    sta c_si
+    lda event_idx
+    asl a
+    asl a
+    clc
+    adc c_si
+    A16
+    and #$00FF
+    asl a
+    tax
+    lda f:card_fail_note,x
+    sta c_noteptr
+    A8
+    beq @board
+@lines:
+    ; one line, or two when it has a line break
+    inc c_note
+    inc c_n
+    A16
+    lda c_noteptr
+    sta ptr0
+    A8
+    lda #^card_fail_note
+    sta ptr0+2
+    ldy #$0000
+@nl:
+    lda [ptr0],y
+    beq @board
+    iny
+    cmp #$0A
+    bne @nl
+    inc c_note
+    inc c_n
+@board:
+    lda c_rank
+    bmi @fit
+    inc c_n                     ; #N ON THE BOARD / NEW TORONTO RECORD!
+    lda c_rank
+    bne @bump
+    inc c_n                     ; + OVER, WE THE NORTH
+    inc c_n
+    bra @fit
+@bump:
+    lda f:c_bumped
+    beq @fit
+    inc c_n                     ; SO LONG
+@fit:
+    stz c_short
+@try:
+    lda #CARD_ROWS
+    sec
+    sbc c_n
+    beq @tight
+    bmi @tight
+    cmp #$03
+    bcc @set
+    lda #$02
+@set:
+    sta c_nst
+    bra @centre
+@tight:
+    ; no room for even one stat: WE THE NORTH! gives way, then a reason's
+    ; second line
+    lda c_rank
+    bne @n2
+    lda c_short
+    bne @n2
+    inc c_short
+    dec c_n
+    bra @try
+@n2:
+    lda c_note
+    cmp #$02
+    bcc @one
+    dec c_note
+    dec c_n
+    bra @try
+@one:
+    lda #$01
+    sta c_nst
+@centre:
+    ; first row: CARD_TOP + half the spare rows (whole 16 px steps)
+    lda c_n
+    clc
+    adc c_nst
+    sta c_n
+    lda #CARD_ROWS
+    sec
+    sbc c_n
+    and #$FE
+    clc
+    adc #CARD_TOP
+    sta c_y
+    rts
 
-; the two stat lines shown next to the arithmetic: ev_stat indices per event
+; the reason line at ptr0 + Y up to a line break or the end, centred on
+; row c_y (orange); -> Y past the break, c_y on the next row
+note_line:
+    ldx #$0000
+@c:
+    lda [ptr0],y
+    beq @end
+    iny
+    cmp #$0A
+    beq @end
+    sta f:c_buf,x
+    inx
+    bra @c
+@end:
+    lda #$00
+    sta f:c_buf,x
+    phy
+    lda ptr0+2
+    pha
+    A16
+    lda ptr0
+    pha
+    A8
+    lda c_y
+    jsr row_cell
+    LDPTR0 c_buf
+    lda #($20 | (TP_ORANGE << 2))
+    jsl txt_print_centre
+    A16
+    pla
+    sta ptr0
+    A8
+    pla
+    sta ptr0+2
+    ply
+    jmp next_row
+
+; X = c_y * 32 + A (column); keeps ptr0 and the tmps
+cy_cell:
+    sta c_cell
+    stz c_cell+1
+    lda c_y
+    A16
+    and #$00FF
+    asl a
+    asl a
+    asl a
+    asl a
+    asl a
+    clc
+    adc c_cell
+    tax
+    A8
+    rts
+
+next_row:
+    inc c_y
+    inc c_y
+    rts
+
+; Y = length of the string at ptr0
+strlen:
+    ldy #$0000
+@l:
+    lda [ptr0],y
+    beq @x
+    iny
+    bra @l
+@x:
+    rts
+
+; the two stat lines shown on the card: ev_stat indices per event, the first
+; one kept when there is room for only one
 card_stat_pick:
     .byte 1, 2                  ; bike: TTC TOKENS, WIPEOUTS
     .byte 0, 1                  ; bay: TIME LEFT, PASSED
     .byte 1, 2                  ; park: DOGS DODGED, TACKLES
     .byte 0, 2                  ; cops: SIP 'N' HOPS, HURDLES
-    .byte 0, 1                  ; sail: TIME LEFT, BUOYS
+    .byte 1, 0                  ; sail: BUOYS, TIME LEFT
     .byte 0, 1                  ; parking: SPOTS PARKED, CURB KISSES
     .byte 1, 0                  ; subway: STATIONS, GERMS
 
-; carry set = ev_break holds a sum (not all zero) that adds up to ev_score
+; carry set = ev_break adds up to ev_score (0 + 0 - 0 = 0 counts: a score of
+; nothing still shows its sum)
 break_ok:
     A16
     lda ev_break
-    ora ev_break+2
-    ora ev_break+4
-    beq @no
-    lda ev_break
     clc
     adc ev_break+2
+    bcs @no
     sec
     sbc ev_break+4
+    bcc @no
     cmp ev_score
     bne @no
     A8
@@ -608,11 +884,37 @@ break_ok:
     clc
     rts
 
-; rows 12-14: base, bonus and penalty under the event's labels
-; (card_break_labels), then + - = down column 5 to the SCORE row
+; the sum rows from c_y: base (always), + bonus and - penalty (only when not
+; 0), each under the event's label (card_break_labels) with its rate after
+; it when the event has one (card_rate / card_rate_fail)
 break_lines:
     stz tmp7
 @l:
+    lda tmp7
+    asl a
+    TAYB
+    A16
+    lda ev_break,y
+    sta c_val
+    A8
+    lda tmp7
+    beq @show
+    A16
+    lda c_val
+    A8
+    jeq @next                   ; nothing added or taken: no row
+    lda tmp7
+    dec a
+    TAXB
+    lda f:brk_op,x
+    sta tmp2
+    lda f:brk_opcol,x
+    pha
+    lda #COL_L
+    jsr cy_cell
+    pla
+    jsl txt_char
+@show:
     lda event_idx
     asl a
     clc
@@ -622,79 +924,65 @@ break_lines:
     A16
     and #$00FF
     asl a
+    sta c_li
     tax
     lda f:card_break_labels,x
     sta ptr0
-    lda tmp7
-    and #$00FF
-    clc
-    adc #BRK_ROW
-    asl a
-    asl a
-    asl a
-    asl a
-    asl a
-    sta tmp5                    ; row cell
-    clc
-    adc #7
-    tax
     A8
     lda #^card_break_labels
     sta ptr0+2
+    lda #COL_S
+    jsr cy_cell
     lda #($20 | (TP_WHITE << 2))
     jsl txt_print
+    jsr strlen
+    ldx c_li
+    lda ev_fail
+    bne @rf
+    A16
+    lda f:card_rate,x
+    bra @rr
+@rf:
+    A16
+    lda f:card_rate_fail,x
+@rr:
+    beq @norate
+    sta ptr0
+    A8
+    lda #^card_rate
+    sta ptr0+2
+    tya
+    clc
+    adc #(COL_S + 1)
+    jsr cy_cell
+    lda #($20 | (TP_GREY << 2))
+    jsl txt_print
+@norate:
+    A8
+    A16
+    lda c_val
+    sta tmp1
+    A8
     lda tmp7
     TAXB
     lda f:brk_col,x
     pha
-    lda tmp7
-    asl a
-    TAYB
-    A16
-    lda ev_break,y
-    sta tmp1
-    lda tmp5
-    clc
-    adc #21
-    tax
-    A8
+    lda #COL_V
+    jsr cy_cell
     pla
     ldy #5
     jsl txt_num
+    jsr next_row
+@next:
     inc tmp7
     lda tmp7
     cmp #3
-    bne @l
-    ldx #$0000
-@op:
-    phx
-    lda f:brk_op,x
-    sta tmp2
-    lda f:brk_opcol,x
-    pha
-    A16
-    txa
-    clc
-    adc #(BRK_ROW + 1)
-    asl a
-    asl a
-    asl a
-    asl a
-    asl a
-    adc #5
-    tax
-    A8
-    pla
-    jsl txt_char
-    plx
-    inx
-    cpx #3
-    bne @op
+    jne @l
     rts
 
 brk_col:   .byte ($20 | (TP_WHITE << 2)), ($20 | (TP_GREEN << 2)), ($20 | (TP_RED << 2))
-brk_op:    .byte '+' - 32 + TXT_WIN, '-' - 32 + TXT_WIN, '=' - 32 + TXT_WIN
-brk_opcol: .byte ($20 | (TP_GREEN << 2)), ($20 | (TP_RED << 2)), ($20 | (TP_YELLOW << 2))
+brk_op:    .byte '+' - 32 + TXT_WIN, '-' - 32 + TXT_WIN
+brk_opcol: .byte ($20 | (TP_GREEN << 2)), ($20 | (TP_RED << 2))
 
 str_finished:    .byte "FINISHED!", 0
 str_out_of_time: .byte "OUT OF TIME!", 0
@@ -839,11 +1127,26 @@ event_standings:
     lda #($20 | (TP_YELLOW << 2))
     jsr print_ev_entry_c
     PRINTC 3, TP_CYAN, str_results
-    ldx #(5*32 + 1)
-    A16
-    lda #$131E
+    ; the box: a field's fits its players, a solo one has the medal lines
+    lda num_players
+    cmp #$02
+    bcc @tall
+    asl a
+    clc
+    adc #3
+    bra @bh
+@tall:
+    lda game_mode
+    cmp #GM_PRACTICE
+    lda #15                     ; rows 5-19: the lines end on 17
+    bcs @bh
+    lda #17                     ; and the medals so far on 19
+@bh:
+    sta tmp1+1
+    sta c_bot
+    lda #30
     sta tmp1
-    A8
+    ldx #(5*32 + 1)
     lda #$20
     jsl txt_box
     lda #TXT_WIN
@@ -954,14 +1257,20 @@ event_standings:
     inc tmp7
     jmp @row
 @shown:
-    ; going solo: medals are against the Toronto Record
     lda num_players
     cmp #$01
-    bne @notsolo
-    PRINTC 11, TP_CYAN, str_solo_rule
-    ldx #(13*32)
-    stx tmp5
-    jsr par_line
+    beq @solo
+    ; a field: the event's Toronto Record under the box, if there's room
+    stz txt_bg
+    cmp #7
+    bcs @notsolo
+    lda c_bot
+    clc
+    adc #6                      ; box rows 5..4+c_bot, a row clear of it
+    jsr rec_line
+    bra @notsolo
+@solo:
+    jsr solo_lines
 @notsolo:
     stz txt_bg
     jsl fade_in
@@ -1014,6 +1323,209 @@ str_results:    .byte "RESULTS", 0
 str_dash:       .byte "-", 0
 str_solo_rule:  .byte "MEDALS VS THE RECORD", 0
 
+; going solo, inside the box under the score (row 7): how far to the next
+; medal, the medal lines against the Toronto Record, the record itself, the
+; board, and the medals won so far in a competition
+solo_lines:
+    jsr gap_line
+    PRINTC 11, TP_CYAN, str_solo_rule
+    ldx #(13*32)
+    stx tmp5
+    jsr par_line
+    lda #15
+    jsr rec_line
+    jsr board_line
+    lda game_mode
+    cmp #GM_PRACTICE
+    beq @x
+    jsr haul_line
+@x:
+    rts
+
+; row 9: "214 MORE FOR SILVER", or gold
+gap_line:
+    lda event_idx
+    A16
+    and #$00FF
+    asl a
+    tax
+    lda players+PL_SCORES,x     ; player 0
+    sta c_val
+    A8
+    lda rank_medal
+    bne @short
+    LDPTR0 str_gap_gold
+    bra @say
+@short:
+    ; the next medal up: none -> bronze, bronze -> silver, silver -> gold
+    cmp #3
+    bcc @m
+    lda #3
+@m:
+    dec a
+    asl a
+    TAXB
+    A16
+    lda f:gap_par,x
+    tay
+    lda a:$0000,y               ; par_g / par_s / par_b
+    sec
+    sbc c_val
+    sta tmp1
+    A8
+    jsr buf_reset
+    jsr buf_num
+    LDPTR0 str_gap_more
+    jsr buf_str
+    lda rank_medal
+    cmp #3
+    bcc @n
+    lda #3
+@n:
+    dec a
+    asl a
+    TAXB
+    A16
+    lda f:gap_name,x
+    sta ptr0
+    A8
+    lda #^gap_name
+    sta ptr0+2
+    jsr buf_str
+    jsr buf_term
+    LDPTR0 c_buf
+@say:
+    ldx #(9*32)
+    lda #($20 | (TP_YELLOW << 2))
+    jsl txt_print_centre
+    rts
+
+gap_par:  .addr par_g, par_s, par_b
+gap_name: .addr str_m_gold, str_m_silver, str_m_bronze
+str_gap_gold: .byte "GOLD! THAT'S RECORD PACE", 0
+str_gap_more: .byte " MORE FOR ", 0
+str_m_gold:   .byte "GOLD", 0
+str_m_silver: .byte "SILVER", 0
+str_m_bronze: .byte "BRONZE", 0
+
+; A = row: "RECORD: SUITGUY 3000" centred (event_idx's #1)
+rec_line:
+    pha
+    jsr buf_reset
+    LDPTR0 str_rec_colon
+    jsr buf_str
+    jsr record_ptr
+    A16
+    txa
+    clc
+    adc #.loword(records + 2)
+    sta ptr0
+    A8
+    stz ptr0+2
+    jsr buf_str
+    lda #' '
+    jsr buf_ch
+    jsr record_ptr
+    A16
+    lda records,x
+    sta tmp1
+    A8
+    jsr buf_num
+    jsr buf_term
+    pla
+    jsr row_cell
+    LDPTR0 c_buf
+    lda #($20 | (TP_WHITE << 2))
+    jsl txt_print_centre
+    rts
+
+; row 17: where this score sits on the Toronto board (c_rank from the
+; score card), or what it takes to get on it
+board_line:
+    lda c_rank
+    bmi @off
+    bne @on
+    PRINTC 17, TP_PINK, str_new_record
+    rts
+@on:
+    jsr buf_reset
+    lda #'#'
+    jsr buf_ch
+    lda c_rank
+    inc a
+    jsr buf_byte
+    LDPTR0 str_on_board
+    jsr buf_str
+    jsr buf_term
+    LDPTR0 c_buf
+    ldx #(17*32)
+    lda #($20 | (TP_GREEN << 2))
+    jsl txt_print_centre
+    rts
+@off:
+    jsr buf_reset
+    LDPTR0 str_top5
+    jsr buf_str
+    jsr record_ptr
+    A16
+    lda records + REC_ROW*4,x   ; #5
+    sta tmp1
+    A8
+    jsr buf_num
+    jsr buf_term
+    LDPTR0 c_buf
+    ldx #(17*32)
+    lda #($20 | (TP_GREY << 2))
+    jsl txt_print_centre
+    rts
+
+; row 19: "MEDALS SO FAR  [g] 1  [s] 0  [b] 2"
+haul_line:
+    PRINT 4, 19, TP_GREY, str_so_far
+    stz tmp6
+@k:
+    lda tmp6
+    TAXB
+    lda f:medal_tp,x
+    sta tmp7
+    lda #(TXT_MEDAL + TXT_WIN)
+    sta tmp2
+    lda tmp6                    ; column 18 + k*4
+    asl a
+    asl a
+    clc
+    adc #(19*32 + 18) & $FF
+    A16
+    and #$00FF
+    clc
+    adc #(19*32) & $FF00
+    tax
+    A8
+    lda tmp7
+    jsl txt_char
+    inx
+    phx
+    lda tmp6
+    TAXB
+    lda players+PL_GOLD,x       ; player 0
+    A16
+    and #$00FF
+    sta tmp1
+    A8
+    plx
+    ldy #1
+    lda #($20 | (TP_WHITE << 2))
+    jsl txt_num
+    inc tmp6
+    lda tmp6
+    cmp #3
+    bne @k
+    rts
+
+str_rec_colon: .byte "RECORD: ", 0
+str_top5:      .byte "THE BOARD STARTS AT ", 0
+str_so_far:    .byte "MEDALS SO FAR", 0
+
 ; ------------------------------------------------------------------
 ; medal_table: between events of a multiplayer competition, the running
 ; medal table under a CN Tower LED ticker. Skipped after the last event
@@ -1063,7 +1575,7 @@ medal_table:
     jsr menu_setup
     PRINTC 1, TP_YELLOW, str_medal_table
     jsr draw_table
-    ; the ticker: "AFTER 2 OF 4 EVENTS +++ KEV LEADS ON 8 PTS +++ NEXT UP: ..."
+    ; the ticker: "EVENT 2 OF 4 DONE +++ KEV LEADS ON 8 PTS +++ NEXT UP: ..."
     jsr buf_reset
     LDPTR0 str_tk_after
     jsr buf_str
@@ -1171,9 +1683,9 @@ medal_table:
     rts
 
 str_medal_table: .byte "MEDAL TABLE", 0
-str_tk_after:    .byte "AFTER ", 0
+str_tk_after:    .byte "EVENT ", 0
 str_tk_of:       .byte " OF ", 0
-str_tk_events:   .byte " EVENTS +++ ", 0
+str_tk_events:   .byte " DONE +++ ", 0
 str_tk_none:     .byte "NO MEDALS YET. ANYONE? +++ ", 0
 str_tk_tied:     .byte "TIED AT THE TOP ON ", 0
 str_tk_leads:    .byte " LEADS ON ", 0
@@ -1186,7 +1698,7 @@ str_tk_onplace:  .byte " STILL AT ONTARIO PLACE +++ ", 0
 
 ; ------------------------------------------------------------------
 ; draw_table: rows 3..21, the medal table in final_sort order
-;   place  [jersey]name   G S B  PTS SCORE
+;   place [jersey] name    G S B  PTS SCORE
 ; The jersey is a sprite in the player's sponsor colours (sprite palette =
 ; row), so two PLAYER 1s can still be told apart.
 MARK_TILE = 240                 ; spare OBJ tile on the menu screens
@@ -1298,12 +1810,13 @@ draw_table:
     A16
     lda tmp5
     clc
-    adc #5
+    adc #6                      ; a cell clear of the jersey
     tax
     A8
     lda tmp4
     jsl print_player_name
-    ; gold silver bronze, each in its medal's colour, two cells clear of the name
+    ; gold silver bronze (columns 15, 17, 19), each in its medal's colour,
+    ; a cell clear of the longest name
     lda tmp4
     jsl player_offset
     stx tmp4
@@ -1671,15 +2184,61 @@ row_cell:
     A8
     rts
 
-; final_table: the overall standings, then REMATCH / 1 EVENT / TITLE
-; -> A = 0 / 1 / 2. The cursor starts on TITLE: a player still tapping A
-; through the podium must not start a whole new set by accident.
+; final_table: the overall standings, then REMATCH / 1 EVENT / TITLE.
+; A = where the cursor starts (2 TITLE after the podium, 1 back from 1 EVENT)
+; -> A = 0 / 1 / 2. TITLE throws the roster away, so it asks first (cursor
+; on NO): a player still tapping A through the podium can neither start a
+; whole new set nor lose the crew by accident.
 final_table:
+    sta c_fdef
     jsr menu_setup
     PRINTC 1, TP_YELLOW, str_final
     jsr draw_table
-    ; under the box: the champion, then how first place was decided when
-    ; points alone didn't
+    jsr final_lines
+    lda c_order
+    ldy #$0000
+    jsl player_palette
+    lda #25
+    ldx #((CARD_LOCK << 8) | 1)
+    jsr card_setup
+    lda c_champs
+    cmp #$01
+    bne @nohop
+    lda #$03                    ; backdrop + the champion hops
+    sta c_hook
+@nohop:
+    lda #$02
+    sta c_opts                  ; REMATCH / 1 EVENT / TITLE
+    lda c_fdef
+    sta c_def
+    jsr card_fade_in            ; the cursor moves during the fade
+    lda #SONG_STANDINGS
+    jsl music_keep
+@ask:
+    jsl card_wait
+    cmp #$02
+    bne @go
+    jsr title_confirm
+    bcs @title
+    ; NO: back to the choices, the cursor still on TITLE
+    lda #$02
+    sta c_opts
+    sta c_def
+    lda #16
+    sta c_lock
+    bra @ask
+@title:
+    lda #$02
+@go:
+    pha
+    jsl fade_out
+    jsl music_stop
+    pla
+    rtl
+
+; under the final table's box: the champion, then how first place was
+; decided when points alone didn't
+final_lines:
     jsr buf_reset
     lda c_champs
     bne @won
@@ -1708,38 +2267,85 @@ final_table:
     jsl txt_print_centre
     lda #$00
     jsl why_line
-    bcc @nowhy
+    bcc @x
+    ; 16 px under the champion line; a full field of eight has no room, so
+    ; it takes the champion line's place (the champions are yellow above)
+    ldy #4
+    lda num_players
+    cmp #MAX_PLAYERS
+    bcc @w4
     lda c_bot
     clc
-    adc #3
+    adc #2
+    jsr blank_row
+    ldy #2
+@w4:
+    tya
+    clc
+    adc c_bot
     jsr row_cell
     lda #($20 | (TP_CYAN << 2))
     jsl txt_print_centre
-@nowhy:
-    lda c_order
-    ldy #$0000
-    jsl player_palette
-    jsl fade_in
-    lda #SONG_STANDINGS
-    jsl music_keep
-    lda #25
-    ldx #((CARD_LOCK << 8) | 1)
-    jsr card_setup
-    lda c_champs
-    cmp #$01
-    bne @nohop
-    lda #$03                    ; backdrop + the champion hops
-    sta c_hook
-@nohop:
-    lda #$02
-    sta c_opts                  ; REMATCH / 1 EVENT / TITLE
-    sta c_def                   ; on TITLE
+@x:
+    rts
+
+; "LEAVE AND LOSE 4 PLAYERS?" on row 23 (over the lines under the table for
+; now), NO / YES on the choices' row 25, on NO after a short lockout and a
+; let-go -> carry set = YES
+title_confirm:
+    jsr buf_reset
+    LDPTR0 str_leave
+    jsr buf_str
+    lda num_players
+    jsr buf_byte
+    LDPTR0 str_lose_n
+    lda num_players
+    cmp #$02
+    bcs @pl
+    LDPTR0 str_lose_1
+@pl:
+    jsr buf_str
+    jsr buf_term
+    lda #23
+    jsr blank_row
+    lda #24
+    jsr blank_row
+    lda #23
+    jsr row_cell
+    LDPTR0 c_buf
+    lda #($20 | (TP_ORANGE << 2))
+    jsl txt_print_centre
+    lda #$03
+    sta c_opts
+    stz c_def                   ; NO
+    lda #16
+    sta c_lock
     jsl card_wait
     pha
-    jsl fade_out
-    jsl music_stop
+    lda #23
+    jsr blank_row
+    jsr final_lines
     pla
-    rtl
+    cmp #$01
+    rts
+
+; A = row: blank columns 2-29
+blank_row:
+    jsr row_cell
+    inx
+    inx
+    A16
+    lda #$011C
+    sta tmp1
+    A8
+    stz tmp2
+    lda #$20
+    jsl txt_fill
+    rts
+
+str_leave:  .byte "LEAVE AND LOSE ", 0
+str_lose_n: .byte " PLAYERS?", 0
+str_lose_1: .byte " PLAYER?", 0
 
 str_final:    .byte "FINAL STANDINGS", 0
 str_champ:    .byte "CHAMPION: ", 0
@@ -2153,15 +2759,18 @@ str_amp:       .byte " & ", 0
 
 ; ------------------------------------------------------------------
 ; card_wait (jsl from the screen, so pt still sees which screen it is):
-; ignore input for c_lock frames, and until every button has been let go
-; for REL_FRAMES frames in a row (a mash from the last turn can't carry
-; over), then show the prompt and wait for a fresh press of A or START.
+; ignore A for c_lock frames, and until every button has been let go
+; for c_relq frames in a row (a mash from the last turn can't carry
+; over; REL_NEXT when the card hands over to another player, so even a
+; steady rhythm of taps has to stop), then show the prompt and wait for a
+; fresh press of A or START.
 ; The d-pad doesn't count: a thumb resting on it is not a mash. If buttons
 ; are still down when the timed lockout ends, the prompt row says so
 ; (LET GO OF THE BUTTONS) instead of the card looking hung; mashing never
 ; extends the timed part, only the short quiet spell.
-; c_opts 1/2 offer three choices instead (the d-pad or SELECT moves), the
-; cursor starting on c_def. Runs the c_hook extras every frame. -> A = choice
+; c_opts 1/2 offer three choices instead, 3 a NO / YES; the d-pad or SELECT
+; moves the cursor (from c_def) at once, only A waits for the lockout.
+; Runs the c_hook extras every frame. -> A = choice
 REL_FRAMES = 20
 QUIET_MASK = PAD_A | PAD_B | PAD_X | PAD_Y | PAD_START | PAD_SELECT | PAD_L | PAD_R
 card_wait:
@@ -2169,17 +2778,21 @@ card_wait:
     sta c_sel
     stz c_tick
     stz c_hint
-    lda #REL_FRAMES
+    lda c_relq
     sta c_relc
+    lda c_opts
+    beq @lock
+    jsr card_prompt             ; a menu shows at once
 @lock:
     jsl wait_frame
     jsr card_hook
+    jsr card_nav
     A16
     lda pad
     and #QUIET_MASK
     A8
     beq @quiet
-    lda #REL_FRAMES             ; something held: the quiet spell starts again
+    lda c_relq                  ; something held: the quiet spell starts again
     sta c_relc
     bra @locked
 @quiet:
@@ -2200,6 +2813,7 @@ card_wait:
     jsr card_hint
     bra @lock
 @armed:
+    stz c_hint
     jsr card_prompt
 @w:
     jsl wait_frame
@@ -2208,8 +2822,24 @@ card_wait:
     beq @nb
     jsr card_prompt
 @nb:
+    jsr card_nav
+    A16
+    lda pad_new
+    and #(PAD_A | PAD_START)
+    A8
+    beq @w
+    SFX SFX_SELECT
+    lda c_sel
+    rtl
+
+; a menu's cursor: LEFT / UP back, RIGHT / DOWN / SELECT on, wrapping
+; (the row is redrawn unless LET GO OF THE BUTTONS is up)
+card_nav:
     lda c_opts
-    beq @confirm
+    beq @x
+    TAXB
+    lda f:opt_cnt-1,x
+    sta c_n
     A16
     lda pad_new
     and #(PAD_LEFT | PAD_UP)
@@ -2217,7 +2847,7 @@ card_wait:
     beq @fwd
     lda c_sel
     bne @p1
-    lda #3
+    lda c_n
 @p1:
     dec a
     sta c_sel
@@ -2227,26 +2857,42 @@ card_wait:
     lda pad_new
     and #(PAD_RIGHT | PAD_DOWN | PAD_SELECT)
     A8
-    beq @confirm
+    beq @x
     lda c_sel
     inc a
-    cmp #3
+    cmp c_n
     bcc @f1
     lda #$00
 @f1:
     sta c_sel
 @moved:
     SFX SFX_BLIP
+    lda c_hint
+    bne @x
     jsr card_prompt
-@confirm:
-    A16
-    lda pad_new
-    and #(PAD_A | PAD_START)
-    A8
-    beq @w
-    SFX SFX_SELECT
+@x:
+    rts
+
+; fade a menu card in with its cursor already live (card_setup and c_opts
+; first): a d-pad press during the fade isn't lost
+card_fade_in:
+    lda c_def
+    sta c_sel
+    stz c_hint
+    jsr card_prompt
+    lda #$00
+@l:
+    sta inidisp_sh
+    pha
+    jsl wait_frame
+    jsr card_nav
+    pla
+    inc a
+    cmp #$10
+    bne @l
     lda c_sel
-    rtl
+    sta c_def
+    rts
 
 card_hook:
     lda c_hook
@@ -2285,7 +2931,8 @@ card_hook:
     A8
     jmp ticker_draw
 
-; new record: the banner flashes pink / yellow, WE THE NORTH red / white
+; new record: the banner (row c_rr1) flashes pink / yellow, WE THE NORTH
+; (row c_rr2, if there was room) red / white
 rec_flash:
     lda frame
     and #$07
@@ -2293,25 +2940,44 @@ rec_flash:
     lda frame
     and #$08
     beq @y
-    lda #($20 | (TP_PINK << 2))
-    xba
     lda #($20 | (TP_WHITE << 2))
+    sta tmp6
+    lda #($20 | (TP_PINK << 2))
+    sta tmp6+1
     bra @s
 @y:
-    lda #($20 | (TP_YELLOW << 2))
-    xba
     lda #($20 | (TP_RED << 2))
+    sta tmp6
+    lda #($20 | (TP_YELLOW << 2))
+    sta tmp6+1
 @s:
-    ldx #((21*32 + 3) * 2)
+    lda c_rr2
+    beq @b
     jsr @row
-    xba
-    ldx #((17*32 + 3) * 2)
+@b:
+    lda tmp6+1
+    sta tmp6
+    lda c_rr1
+    beq @x
     jsr @row
     lda #$01
     sta txt_dirty
 @x:
     rts
 @row:
+    A16
+    and #$00FF
+    asl a
+    asl a
+    asl a
+    asl a
+    asl a
+    clc
+    adc #3
+    asl a
+    tax
+    A8
+    lda tmp6
     ldy #26
 @l:
     sta txt_map+1,x
@@ -2403,7 +3069,7 @@ card_prompt:
     lda #($20 | (TP_GREY << 2))
 @pr:
     jsl txt_print_centre
-    bra @x
+    jmp @x
 @choice:
     stz tmp6                    ; option 0, 1, 2
 @opt:
@@ -2456,24 +3122,30 @@ card_prompt:
 @print:
     jsl txt_print
     inc tmp6
+    lda c_opts
+    TAXB
     lda tmp6
-    cmp #3
+    cmp f:opt_cnt-1,x
     bne @opt
 @x:
     pla
     sta txt_bg
     rts
 
-; c_opts 1: practice results, 2: final standings (arrow sits 2 cells left;
-; TITLE ends by column 27, clear of the champion hopping at the right)
-opt_col: .byte 4, 12, 26, 3, 13, 23
-opt_str: .addr str_retry, str_other, str_menu, str_rematch, str_onemore, str_newgame
+; c_opts 1: practice results, 2: final standings, 3: NO / YES (arrow sits 2
+; cells left; TITLE ends by column 27, clear of the champion hopping at the
+; right)
+opt_cnt: .byte 3, 3, 2
+opt_col: .byte 4, 12, 26, 4, 13, 23, 11, 18, 0
+opt_str: .addr str_retry, str_other, str_menu, str_rematch, str_onemore, str_newgame, str_no, str_yes, str_no
 str_retry:   .byte "RETRY", 0
 str_other:   .byte "OTHER EVENT", 0
 str_menu:    .byte "MENU", 0
 str_rematch: .byte "REMATCH", 0
 str_onemore: .byte "1 EVENT", 0
 str_newgame: .byte "TITLE", 0
+str_no:      .byte "NO", 0
+str_yes:     .byte "YES", 0
 
 ; the champion's athlete hops beside the final table
 champ_hop:
@@ -2614,6 +3286,56 @@ bl_fine:   .byte "SPILLS+FINE", 0
 bl_bump:   .byte "BUMPS", 0
 bl_dents:  .byte "DENTS+CURBS", 0
 bl_germs:  .byte "GERMS", 0
+
+; card_fail_note: the line under a failed run's sum, saying why it scored
+; what it did (26 characters at most, centred; a $0A splits it into two lines,
+; the second one dropped when the card is full). Per event, ev_fail 1 (its
+; own fail), 2 (out of time), 3 (called it a day), 4 (its second fail);
+; 0 = none. A base of 0 in a card_still event shows str_still instead.
+card_fail_note:
+    .addr fn_bike,   fn_bike,   fn_bike,   fn_bike      ; bike
+    .addr fn_bay,    fn_bay,    fn_bay,    fn_bay       ; bay
+    .addr fn_park,   fn_park,   fn_park,   fn_park      ; park
+    .addr fn_cops,   fn_cops,   fn_cops_q, fn_cops      ; cops
+    .addr fn_sail,   fn_sail,   fn_sail,   fn_sail      ; sail
+    .addr fn_pk,     fn_pk,     fn_pk_q,   fn_pk        ; parking
+    .addr fn_sub,    fn_sub,    fn_sub_q,  fn_sub       ; subway
+fn_bike:   .byte "NO DELIVERY, NO 1000 FEE", 0
+fn_bay:    .byte "NO TRAIN: NO 1000 OR STYLE", 0
+fn_park:   .byte "NO DUNDAS: NO 750 OR STYLE", 0
+fn_cops:   .byte "BUSTED: THE COP TAKES HALF", 0
+fn_cops_q: .byte "QUIT: THE COP TAKES HALF", 0
+fn_sail:   .byte "NO FINISH, NO STYLE PAID", 0
+fn_pk:     .byte "PARK ONE SPOT TO FINISH", 0
+fn_pk_q:   .byte "QUITTERS KEEP 450 AT MOST", 0
+fn_sub:    .byte "PATIENT ZERO! STYLE VOID", $0A, "RIDE: 40 A STOP YOU SURFED", 0
+fn_sub_q:  .byte "GAVE UP: STYLE VOID", $0A, "RIDE: 40 A STOP YOU SURFED", 0
+
+; a failed run whose base is 0 says this instead, in the events where only
+; standing still earns a base of 0 (1 = yes)
+card_still: .byte 1, 1, 1, 0, 1, 0, 1    ; bike bay park cops sail parking subway
+str_still:  .byte "STANDING STILL PAYS 0", 0
+
+; card_rate / card_rate_fail: an optional rate printed in grey after a sum
+; label ("TIPS 50 A TOKEN"), per event base, bonus, penalty; 0 = none. The
+; first table is for a finished run, the second for a failed one. Label +
+; space + rate fit in 16 characters.
+card_rate:
+    .addr 0, 0, 0               ; bike
+    .addr 0, 0, 0               ; bay
+    .addr 0, 0, 0               ; park
+    .addr 0, 0, 0               ; cops
+    .addr 0, 0, 0               ; sail
+    .addr 0, 0, 0               ; parking
+    .addr 0, 0, 0               ; subway
+card_rate_fail:
+    .addr 0, 0, 0               ; bike
+    .addr 0, 0, 0               ; bay
+    .addr 0, 0, 0               ; park
+    .addr 0, 0, 0               ; cops
+    .addr 0, 0, 0               ; sail
+    .addr 0, 0, 0               ; parking
+    .addr 0, 0, 0               ; subway
 
 ; stat labels: 4 per event (last is padding), 0 = unused
 card_stat_labels:

@@ -46,6 +46,7 @@ pod_y:    .res MAX_PLAYERS*2
 ceremony:
     jsl final_sort
     jsr podium_scene
+    lda #$02                    ; the cursor on TITLE (which asks first)
     jsl final_table
     rtl
 
@@ -789,7 +790,7 @@ fireworks:
     A16
     dec fw_next
     A8
-    bne @age
+    jne @age
     lda #18
     jsl rand_range
     clc
@@ -822,13 +823,21 @@ fireworks:
     ldx cer_i
     sta fw_x,x
     stz fw_x+1,x
-    lda #61                     ; y 40..100: clear of the marquee and the chamber
+    lda #91                     ; y 40..130: above the arches
     jsl rand_range
     clc
     adc #40
     ldx cer_i
     sta fw_y,x
     stz fw_y+1,x
+    ; and never over the marquee or a banner: try again in a moment
+    jsr fw_clear
+    bcc @launch
+    lda #2
+    sta fw_next
+    bra @age
+@launch:
+    ldx cer_i
     lda #FW_LIFE
     sta fw_t,x
     lda cer_n
@@ -851,9 +860,103 @@ fireworks:
     bne @a
     rts
 
-; firework zones: first x, how many x
-fw_zx: .byte 12, 114, 236
-fw_zw: .byte 13, 29, 12
+; firework zones: first x, how many x (a burst is 32 x 32 round x, y)
+fw_zx: .byte 14, 114, 238
+fw_zw: .byte 11, 29, 8
+
+; carry set = burst cer_i (fw_x, fw_y) would touch text: the marquee, a
+; banner, or where PRESS A will go (cells x-16..x+15, y-16..y+21: the
+; sparkle drifts down)
+fw_clear:
+    ldx cer_i
+    A16
+    lda fw_y,x
+    sec
+    sbc #16
+    lsr a
+    lsr a
+    lsr a
+    sta tmp1                    ; first row
+    sta tmp6
+    lda fw_y,x
+    clc
+    adc #21
+    lsr a
+    lsr a
+    lsr a
+    sta tmp2                    ; last row
+    lda fw_x,x
+    sec
+    sbc #16
+    bpl @l0
+    lda #$0000
+@l0:
+    lsr a
+    lsr a
+    lsr a
+    sta tmp3                    ; first column
+    lda fw_x,x
+    clc
+    adc #15
+    lsr a
+    lsr a
+    lsr a
+    cmp #32
+    bcc @r0
+    lda #31
+@r0:
+    sta tmp4                    ; last column
+@row:
+    lda tmp1
+    asl a
+    asl a
+    asl a
+    asl a
+    asl a
+    clc
+    adc tmp3
+    asl a
+    tax
+    lda tmp3
+    sta tmp5
+@col:
+    lda txt_map,x
+    bne @hit
+    inx
+    inx
+    lda tmp5
+    inc a
+    sta tmp5
+    cmp tmp4
+    bcc @col
+    beq @col
+    lda tmp1
+    inc a
+    sta tmp1
+    cmp tmp2
+    bcc @row
+    beq @row
+    ; PRESS A's strip (row 11, columns 11-20) before it shows
+    lda tmp6
+    cmp #12
+    bcs @ok
+    lda tmp2
+    cmp #11
+    bcc @ok
+    lda tmp3
+    cmp #21
+    bcs @ok
+    lda tmp4
+    cmp #11
+    bcs @hit
+@ok:
+    A8
+    clc
+    rts
+@hit:
+    A8
+    sec
+    rts
 
 draw_fireworks:
     ldx #$0000
