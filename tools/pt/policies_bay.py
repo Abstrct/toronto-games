@@ -195,6 +195,172 @@ class bay_beat(Policy):
         return m
 
 
+def _hand_latency():
+    """The reaction latency pt's human hand adds to every input (pt.py run_bot's
+    `latency` local; 0 outside `pt.py curve`)."""
+    f = inspect.currentframe()
+    while f:
+        if f.f_code.co_name == 'run_bot' and 'latency' in f.f_locals:
+            return int(f.f_locals['latency'] or 0)
+        f = f.f_back
+    return 0
+
+
+class bay_hand(Policy):
+    """The curve bot: a person with a pad, not a RAM reader.
+
+    `pt.py curve` delays every input by the hand's reaction latency L. Beat taps
+    aren't reactions (you hear the song coming and anticipate it), so this bot
+    sends its steps L frames early and pt's delay lands them back on the beat.
+    What's left is human rhythm: timing noise (sd 0.7 + 0.16 L frames: 3.1 at
+    L = 15, plus pt's own +-L/4 hand jitter), a slowly wandering sense of the
+    beat (AR(1) drift, sd ~0.08 L; about 3.9 frames all told at L = 15), and the odd dropped beat. L doubles as the
+    skill knob: an L = 0 hand is the expert.
+
+    Hazards ARE reactions: lane changes and EXCUSE ME are decided from what is
+    on screen now (people visible ahead in your lane) and land L frames late.
+    Look-ahead is a human's ~1 s glance down the sidewalk, and a slow hand
+    overlooks more (L% of hazards go unnoticed). Experts weave and swipe PRESTO;
+    slower hands lean on EXCUSE ME and skip PRESTO once timing gets loose."""
+    every = 1
+    skill = None            # fixed noise level (frames, like L) outside `curve`
+    blind = None            # chance to overlook a hazard (default L%)
+    dodges = True
+
+    def __init__(self):
+        self.eyes = _Eyes(self)
+        self.L = None
+        self.k = None             # next 8th note to step on
+        self.emit = None          # frame to send it
+        self.drift = 0.0
+        self.foot = LEFT
+        self.tap_until = -1
+        self.tap_mask = 0
+        self.act_until = -1
+        self.act_mask = 0
+        self.excuse_at = -100
+        self.noticed = {}
+
+    def setup(self):
+        L = self.L = _hand_latency()
+        S = L if self.skill is None else self.skill
+        self.sd = 0.7 + 0.16 * S
+        self.drift_sd = 0.026 * S          # stationary sd ~0.08 S with rho 0.95
+        self.drop = 0.01 if S else 0.0
+        self.react = 76                     # px ahead (about a second of walking)
+        self.p_blind = 0.01 * S if self.blind is None else self.blind
+        self.prefer_lanes = S < 9
+        self.presto = S < 9
+
+    def next_beat(self, t, rng):
+        # first 8th whose (anticipated) send time is still ahead of us
+        k = max(self.k + 1 if self.k is not None else 0, (t + self.L - PHASE) // 15 + 1)
+        self.k = k
+        self.drift = 0.95 * self.drift + rng.gauss(0, self.drift_sd) if self.drift_sd else 0.0
+        land = PHASE + 15 * k + rng.gauss(0, self.sd) + self.drift
+        self.emit = max(t + 1, int(round(land)) - self.L)
+
+    def hazards(self, t, rng):
+        seen = self.eyes.look()
+        if not seen:
+            return 0
+        me, ents = seen
+        if me['state'] not in (0, 1):
+            return 0
+        for e in ents:
+            e['rel'] = _rel(e, me)
+
+        def noticed(e):
+            key = (e['type'], e['wx'] // 32, e['lane'])
+            if key not in self.noticed:
+                self.noticed[key] = rng.random() >= self.p_blind
+            return self.noticed[key]
+        ahead = [e for e in ents if e['lane'] == me['lane'] and -2 < e['rel'] < self.react
+                 and not e['flags'] & 0x0C and e['type'] != T_JOGGER and noticed(e)]
+        behind = [e for e in ents if e['type'] == T_JOGGER and e['lane'] == me['lane'] and -90 < e['rel'] < 0
+                  and not e['flags'] & 0x04 and noticed(e)]
+        if not ahead and not behind:
+            return 0
+
+        def room(lane):
+            # (px you could walk in that lane before reaching someone, and
+            # whether that someone is a walker you could ask to step aside);
+            # 0 room: someone right beside you, or a jogger coming
+            if any(e['lane'] == lane and e['type'] == T_JOGGER and -90 < e['rel'] < 0 for e in ents):
+                return 0, False
+            near = sorted((e['rel'], e['type']) for e in ents if e['lane'] == lane and not e['flags'] & 0x0C
+                          and e['type'] != T_JOGGER and e['rel'] > -18)
+            if not near:
+                return 999, False
+            r, typ = near[0]
+            return (0 if r < 28 else r), (typ < T_JOGGER and r > -4)
+        here = min((e['rel'] for e in ahead), default=999)
+        lanes = [l for l in (me['lane'] - 1, me['lane'] + 1) if 0 <= l <= 2]
+        clean = [l for l in lanes if room(l)[0] > here + 16]
+        walkers = ahead and all(e['type'] < T_JOGGER for e in ahead) and not behind
+        can_excuse = walkers and t - self.excuse_at > 45 and any(e['rel'] < 60 for e in ahead)
+        if clean and (self.prefer_lanes or not can_excuse):
+            best = max(room(l)[0] for l in clean)
+            to = rng.choice([l for l in clean if room(l)[0] == best])
+        elif can_excuse:
+            self.excuse_at = t
+            return A
+        else:
+            # boxed in by something that won't move: step in behind a walker
+            # (and ask them next)
+            soft = [l for l in lanes if room(l)[1]]
+            if not soft or here > 40:
+                return 0
+            to = rng.choice(soft)
+        return X if to < me['lane'] else B
+
+    def act(self, t, tel, rng):
+        if self.L is None:
+            self.setup()
+        if self.emit is None:
+            self.next_beat(t, rng)
+        if t >= self.emit:
+            if rng.random() >= self.drop:
+                self.tap_mask = self.foot
+                if self.presto and self.k % 8 == 0:
+                    self.tap_mask |= Y
+                self.tap_until = t + TAP
+                self.foot = RIGHT if self.foot == LEFT else LEFT
+            self.next_beat(t, rng)
+        if t < self.tap_until:
+            return self.tap_mask
+        if t < self.act_until:
+            return self.act_mask
+        # the other thumb: only between taps, so a lane press never rides on a step
+        if self.dodges and t % 3 == 0 and t + 6 < self.emit:
+            s = self.hazards(t, rng)
+            if s:
+                self.act_mask = s
+                self.act_until = t + TAP
+                return s
+        return 0
+
+
+class bay_casual(bay_hand):
+    """A decent rhythm player who doesn't dodge perfectly (Gord, Marcus):
+    human timing (sd ~3.1 + drift) and hand latency even outside `curve`,
+    overlooks 40% of the crowd, says EXCUSE ME rather than weave."""
+    skill = 15
+    blind = 0.4
+
+    def setup(self):
+        super().setup()
+        if not self.L:          # outside `curve`: add the hand's lag ourselves
+            self.L = 0
+
+
+class bay_stepper(bay_hand):
+    """Steps in time like a person (sd ~3 frames + drift) and never looks up:
+    no lanes, no EXCUSE ME. The steady stepper of rounds 2-3."""
+    skill = 15
+    dodges = False
+
+
 class bay_ace(bay_beat):
     """Expert: tight timing, weaves through lanes instead of asking (asking
     breaks the combo), swipes PRESTO on every gold downbeat."""
@@ -311,10 +477,12 @@ class bay_mashy(Policy):
         return m
 
 
-POLICIES = {c.__name__: c for c in [bay_beat, bay_ace, bay_human, bay_sloppy, bay_rookie, bay_blind,
+POLICIES = {c.__name__: c for c in [bay_beat, bay_hand, bay_casual, bay_stepper, bay_ace, bay_human, bay_sloppy, bay_rookie, bay_blind,
                                      bay_spam, bay_steady6, bay_double, bay_halfout, bay_mash,
                                      bay_mash10, bay_mashy]}
 
 DEFAULTS = {'bay': ['idle', 'mash_a', 'random_input', 'bay_mash', 'bay_mash10', 'bay_mashy',
                     'bay_steady6', 'bay_halfout', 'bay_blind', 'bay_spam', 'bay_double', 'bay_rookie',
-                    'bay_human', 'bay_sloppy', 'bay_beat', 'bay_ace']}
+                    'bay_human', 'bay_stepper', 'bay_casual', 'bay_sloppy', 'bay_hand', 'bay_beat', 'bay_ace']}
+
+CURVE = {'bay': 'bay_hand'}
