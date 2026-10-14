@@ -21,18 +21,23 @@ the event's physics (src/ev_cops.s):
               cop's well back, and sips through the jump for SIP 'N' HOPs.
               No physics model, no look into RAM's future; `pt curve` adds
               the hand's latency on top.
-  cops_pro    the expert: cops_eyes with a frame of anticipation error,
-              cutting it fine with the cop and the BUZZ budget
-  cops_ace    the best run we know: cops_pro with perfect anticipation that
-              rides the BUZZ high for LIQUID COURAGE (the undocumented trick)
+  cops_pro    the expert (and the title demo): cops_eyes with a frame of
+              anticipation error, cutting it fine with the cop and the BUZZ
+              budget, and taking the big hurdles on LIQUID COURAGE (the
+              undocumented trick) when a ground gulp sets it up
+  cops_ace    the best run we know: cops_pro with near-perfect anticipation
+              that rides the BUZZ high for LIQUID COURAGE (the undocumented trick)
   cops_firstgo  cops_noob who never sips (Dana's chalk-only first go)
+  cops_prompt a first-timer who obeys only on-screen prompts, no
+              anticipation (`pt curve -p cops_prompt -l 20,22,25`)
+  cops_allsip sips over every hop, never minds the BUZZ (it goes red)
   cops_noob   an honest first-timer: +-5 frames off the chalk, freezes on one
               hurdle in four, sips without minding the BUZZ (run it through
               `pt curve -p cops_noob -l 15,24`: it should outlast the 30 s
               warm-up and bank a few hundred points when it's busted)
 
-Every take-off pays up to 30 (minus a point per 1.6 px from the chevron,
-nothing 48 px past it), and ON THE CHALK (8 px short .. 20 px past) doubles a
+Every take-off pays up to 40 (minus a point per 1.6 px from the chevron,
+nothing 64 px past it), and ON THE CHALK (8 px short .. 20 px past) doubles a
 SIP 'N' HOP, DEAD ON triples it. So the curve slopes all the way from 0 to
 ~20 frames of hand latency. A late hand that runs into a hurdle stops against
 it for 24 frames, and its A (on seeing the stop) scrambles over (no spill).
@@ -392,6 +397,7 @@ class cops_eyes(Policy):
     air_buzz = 5                # ...for a sip over crates or a bench (10+ is TIPSY: the cop gains)
     air_buzz_big = 7            # ...over a bin or a raccoon (they pay double)
     careless = 0.1
+    courage = False             # gulps on the ground to take a big hurdle at BUZZ 128+
     miss = 0.0                  # chance to freeze on a hurdle and not jump at all
     sips = True
     scramble = True             # hits A when the runner stops dead against a hurdle
@@ -474,6 +480,15 @@ class cops_eyes(Policy):
                     and (not bin_close or rng.random() < self.careless / 20)):
                 self.b_until = t + self.GULP
                 m |= B
+            elif self.sips and self.courage and q <= self.ground_q and not cop_on_screen and not bin_close:
+                # a gulp now that leaves the BUZZ at 128..170 when we take off for
+                # the bin or raccoon coming up: its SIP 'N' HOP is LIQUID COURAGE
+                big = [a for a in ahead if a[2]['i'] not in self.done]
+                if big and big[0][2]['t'] in (T_BIN, T_COON) and 90 < big[0][0] < 240:
+                    frames = self.GULP + big[0][0] / 2
+                    if 130 <= s.buzz + 56 - frames / 4 <= 170:
+                        self.b_until = t + self.GULP
+                        m |= B
         return m
 
 
@@ -506,18 +521,119 @@ class cops_pro(cops_eyes):
     the buzz."""
     ERR = 1
     ground_q, air_q = 4, 6
-    ground_buzz, air_buzz, air_buzz_big = 2, 6, 9
+    ground_buzz, air_buzz, air_buzz_big = 2, 6, 10
+    courage = True
 
 
 class cops_ace(cops_pro):
     """The best run we know: cops_pro who knows the undocumented trick. A SIP
     'N' HOP's base is 8 + a point for every 16 BUZZ you had before the sip
-    (LIQUID COURAGE from 128 up), so it rides the meter just under the red."""
-    ERR = 0
+    (LIQUID COURAGE from 128 up, 4 more on the base), so it rides the meter
+    just under the red and takes the big hurdles on courage."""
+    ERR = 0.5
     ground_buzz, air_buzz, air_buzz_big = 4, 10, 10
 
 
-POLICIES = {c.__name__: c for c in [cops_safe, cops_pro, cops_pro_rt, cops_human, cops_rookie, cops_human15, cops_eyes, cops_noob, cops_firstgo, cops_ace,
+class cops_prompt(Policy):
+    """A first-timer who reads the intro card once and from then on does only
+    what the screen says (run it through `pt curve -p cops_prompt -l 20,22,25`:
+    the hand's latency is all the timing it has, no anticipation at all).
+
+    - Hurdles: the card says yellow chalk = tap A, red chalk = hold A. It
+      decides to jump when the chevron reaches the runner's feet.
+    - Stopped dead against a hurdle: does nothing until a callout says to
+      tap A, then taps it.
+    - Sips: only once a callout has said HOLD B; then a gulp whenever the cop
+      is off screen and nothing's close, until TIPSY / SLOSHED / the cop's
+      watching says stop (and again once the BUZZ meter is out of the red).
+      SIP 'N' HOPs only after a callout has said B mid-air.
+    """
+    TAP, HOLD, GULP = 8, 22, 24
+
+    def __init__(self):
+        self.g = None
+        self.done = set()
+        self.a_until = self.b_until = -1
+        self.sip_ok = self.air_ok = False
+        self.stop = False
+        self.last = ''
+        self.scram = False
+
+    def popup(self):
+        return ' '.join(r.strip(' .') for r in self.g.text_rows()[8:13])
+
+    def act(self, t, tel, rng):
+        if self.g is None:
+            self.g = getattr(self, "game", None) or _game()
+        s = _State(self.g)
+        if s.state != ST_RUN:
+            self.a_until = self.b_until = -1
+            return 0
+        txt = self.popup() if t % 2 == 0 else self.last
+        fresh = txt != self.last
+        self.last = txt
+        if fresh:
+            if 'HOLD B' in txt and "DON'T" not in txt:
+                self.sip_ok, self.stop = True, False
+                if not s.air and not s.bump:
+                    self.b_until = t + self.GULP
+            if 'MID-AIR' in txt:
+                self.air_ok = True
+            if any(w in txt for w in ("DON'T SIP", 'TIPSY', 'SLOSHED', 'SAW THAT')):
+                self.stop = True
+                self.b_until = -1
+            self.scram = 'SCRAMBLE' in txt and 'TAP A' in txt
+        if self.stop and s.buzz < 176 and (s.gap >> 8) > PLAYER_SX + 20:
+            self.stop = False       # the meter's pink again and he's gone
+        m = 0
+        if t < self.a_until:
+            m |= A
+        if t < self.b_until:
+            m |= B
+        if s.bump and not s.air:
+            if self.scram and t >= self.a_until:
+                self.a_until = t + 6
+                return A
+            return m & ~B
+        if s.air or t < self.a_until:
+            return m
+        cop_seen = (s.gap >> 8) <= PLAYER_SX + 20
+        for e in s.ents:
+            if e['flags'] & 0x1B or e['i'] in self.done:
+                continue
+            to_mark = e['wx'] - s.dist - MK_D[e['t']]
+            if -24 < to_mark <= 0:
+                self.done.add(e['i'])
+                self.a_until = t + (self.HOLD if e['t'] == T_BIN else self.TAP)
+                m |= A
+                if self.air_ok and self.sip_ok and not self.stop and not cop_seen:
+                    self.b_until = t + self.GULP
+                    m |= B
+                else:
+                    self.b_until = -1
+                    m &= ~B
+                return m
+        live = {e['i'] for e in s.ents if not e['flags'] & 0x1B}
+        self.done &= live
+        if self.sip_ok and not self.stop and t >= self.b_until and not cop_seen:
+            near = min((e['wx'] - s.dist for e in s.ents if not e['flags'] & 0x1B and e['wx'] - s.dist > -10),
+                       default=999)
+            if near > 150 and rng.random() < 0.03:
+                self.b_until = t + self.GULP
+                m |= B
+        return m
+
+
+class cops_allsip(cops_eyes):
+    """Dana's "sip on every hop": an air sip over every hurdle the cop can't
+    see, never one on the ground, never minding the BUZZ. It should hit the
+    red within ~10 hops and get SLOSHED: always sipping is a choice that costs."""
+    ground_buzz = -1
+    air_buzz = air_buzz_big = 16
+    air_q = 16
+
+
+POLICIES = {c.__name__: c for c in [cops_safe, cops_pro, cops_pro_rt, cops_human, cops_rookie, cops_human15, cops_eyes, cops_noob, cops_firstgo, cops_ace, cops_prompt, cops_allsip,
                                     hold_b_mash_a, tap_a]}
 DEFAULTS = {'cops': ['idle', 'hold_b', 'hold_a', 'mash_a', 'hold_b_mash_a', 'tap_a', 'cops_jump', 'cops_safe',
                      'cops_pro', 'cops_human', 'cops_human15', 'cops_eyes', 'cops_rookie', 'random_input']}

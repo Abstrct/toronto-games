@@ -6,34 +6,35 @@
 ; commits to it. Sips only score while the cop can't see you (off-screen).
 ; Every hurdle has a chalk take-off mark on the pavement ahead of it: a
 ; yellow chevron (tap A) or red ones (hold A), with a chalk strip on from it.
-; Take-off points (style) for every hop: 30 right on the chevron, a point
-; less every 1.6 px either side, nothing 48 px past it (or 9 short). DEAD ON
+; Take-off points (style) for every hop: 40 right on the chevron, a point
+; less every 1.6 px either side, nothing 64 px past it (or 9 short). DEAD ON
 ; (within a frame of the chevron) and ON THE CHALK (8 px short to 20 px past:
 ; the strip) name it; past the strip it's BIT LATE, BUD.
 ; A sip finished mid-air over a hurdle is a SIP 'N' HOP. It pays
 ;   base x chain x chalk
 ; base 8 + a point for every 16 BUZZ you had before the sip (nobody tells you:
-; LIQUID COURAGE from 128 up), doubled over a green bin (BIG SIP 'N' HOP) or a
-; raccoon (RACCOON RUN); chain X1..X5 (one more for each SIP 'N' HOP in a
+; from 128 up it's LIQUID COURAGE and the base takes 4 more, but the sip takes
+; you into the red), doubled over a green bin (BIG SIP 'N' HOP) or a raccoon
+; (RACCOON RUN); chain X1..X5 (one more for each SIP 'N' HOP in a
 ; row); chalk X1, X2 ON THE CHALK, X3 DEAD ON. The banner's second line
 ; spells out the parts that multiply. A dry hop that paid take-off points
 ; holds the chain; one way off the chalk ends it (so does a spill, a
 ; scramble, a seen or a sloshed sip). Sip on the ground next to a green bin
 ; and a raccoon nicks your can. Run into a hurdle and you stop dead against
-; it for 24 frames: A then scrambles you over (no spill, no points), else you
-; go down. The first 30 s are a warm-up: the cop hangs back, can't bust you,
-; and the game tells you what each obstacle needs; then he finds his legs
-; over 4 s.
+; it (STUCK! TAP A TO SCRAMBLE): A then scrambles you over (no spill, no
+; points), else you go down. The first 30 s are a warm-up: the cop hangs back,
+; can't bust you, and the game tells you what each obstacle needs; you stand
+; against a hurdle longer, and hopping at nothing only gets a word, not
+; WINDED. Then he finds his legs over 4 s.
 ; BUZZ is the sip budget: each sip adds to it and it wears off slowly. In the
 ; red (TIPSY) the cop gains on you until he's on screen, watching, and a sip
 ; is SLOSHED: no points, chain over. So a top run picks its sips (the big
 ; hurdles, DEAD ON take-offs) and rides the BUZZ high without going red.
-; Score (ev_break): RUN (20 a hurdle cleared, and each one banks a point for
-; every 16 px of road behind it; + 300 for making Spadina) + STYLE (take-offs,
-; sips, SIP 'N' HOPs, no-spill bonus).
-; A spill costs no points (bar that hop's take-off): it costs ground on the
-; cop, your chain and the no-spill bonus. Busted: the COP'S FINE takes a
-; quarter of run + style. The HUD's PTS is that sum so far.
+; Score (ev_break): RUN (50 a hurdle hopped) + STYLE (take-offs, sips, SIP 'N'
+; HOPs). The finish tally and the card add it up the same way.
+; A spill costs no points (bar that hop's take-off and its 50): it costs
+; ground on the cop and your chain. Busted: the COP'S FINE takes a quarter of
+; run + style; make Spadina and there's no fine. The HUD's PTS is run + style.
 .p816
 .smart -
 .include "globals.inc"
@@ -66,18 +67,20 @@ TRIP_LUNGE = 16              ; px the cop gains on top of the stumble
 SEEN_LUNGE = 10              ; px the cop gains when he catches you sipping
 ;  a callout stays up at least this long before coaching may replace it
 POP_MIN    = 40
-BUMP_T     = 24              ; frames up against a hurdle: A scrambles over, else a spill
-                             ; (long enough for a hand that sees the stop to react)
+BUMP_T     = 40              ; frames up against a hurdle: A scrambles over, else a spill
+                             ; (STUCK! TAP A TO SCRAMBLE comes up at once: long enough for
+                             ; a 25-frame hand that reads it to act)
+BUMP_WARM  = 90              ; ...in the warm-up: it teaches before it punishes
 WASTE_MAX  = 3               ; jumps in a row over nothing and you're winded...
 WIND_T     = 150             ; ...for this long: sipping pace, and no jumping
 SIP_PTS    = 8               ; a lucky sip (style)
-HURDLE_PTS = 20              ; a hurdle cleared (run)
-DIST_SH    = 4               ; run: a point every 16 px
+HURDLE_PTS = 50              ; a hurdle hopped (run: the card's 50 A HURDLE)
 COMBO_PTS  = 8               ; SIP 'N' HOP over crates or a bench: x chain x chalk (style),
                              ; + a point for every 16 BUZZ you had before the sip (the
                              ; base shows it; nobody tells you), double over a green bin
                              ; (BIG SIP 'N' HOP) or a raccoon (RACCOON RUN)
-COURAGE    = 128             ; ...BUZZ this high before it: LIQUID COURAGE
+COURAGE    = 128             ; ...BUZZ this high before it: LIQUID COURAGE,
+COURAGE_PTS = 4              ; ...and the base takes this much more
 ; the chalk: a chevron (the mark) with a chalk strip on to the hurdle. Take
 ; off on it and the hop pays TAKE-OFF points (style), graded by how close to
 ; the chevron you were, and a SIP 'N' HOP on it pays X2 (X3 DEAD ON)
@@ -85,8 +88,8 @@ CHALK_EARLY = 8              ; px before the mark that still counts as on it (X2
 CHALK_LATE = 20              ; ...and after it (the strip)
 DEAD_EARLY = 2               ; DEAD ON (X3): within a frame of the mark
 DEAD_LATE  = 3
-TO_MAX     = 30              ; take-off points DEAD ON the chevron...
-TO_ZERO    = 48              ; ...falling a point a px or so to nothing this far past it
+TO_MAX     = 40              ; take-off points DEAD ON the chevron...
+TO_ZERO    = 64              ; ...falling a point every 1.6 px to nothing this far past it
 
 BUZZ_TIPSY = 176             ; BUZZ meter in the red: TIPSY. The cop gains on you, and a
                              ; sip now is SLOSHED (no points, chain over)
@@ -94,8 +97,6 @@ TIPSY_GAIN = $0060           ; ...this much a frame (8.8)
 TIPSY_NEAR = 96              ; ...until he's this close: on screen, watching your sips
 SIP_BUZZ   = 56              ; each sip; it wears off 1 every 4 frames
 CHAIN_MAX  = 5
-FINISH_PTS = 300             ; reaching Spadina (run)
-CLEAN_PTS  = 200             ; ...without a single spill (style)
 
 ST_RUN     = 0
 ST_TRIP    = 1
@@ -137,8 +138,6 @@ c_taught = ev_ram + 62       ; coaching shown: 1<<type, $20 sip, $40 air sip, $8
 c_jcoon  = ev_ram + 200      ; this jump cleared a raccoon
 c_coons  = ev_ram + 202      ; RACCOON RUNs
 c_fine   = ev_ram + 204
-c_bonus  = ev_ram + 206      ; made Spadina
-c_clean  = ev_ram + 208      ; no spills
 c_best   = ev_ram + 210      ; best chain
 c_quit   = ev_ram + 212      ; gave up from the pause menu
 c_ppal   = ev_ram + 214
@@ -157,7 +156,6 @@ c_jchalk = ev_ram + 272      ; this jump took off on the chalk
 c_chalks = ev_ram + 274      ; chalk SIP 'N' HOPs
 c_asip   = ev_ram + 276      ; B went down mid-air: this sip is committed
 c_scram  = ev_ram + 278      ; scrambles
-c_bank   = ev_ram + 280      ; run: the road behind your last cleared hurdle (px/16)
 c_jscr   = ev_ram + 282      ; this jump is a scramble
 c_waste  = ev_ram + 284      ; jumps in a row that cleared nothing
 c_wind   = ev_ram + 286      ; frames left winded (bunny-hopping)
@@ -470,6 +468,10 @@ running_clock:
     ldx #$0001
     stx c_popup
 @nl:
+    ; stopped dead against a hurdle: STUCK! TAP A TO SCRAMBLE is up, and
+    ; nothing talks over it
+    lda c_bump
+    jne @x
     ; the warm-up's over: say so (once the panel's free)
     lda c_told
     bne @nw
@@ -544,10 +546,15 @@ running_clock:
     lda c_taught
     ora #$20
     sta c_taught
+    LDPTR1 str_c_sip2
+    jsr set_line2
     LDPTR0 str_c_sip
     lda #TP_YELLOW
     ldx #100
-    jmp popup_low
+    jsr popup_low
+    lda #$01
+    sta c_pline2
+    rts
 @h2:
     ; first lucky sip went down: now do it in the air
     lda c_taught
@@ -1137,6 +1144,19 @@ jump_physics:
     cmp #WASTE_MAX
     jcc @x
     stz c_waste
+    ; in the warm-up it's only a word of advice
+    A16
+    lda c_t
+    cmp #WARM_T
+    A8
+    bcs @wnd
+    LDPTR1 str_hop2
+    jsr set_line2
+    LDPTR0 str_hop1
+    lda #TP_ORANGE
+    ldx #90
+    jmp popup_t2
+@wnd:
     lda #WIND_T
     sta c_wind
     LDPTR0 str_wind
@@ -1222,7 +1242,17 @@ sip_n_hop:
     inc c_chalks
     A8
 @nch:
-    ; the base: 8 + BUZZ/16, doubled for the big ones
+    ; the base: 8 + BUZZ/16 (+ COURAGE_PTS from 128 up: LIQUID COURAGE, and
+    ; the sip on top of it takes you into the red: TIPSY, the cop closes in,
+    ; and your next sips are SLOSHED until it wears off), doubled for the big
+    ; ones
+    lda c_jbz
+    cmp #COURAGE
+    lda #0
+    bcc @nc
+    lda #COURAGE_PTS
+@nc:
+    sta tmp4
     lda c_jbz
     lsr a
     lsr a
@@ -1230,6 +1260,7 @@ sip_n_hop:
     lsr a
     clc
     adc #COMBO_PTS
+    adc tmp4
     ldx c_jcoon
     bne @big
     ldx c_jbin
@@ -1238,7 +1269,7 @@ sip_n_hop:
     asl a
 @bs:
     sta tmp4                    ; base
-    ; chain x chalk (<= 15), then x base (<= 240)
+    ; chain x chalk (<= 15), then x base (<= 44: 660)
     lda c_jchalk
     inc a
     sta WRMPYA
@@ -1506,8 +1537,10 @@ cop_chase:
     .a16
     cmp #(COP_SEEN*256)
     bcs @far
-    ; first time he's on screen: say so
+    ; first time he's on screen: say so (not over STUCK!: that waits)
     A8
+    lda c_bump
+    bne @nh
     lda c_taught
     bmi @nh
     ora #$80
@@ -1692,6 +1725,7 @@ ents_update:
     ; first of its kind coming on screen: coach it (once the callout up has
     ; been read: it's 200 px out, so there's time)
     lda c_pmin
+    ora c_bump
     bne @nocoach
     lda E_FLAGS,x
     and #$03
@@ -1746,11 +1780,6 @@ ents_update:
     clc
     adc #HURDLE_PTS
     sta c_hpts
-    lda c_dist                  ; ...and banks the road you've run
-    .repeat DIST_SH
-    lsr a
-    .endrepeat
-    sta c_bank
     A8
     lda c_air
     beq @nopass
@@ -1775,7 +1804,7 @@ ents_update:
     lda c_vy+1
     bmi @gnd
     lda tmp0+1
-    bpl @store
+    jpl @store
 @gnd:
     lda E_TYPE,x
     TAYB
@@ -1785,7 +1814,7 @@ ents_update:
     bra @dx
 @far:
     cmp #$FF
-    bne @store
+    jne @store
     lda tmp0
     eor #$FF
     inc a
@@ -1809,7 +1838,14 @@ ents_update:
     ora #$10
     sta E_FLAGS,x
     stx c_bumpe
+    A16
+    lda c_t
+    cmp #WARM_T
+    A8
     lda #BUMP_T
+    bcs @bt
+    lda #BUMP_WARM              ; the warm-up gives you longer to read it
+@bt:
     sta c_bump
     lda E_TYPE,x
     cmp #T_COON
@@ -1819,6 +1855,11 @@ ents_update:
     A8
 @bs:
     SFX SFX_STEP
+    ; say what to do, at once: it outranks any coaching
+    LDPTR0 str_stuck
+    lda #TP_ORANGE
+    ldx #BUMP_WARM
+    jsr popup_t
     ldx c_cur
     bra @store
 @against:
@@ -1903,6 +1944,24 @@ trip:
     LDPTR0 str_coon
     bra @pop
 @oof:
+    ; a spill that teaches: under it, what would have got you over
+    lda E_FLAGS,x
+    and #$10
+    beq @nst
+    LDPTR1 str_oof_stuck        ; stood against it and never pressed A
+    bra @two
+@nst:
+    lda E_TYPE,x
+    cmp #T_BIN
+    bne @plain
+    LDPTR1 str_oof_bin          ; a hop into a green bin
+@two:
+    jsr set_line2
+    LDPTR0 str_oof
+    lda #TP_RED
+    ldx #70
+    jmp popup_t2
+@plain:
     LDPTR0 str_oof
 @pop:
     lda #TP_RED
@@ -2120,14 +2179,20 @@ tally_box:
     jsl txt_box
     rts
 
-; (in two frames' text slots: it's too much text for one)
+; (in two frames' text slots: it's too much text for one). The same sum as
+; the card: RUN 50 A HURDLE + STYLE (- COP'S FINE) = SCORE
 tally_text:
     lda #TXT_WIN
     sta txt_bg
     lda ev_fail
-    jeq @won
+    bne @bust
+    PRINTC 7, TP_GREEN, str_t_won
+    bra @run
+@bust:
     PRINTC 7, TP_RED, str_t_bust
+@run:
     PRINT 6, 9, TP_WHITE, str_t_run
+    PRINT 10, 9, TP_GREY, str_t_rate
     stz tmp7
     ldx ev_break
     ldy #(9*32 + 21)
@@ -2140,28 +2205,6 @@ tally_text:
     ldy #(10*32 + 21)
     lda #TP_GREEN
     jsr tnum
-    bra tally_half
-@won:
-    PRINTC 7, TP_GREEN, str_t_won
-    PRINT 6, 9, TP_WHITE, str_t_run
-    stz tmp7
-    A16
-    lda ev_break
-    sec
-    sbc c_bonus
-    tax
-    A8
-    ldy #(9*32 + 21)
-    lda #TP_YELLOW
-    jsr tnum
-    PRINT 6, 10, TP_WHITE, str_t_spa
-    lda #'+'
-    sta tmp7
-    ldx c_bonus
-    ldy #(10*32 + 21)
-    lda #TP_GREEN
-    jsr tnum
-tally_half:
     stz txt_bg
     lda #7
     sta c_pend
@@ -2172,7 +2215,10 @@ tally_text2:
     lda #TXT_WIN
     sta txt_bg
     lda ev_fail
-    beq @style
+    bne @fine
+    PRINTC 13, TP_GREY, str_t_spa
+    bra @score
+@fine:
     PRINT 6, 11, TP_WHITE, str_t_fine
     lda #'-'
     sta tmp7
@@ -2187,35 +2233,9 @@ tally_text2:
     A8
     bne @fq
     PRINTC 13, TP_GREY, str_t_none
-    jmp @score
+    bra @score
 @fq:
     PRINTC 13, TP_GREY, str_t_half
-    jmp @score
-@style:
-    PRINT 6, 11, TP_WHITE, str_t_style
-    lda #'+'
-    sta tmp7
-    A16
-    lda ev_break+2
-    sec
-    sbc c_clean
-    tax
-    A8
-    ldy #(11*32 + 21)
-    lda #TP_GREEN
-    jsr tnum
-    lda c_spills
-    bne @spilt
-    PRINT 6, 12, TP_WHITE, str_t_clean
-    lda #'+'
-    sta tmp7
-    ldx c_clean
-    ldy #(12*32 + 21)
-    lda #TP_GREEN
-    jsr tnum
-    bra @score
-@spilt:
-    PRINT 6, 12, TP_GREY, str_t_spilt
 @score:
     PRINT 6, 15, TP_WHITE, str_t_score
     stz tmp7
@@ -2788,27 +2808,27 @@ cops_hud:
     ldy #4
     lda #($20 | (TP_YELLOW << 2))
     jsl txt_num
-    ; SIP 'N' HOP chain, on its own row under PTS: "X3 CHAIN" (it lasts
-    ; until a spill, a scramble or a dry hop off the chalk)
+    ; SIP 'N' HOP chain, on its own row under PTS, read like it: "CHAIN X3"
+    ; (it lasts until a spill, a scramble or a dry hop off the chalk)
     lda c_chain
     cmp c_hchain
     beq @buzz
     sta c_hchain
     lda c_chain
     beq @noch
+    PRINT 1, 2, TP_WHITE, str_hchain
     lda #('X' - 32)
     sta tmp2
-    ldx #(2*32 + 1)
+    ldx #(2*32 + 7)
     lda #($20 | (TP_GREEN << 2))
     jsl txt_char
     lda c_chain
     clc
     adc #('0' - 32)
     sta tmp2
-    ldx #(2*32 + 2)
+    ldx #(2*32 + 8)
     lda #($20 | (TP_GREEN << 2))
     jsl txt_char
-    PRINT 4, 2, TP_GREEN, str_hchain
     bra @buzz
 @noch:
     ldx #(2*32 + 1)
@@ -2951,20 +2971,11 @@ meter_n:
 
 
 ; ------------------------------------------------------------------
-; run points so far -> c_base: 20 a hurdle cleared, and a point every 16 px
-; of road up to the last hurdle you cleared (all of it once you make Spadina)
+; run points so far -> c_base: 50 a hurdle hopped (a scramble or a spill pays
+; none), the card's RUN 50 A HURDLE
 calc_base:
-    A16
-    lda c_bank
-    ldx c_dist
-    cpx #COURSE_LEN
-    bcc @d
-    lda #(COURSE_LEN >> DIST_SH)
-@d:
-    clc
-    adc c_hpts
-    sta c_base
-    A8
+    ldx c_hpts
+    stx c_base
     rts
 
 ; the HUD's PTS: run + style so far
@@ -2987,10 +2998,10 @@ calc_pts:
 
 ; ev_stat: SIP 'N' HOPs, lucky sips, hurdles, spills
 ; ev_break: run, style, the cop's fine; base + bonus - penalty = ev_score
-; finish: run + 300 Spadina, style + 200 if no spills, no fine
+; finish: run + style, no fine (the tally and the card add it up the same way)
 ; busted / gave up: the fine is a quarter of run + style (the true cost: no
 ; cap, so a greedy run busted near Spadina still beats a timid finish, but
-; loses the quarter, the 300 and the no-spill 200)
+; loses the quarter)
 cops_score:
     A16
     lda c_combos
@@ -3002,8 +3013,6 @@ cops_score:
     lda c_spills
     sta ev_stat+6
     stz c_fine
-    stz c_bonus
-    stz c_clean
     stz ev_break+4
     A8
     jsr calc_base
@@ -3014,19 +3023,9 @@ cops_score:
     lda c_dist
     cmp #COURSE_LEN
     bcc @caught16
-    lda #FINISH_PTS
-    sta c_bonus
-    clc
-    adc c_base
+    lda c_base
     sta ev_break
-    lda c_spills
-    bne @dirty
-    lda #CLEAN_PTS
-    sta c_clean
-@dirty:
     lda c_style
-    clc
-    adc c_clean
     sta ev_break+2
     clc
     adc ev_break
@@ -3079,7 +3078,8 @@ str_held2:    .byte "CLOSE ENOUGH: CHAIN HELD", 0
 str_buzzed:   .byte "SLOSHED! 0 PTS, CHAIN OVER", 0
 str_tipsy:    .byte "TIPSY! THE COP'S GAINING", 0
 str_warm:     .byte "WARM-UP OVER: HE'S COMING!", 0
-str_c_sip: .byte "COP CAN'T SEE YOU: HOLD B!", 0
+str_c_sip: .byte "COP CAN'T SEE! HOLD B: SIP", 0
+str_c_sip2: .byte "RED BUZZ = SLOSHED, 0 PTS", 0
 str_c_air: .byte "B MID-AIR = SIP 'N' HOP!", 0
 str_c_dry: .byte "CHALK! B MID-AIR PAYS X2", 0
 str_c_dry3: .byte "DEAD ON! B MID-AIR PAYS X3", 0
@@ -3107,12 +3107,11 @@ str_t_bust:  .byte "BUSTED BY THE BIKE COP!", 0
 str_t_won:   .byte "SPADINA! YOU LOST HIM!", 0
 str_t_run:   .byte "RUN", 0
 str_t_style: .byte "STYLE", 0
-str_t_spilt: .byte "SPILLED: NO BONUS", 0
 str_t_fine:  .byte "COP'S FINE", 0
 str_t_half:  .byte "FINE IS 1/4 OF RUN+STYLE", 0
 str_t_none:  .byte "NOT ONE HURDLE CLEARED", 0
-str_t_spa:   .byte "MADE SPADINA", 0
-str_t_clean: .byte "NO SPILLS", 0
+str_t_spa:   .byte "MADE SPADINA: NO FINE", 0
+str_t_rate:  .byte "50 A HURDLE", 0      ; HURDLE_PTS
 str_t_score: .byte "SCORE", 0
 str_pts:  .byte "PTS", 0
 str_hchain: .byte "CHAIN", 0
@@ -3129,3 +3128,12 @@ str_spa:  .byte "SPADINA", 0
 .segment "GFX1"
 cops_run_spr: .incbin "cops_run.bin"
 cops_run_end:
+
+; sprint 7's lines: GFX1 is nearly full, so they live in bank $80 (CODE), read
+; through 24-bit pointers like the rest
+.segment "CODE"
+str_stuck:     .byte "STUCK! TAP A TO SCRAMBLE", 0
+str_oof_stuck: .byte "STUCK? TAP A TO SCRAMBLE", 0
+str_oof_bin:   .byte "GREEN BIN: HOLD A AT RED", 0
+str_hop1:      .byte "HOP AT THE CHALK, BUD!", 0
+str_hop2:      .byte "HOPS AT NOTHING WIND YOU", 0
