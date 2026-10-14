@@ -1016,7 +1016,7 @@ card_stat_pick_fail:
 
 ; 1 = a failed run forfeits the bonus: the event leaves it in ev_break+2,
 ; keeps it out of ev_score, and the card shows it as a grey FORFEIT row
-card_forfeit: .byte 1, 0, 0, 0, 0, 0, 0    ; bike bay park cops sail parking subway
+card_forfeit: .byte 1, 0, 1, 0, 0, 0, 0    ; bike bay park cops sail parking subway
 ; a forfeit itemised in two rows (forfeit_split): 1 + the ev_stat index
 ; whose count x card_fsrate is the first part (the rest of the bonus is the
 ; second), 0 = one row; card_fslabel = the two rows' labels (after FORFEIT,
@@ -3804,7 +3804,7 @@ eb5: .byte "THREE SPOTS ON BRUNSWICK.", $0A, "PARK IT. DON'T DENT A BMW.", 0
 eb6: .byte "SURF LINE 1 TO UNION.", $0A, "GRAB A POLE, GET GERMS.", 0
 ec0: .byte "D-PAD STEER    A PEDAL", $0A, "B HOP RAILS AND POTHOLES", $0A, "TOKENS 50, WIPEOUT DROPS 2", 0
 ec1: .byte "ALTERNATE ", TXT_ARROW_L+32, " ", TXT_ARROW_R+32, " ON BIG DOTS", $0A, "SMALL DOTS = DOUBLE TIME", $0A, "UP/DOWN LANE  A EXCUSE ME", 0
-ec2: .byte "D-PAD WALK   A THROW BALL", $0A, "SAFE: B WHEN ! SHOWS: 50", $0A, "BOLD: B AS HE LUNGES: 150+", 0
+ec2: .byte "D-PAD WALK   A THROW BALL", $0A, "SAFE: B ON ! = 100 A DOG", $0A, "BOLD: B ON RED ! = 200-450", 0
 ec3: .byte "YELLOW CHALK: TAP A", $0A, "RED CHALK: HOLD A", $0A, "B: SIP WHILE COP CAN'T SEE", 0
 ec4: .byte "LEFT/RIGHT: TURN  A: HIKE", $0A, "YELLOW ARROW: NEXT MARK", $0A, "GREEN DIAMONDS: ON COURSE", 0
 ec5: .byte "UP: REAR BUMPER TO LINE", $0A, "BACK IN: DOWN+RIGHT, THEN", $0A, "DOWN+LEFT. A: PARK IT!", 0
@@ -3818,15 +3818,16 @@ ef5: .byte "TOWED!", 0
 ef5_1: .byte "NO CLEAN PARK!", 0
 ef6: .byte "PATIENT ZERO!", 0
 ; ev_fail 4: an event's second way to fail (the bike's idle kick)
-ev_fails2:   .addr ef2_0, ef1, ef2, ef3, ef4, ef5, ef6
+ev_fails2:   .addr ef2_0, ef1, ef2_4, ef3, ef4, ef5, ef6
 ef2_0: .byte "YOU'RE FIRED!", 0
+ef2_4: .byte "NAP IN BELLWOODS!", 0
 
 ; result card arithmetic (ev_break): base, bonus, penalty labels per event,
 ; 12 characters at most. BASE + BONUS - PENALTY = SCORE.
 card_break_labels:
     .addr bl_ride,  bl_tips,  bl_wipe       ; bike
     .addr bl_walk,  bl_style, bl_spill      ; bay
-    .addr bl_cross, bl_dogs,  bl_tack150    ; park
+    .addr bl_walk,  bl_dogs,  bl_tack150    ; park
     .addr bl_run,   bl_style, bl_fine       ; cops
     .addr bl_course, bl_style, bl_bump      ; sail
     .addr bl_park,  bl_style, bl_dings      ; parking
@@ -3835,7 +3836,6 @@ bl_tips:   .byte "TOKENS+STYLE", 0
 bl_walk:   .byte "WALK", 0
 bl_course: .byte "COURSE", 0
 bl_arrive: .byte "ARRIVAL", 0
-bl_cross:  .byte "CROSSING", 0
 bl_run:    .byte "RUN", 0
 bl_race:   .byte "RACE", 0
 bl_park:   .byte "PARKING", 0
@@ -3860,7 +3860,7 @@ bl_germs:  .byte "GERMS", 0
 card_fail_note:
     .addr fn_bike,   fn_bike_n, fn_bike_q, fn_bike_s    ; bike
     .addr fn_bay,    fn_bay,    fn_bay_q,  fn_bay       ; bay
-    .addr fn_park,   fn_park_t, fn_park_q, fn_park      ; park
+    .addr fn_park,   fn_park_t, fn_park_q, fn_park_n    ; park
     .addr fn_cops,   fn_cops,   fn_cops_q, fn_cops      ; cops
     .addr fn_sail,   fn_sail_t, fn_sail_t, fn_sail_h    ; sail
     .addr fn_pk,     fn_pk,     fn_pk_q,   fn_pk_i      ; parking
@@ -3871,9 +3871,10 @@ fn_bike_q: .byte "GAVE UP. NOT PAID!", 0
 fn_bike_s: .byte "STOPPED 8 S. NOT PAID!", 0
 fn_bay:    .byte "THE 5:42 LEFT WITHOUT YOU", $0A, "WALK PAID BY DISTANCE", 0
 fn_bay_q:  .byte "GAVE UP: THE 5:42 LEFT", $0A, "WALK PAID BY DISTANCE", 0
-fn_park:   .byte "THIRD TACKLE ENDS THE WALK", $0A, "75 FOR EVERY TENTH WALKED", 0
-fn_park_t: .byte "75 FOR EVERY TENTH WALKED", 0
-fn_park_q: .byte "GAVE UP: 75 A TENTH WALKED", 0
+fn_park:   .byte "3 HEARTS GONE. NO DOGS!", 0
+fn_park_t: .byte "NO DUNDAS, NO DOGS!", 0
+fn_park_q: .byte "GAVE UP. NO DOGS!", 0
+fn_park_n: .byte "NO STEP NORTH IN 10 S", 0
 fn_cops:   .byte "COP CAUGHT YOU: FINED 1/4", 0
 fn_cops_q: .byte "GAVE UP: THE COP FINES 1/4", 0
 fn_sail:   .byte "10 S GETTING NO CLOSER", $0A, "250 A MARK + PART OF NEXT", 0
@@ -3889,7 +3890,7 @@ fn_sub_q:  .byte "GAVE UP: STYLE IS VOID", $0A, "ONLY LEGS YOU LEANED PAY", 0
 ; reason line, for the ev_fail codes in card_still (bit n = ev_fail n: $1E all
 ; four, $02 the event's own fail only, 0 never). For events where only not
 ; playing earns a base of 0.
-card_still:    .byte $18, $0A, $1E, $0A, $10, 0, $1E   ; bike bay park cops sail parking subway
+card_still:    .byte $18, $0A, 0, $0A, $10, 0, $1E   ; bike bay park cops sail parking subway
 card_still_ln: .addr sti0, sti1, sti2, sti3, sti4, 0, sti6
 sti0: .byte "STANDING STILL PAYS 0", 0
 sti1: .byte "STANDING STILL PAYS 0", 0
@@ -3905,7 +3906,7 @@ sti6: .byte "NO LEANING, NO POINTS", 0
 card_rate:
     .addr rt_bike_fin, 0, 0     ; bike
     .addr rt_bay_walk, 0, rt_40each ; bay
-    .addr 0, 0, 0               ; park
+    .addr rt_park_walk, 0, 0    ; park
     .addr rt_hurdles, 0, 0      ; cops
     .addr rt_sail, 0, 0         ; sail
     .addr 0, 0, 0               ; parking
@@ -3913,7 +3914,7 @@ card_rate:
 card_rate_fail:
     .addr rt_bike_m, 0, 0       ; bike
     .addr rt_bydist, 0, rt_40each ; bay
-    .addr 0, 0, 0               ; park
+    .addr rt_tenth, 0, 0        ; park
     .addr rt_hurdles, 0, 0      ; cops
     .addr 0, 0, 0               ; sail
     .addr 0, 0, 0               ; parking
@@ -3927,6 +3928,8 @@ rt_bydist:  .byte "BY DISTANCE", 0
 rt_40each:  .byte "40 EACH", 0
 rt_sub_leg: .byte "40 A LEG", 0
 rt_sub_pen: .byte "X40", 0
+rt_park_walk: .byte "500+25/S", 0
+rt_tenth:   .byte "50 A TENTH", 0
 rt_hurdles: .byte "HURDLES+ROAD", 0
 rt_bike_fin: .byte "1562+20/S", 0
 rt_bike_m:  .byte "1 PER 4 M", 0
