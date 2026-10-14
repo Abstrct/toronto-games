@@ -34,7 +34,10 @@
 ;           mark for a chain), CLEAN TACKS on the beat (up to 3), FERRY SURF
 ;           (two stages) and LINE HONOURS (no bumps at all). Undocumented:
 ;           a ROLL TACK (hold A into a tack, let go as the bow passes head
-;           to wind) pops her out at full speed and pays 250 for the tack.
+;           to wind: the boat flashes and the sail luffs while the window's
+;           open) pops her out at full speed and pays 250 for the tack.
+;           ev_style itemises it all for the card: tight roundings, clean
+;           tacks, ferry surf, line honours, roll tacks.
 ;   no finish  base 250 per mark rounded + up to 249 for the part of the next
 ;           leg sailed (at most 999, so any finish beats it); style only pays
 ;           at the line. Never touched the helm: 0.
@@ -87,7 +90,9 @@ LOOK_T      = 22            ; the coach judges the course from this many frames 
 D_TACK      = 36            ; TACK NOW once the other tack's line passes the buoy this close to windward
 RING_SAY    = 80            ; on a good heading this close: RING AHEAD! HOLD YOUR COURSE
 ARW_MIN     = 32            ; close-hauled course to steer: the first notch this far off the wind
-ROLL_HTW    = 10            ; ROLL TACK: let go of A with the bow this close to head-to-wind
+ROLL_HTW    = 10            ; ROLL TACK: let go of A with the bow this close to head-to-wind,
+                            ; or past it until she's out of the no-go (the boat flashes and
+                            ; the sail luffs all the while: ~19 frames at the quickest)
 ROLL_HOLD   = 4             ; ... after holding it this long in the tack
 PTS_ROLL    = 250           ; a roll tack (instead of a clean tack's 100)
 PTS_CHAIN   = 150           ; tight roundings in a row: +150 for each one before
@@ -111,9 +116,9 @@ PTS_SEC     = 15            ; per second left (finish)
 ; TIGHT ROUNDING: tight_tab by the closest pass, X2 / X3 for a chain in a row
 PTS_TACK    = 100           ; a clean tack on the beat
 TACK_MAX    = 3
-TACK_MINSPD = $0018         ; a tack is clean if she never slows below this...
-TACK_MAXT   = 40            ; ... and the bow crosses the no-go this quickly (frames: taps
-                            ; 10 frames apart, six a second, make it)
+TACK_MAXT   = 40            ; a tack is clean if the bow crosses the no-go this quickly
+                            ; (frames: taps 10 frames apart, six a second, make it; the
+                            ; speed she loses in there is the tack's own cost, not a test)
 PTS_CLEAN   = 300           ; finish without a single bump
 PTS_SURF    = 200
 FINISH_MIN  = 4*PTS_LEG     ; a finish never scores less (a DNF tops out at 999)
@@ -228,7 +233,6 @@ s_coachn = ev_ram + 358      ; the taps the last coach line asked for (signed no
 s_gtold  = ev_ram + 359      ; "GREEN DIAMONDS" has been explained
 s_tkin   = ev_ram + 360      ; tack watch: bow in the no-go (1)
 s_tkside = ev_ram + 361      ; ... the side of the wind it came in from
-s_tkmin  = ev_ram + 362      ; ... her lowest speed in there
 s_tkt    = ev_ram + 364      ; ... frames in there
 s_tacks  = ev_ram + 366      ; clean tacks paid
 s_fgo    = ev_ram + 367      ; the ferry has left Ward's
@@ -320,6 +324,13 @@ s_rpend  = ev_ram + 710
 s_bfsg   = ev_ram + 720      ; buoy_fix: the buoy's side of the bow's line (bit 7: left)
 s_bfc    = ev_ram + 714      ; buoy_fix's last answer: the pick, bow, order, mark it was for,
                              ; then what it said and s_urgent (worked out afresh every 4th frame)      ; rounded over the ring's edge: TIGHT ROUNDING judged once inside ROUND_R ($FF none)
+s_rollw  = ev_ram + 724      ; the undocumented trick's window is open (the boat flashes, the sail luffs)
+s_rtick  = ev_ram + 726      ; s_tick when the last mark counted (word)
+s_tw     = ev_ram + 728      ; sl_turn scratch (words)
+s_tw2    = ev_ram + 730
+s_hm     = ev_ram + 732      ; sl_hit: the mark (word offset)
+s_lpx4   = ev_ram + 734      ; sl_turn: where the swing ends, quarter px (signed words)
+s_lpy4   = ev_ram + 736
 s_abest  = ev_ram + 696      ; ADRIFT: closest to the mark since the leg began or she was last on course
 s_ox     = ev_ram + 280      ; spr16/spr8 scratch
 s_oy     = ev_ram + 282
@@ -387,15 +398,16 @@ ev_sail:
 @quit:
     jsl music_stop
     jsr sail_score
-    ; an empty HUD panel and no callout behind the card
+    ; no HUD panel (not even its frame) and no callout behind the card
     jsr pop_clear
     ldx #$0000
     A16
     lda #$0420                  ; 32 x 4
     sta tmp1
     A8
-    lda #HUD_ATTR
-    jsl txt_box
+    stz tmp2
+    lda #$20
+    jsl txt_fill
     jsl score_card
     ; back to the usual 64x32 BG1 / BG2 maps and backdrop for the next screens
     lda #((VRAM_BG1MAP >> 8) | 1)
@@ -525,6 +537,29 @@ popup_l:
     rtl
 say_coach_l:
     jsr say_coach
+    rtl
+coach_free_l:
+    jsr coach_free
+    rtl
+; a tip (TAP FASTER, PASS CLOSER): up over nothing or a teaching line, as a
+; teaching line itself (any order goes straight over it). Carry set if up.
+tip:
+    pha
+    A16
+    lda s_popup
+    A8
+    beq @y
+    lda s_pprio
+    bne @n
+@y:
+    stz s_pnew
+    pla
+    jsr popup_any
+    sec
+    rtl
+@n:
+    pla
+    clc
     rtl
 popup_any_l:
     jsr popup_any
@@ -714,6 +749,7 @@ sail_init:
     lda cur_player
     ldy #$0000
     jsl player_palette
+    jsl sail_flash              ; (sprite palette 5: the boat's, lit up)
     lda #$17                        ; BG1 + BG2 + BG3 + sprites
     sta tm_sh
     stz txt_bg
@@ -1325,95 +1361,16 @@ taps_to_course:
 
 ; every frame while racing: the coach. One order at a time: it stands until
 ; the bow's notch reaches it (then its line says GOOD!, or the second half of
-; a long turn follows at once), it lapses (ORDER_T), or the taps go the other
-; way; only then can there be another. An order nobody has started on is
-; said afresh once the course to steer has moved on (REPLAN_T). After a
-; rounding the turn for the next leg waits for the buoy to be abeam
-; (round_gate), so it can't sweep her onto it.
+; a long turn follows at once) or it's truly obsolete; only then can there
+; be another (coach_ord). Hesitating never turns it round. After a rounding
+; the turn for the next leg waits for the buoy to be abeam (round_gate), so
+; it can't sweep her onto it.
 coach:
     jsl buoy_watch
     lda s_ord
     cmp #$FF
-    jeq @none
-    A16
-    inc s_ordt
-    lda s_ordt
-    cmp #ORDER_T
-    A8
-    bcs @lapse
-    lda s_hgoal
-    cmp s_ord
-    beq @done
-    lda s_omd                   ; (on a good course another way before she's
-    cmp #3                      ; started on it: done too; not clear of the
-    beq @ww                     ; buoy just rounded, though)
-    lda s_otch
-    bne @ww
-    lda s_green
-    bne @done
-@ww:
-    lda s_ord                   ; more taps to go than it asked for: wrong way
-    sec
-    sbc s_hgoal
-    jsr abs8
-    lsr a
-    lsr a
-    lsr a
-    lsr a
-    cmp s_ordn
-    beq @late
-    bcc @late
-    ; the other way: a tap she'd started before this order went up lands in
-    ; its first moments: the order again from where the bow is now
-    A16
-    lda s_ordt
-    cmp #12
-    A8
-    bcs @lapse
-    lda s_omd
-    cmp #3
-    beq @lapse
-    lda s_reiss                 ; (once: after that it's her steering)
-    bne @lapse
-    lda #$FF
-    sta s_ord
-    stz s_omode
-    jsl issue_order
-    lda #1
-    sta s_reiss
-    rts
-@lapse:
-    lda #$FF
-    sta s_ord
-    stz s_split
-    stz s_reiss
-    lda s_pprio                 ; (its line goes with it)
-    cmp #2
-    bne @x
-    ldx #$0001
-    stx s_popup
-    rts
-@done:
-    jsl order_done
-    rts
-@late:
-    ; not started on, and the course to steer has moved: say it afresh
-    lda s_otch
-    bne @x
-    A16
-    lda s_ordt
-    cmp #REPLAN_T
-    A8
-    bcc @x
-    lda s_adir
-    cmp s_ofin
-    beq @x
-    jsr coach_free
-    bcc @x
-    lda #$FF
-    sta s_ord
-    stz s_omode
-    jsl issue_order
+    beq @none
+    jsl coach_ord
 @x:
     rts
 @none:
@@ -1519,6 +1476,20 @@ coach:
     ldx #90
     jmp popup
 @leg:
+    ; a style tip that waited for a quiet moment (never over an order)
+    lda s_shint
+    bit #4
+    beq @leg0
+    LDPTR0 str_closer
+    lda #TP_CYAN
+    ldx #110
+    jsr hint
+    bcc @x2
+    lda s_shint
+    and #$FB
+    sta s_shint
+    rts
+@leg0:
     ; the leg's teaching line (after the rounding has been judged), and on
     ; the last leg the ferry's wake
     lda s_legh
@@ -2128,10 +2099,14 @@ irons:
 
 
 ; CLEAN TACK: on the beat to mark 2, the bow crosses the no-go from one side
-; of the wind to the other quickly and she never stalls. The first 3 pay.
+; of the wind to the other in TACK_MAXT frames or less (six taps a second do
+; it, whatever her speed). The first 3 pay. A slow one before any clean one
+; says so: TAP FASTER FOR A CLEAN TACK (the one thing it measures).
 ; ROLL TACK (the coach never mentions it): hike (hold A) into the tack and
 ; let go as the bow passes head to wind: the crew rolls her through, she
-; pops out at full speed, and the tack pays PTS_ROLL instead.
+; pops out at full speed, and the tack pays PTS_ROLL instead. While a let-go
+; would land it, the boat flashes and the sail luffs (s_rollw, from the
+; frame the window opens: a thump of canvas with it).
 tack_watch:
     lda s_head
     sec
@@ -2140,36 +2115,40 @@ tack_watch:
     jsr abs8
     sta tmp1
     cmp #NOGO
-    bcs @out
+    jcs @out
     lda s_tkin
     bne @in
     inc s_tkin
     lda tmp0
     sta s_tkside
-    ldx s_speed
-    stx s_tkmin
     ldx #$0000
     stx s_tkt
     stz s_tka
     stz s_rolled
+    stz s_rollw
     rts
 @in:
-    ; the roll: A held a while, then let go with the bow near head to wind
     lda s_hike
     beq @let
-    lda s_tka
+    lda s_tka                   ; A held: how long
     cmp #$FF
-    beq @m0
+    beq @win
     inc s_tka
+@win:
+    jsr roll_win
+@wset:
+    cmp s_rollw
+    beq @m0
+    sta s_rollw
+    cmp #0
+    beq @m0
+    SFX SFX_STEP                ; (the sail slats as she comes up)
     bra @m0
 @let:
-    lda s_tka
-    cmp #ROLL_HOLD
-    bcc @m0
-    stz s_tka
-    lda tmp1
-    cmp #ROLL_HTW
-    bcs @m0
+    ; let go: rolled if the window was open (what the player saw)
+    lda s_rollw
+    stz s_rollw
+    beq @lx
     lda #1
     sta s_rolled
     A16
@@ -2182,17 +2161,15 @@ tack_watch:
 @sp:
     sta s_speed
     A8
+@lx:
+    stz s_tka
 @m0:
     A16
     inc s_tkt
-    lda s_speed
-    cmp s_tkmin
-    bcs @m
-    sta s_tkmin
-@m:
     A8
     rts
 @out:
+    stz s_rollw
     lda s_tkin
     jeq @x
     stz s_tkin
@@ -2210,11 +2187,8 @@ tack_watch:
     A16
     lda s_tkt
     cmp #TACK_MAXT
-    bcs @slow
-    lda s_tkmin
-    cmp #TACK_MINSPD
-    bcc @slow
     A8
+    bcs @slow
     inc s_tacks
     SFX SFX_COIN
     LDPTR0 str_ctack
@@ -2231,20 +2205,50 @@ tack_watch:
     ldx #60
     jmp popup
 @slow:
-    ; a slow one before any clean one: how they're done (once)
-    A8
+    ; a slow one before any clean one: how they're done (a tip: any order
+    ; goes over it; given once it's been seen)
     lda s_tacks
     bne @x
     lda s_shint
     bit #2
     bne @x
-    ora #2
-    sta s_shint
     LDPTR0 str_faster
     lda #TP_CYAN
     ldx #100
-    jmp popup
+    jsl tip
+    bcc @x
+    lda s_shint
+    ora #2
+    sta s_shint
 @x:
+    rts
+
+;  -> A8 = 1 if the roll's window is open, as the player sees it: hiking
+; ROLL_HOLD frames or more, the bow within ROLL_HTW of head to wind or past
+; it (tmp0 = signed angle off the wind, tmp1 = its size), on a tack that pays
+roll_win:
+    lda s_rolled
+    bne @no
+    lda s_tka
+    cmp #ROLL_HOLD
+    bcc @no
+    lda s_mark
+    cmp #1
+    bne @no
+    lda s_tacks
+    cmp #TACK_MAX
+    bcs @no
+    lda tmp1
+    cmp #ROLL_HTW
+    bcc @yes
+    lda tmp0
+    eor s_tkside
+    bmi @yes
+@no:
+    lda #0
+    rts
+@yes:
+    lda #1
     rts
 
 str_ctack: .byte "CLEAN TACK! +100", 0
@@ -3600,6 +3604,8 @@ marks:
     lda #24
     sta s_burst
     inc s_mark
+    ldx s_tick
+    stx s_rtick
     jsr leg_start
     SFX SFX_SELECT
     ; the order for the mark just rounded is over; from the coach's next
@@ -3774,12 +3780,8 @@ judge:
     lda s_shint
     bit #1
     bne @wx
-    ora #1
+    ora #5                      ; (said once, when the coach has a quiet moment)
     sta s_shint
-    LDPTR0 str_closer
-    lda #TP_CYAN
-    ldx #110
-    jmp popup
 @wx:
     rts
 @tight:
@@ -4027,11 +4029,23 @@ draw_boat:
     bpl @stbd
     inc s_sx
 @stbd:
+    ; the roll's window open: the sail luffs (slats side to side), drawn only
+    lda s_sx
+    sta tmp4
+    lda s_rollw
+    beq @nl
+    lda s_tick
+    and #$04
+    beq @nl
+    lda tmp4
+    eor #1
+    sta tmp4
+@nl:
     lda tmp2
     cmp #9
     bcs @west
     stz tmp5+1
-    lda s_sx
+    lda tmp4
     beq @e0
     lda tmp2
     clc
@@ -4047,7 +4061,7 @@ draw_boat:
     sec
     sbc tmp2
     sta tmp2
-    lda s_sx
+    lda tmp4
     bne @w0
     lda tmp2
     clc
@@ -4066,7 +4080,13 @@ draw_boat:
     A8
     lda #^ms_boat0
     sta ptr1+2
+    lda s_rollw                 ; (and the boat flashes: sprite palette 5, sail_flash)
+    beq @p0
+    lda #$2A
+    bra @pal
+@p0:
     lda #$20
+@pal:
     sta tmp5
     jsl oam_meta
     rts
@@ -5240,7 +5260,8 @@ str_adbl:   .byte "           ", 0
 ; leg sailed, at most 999, so any finish beats any DNF; style only pays at
 ; the line. Never steered: 0. The penalty word is always 0 (nothing is taken
 ; off: bumps cost time, so trying never scores below sitting still).
-; ev_stat: time left, marks rounded, bumps, style points
+; ev_stat: time left, marks rounded, bumps, style points; ev_style: style by
+; source (tight roundings, clean tacks, ferry surf, line honours, roll tacks)
 ; ev_break: base, bonus, penalty (base + bonus - penalty = ev_score)
 sail_score:
     A16
@@ -5266,6 +5287,11 @@ sail_score:
     and #$00FF
     sta ev_stat+4
     stz ev_stat+6
+    stz ev_style                ; (style by source: none unless she finishes)
+    stz ev_style+2
+    stz ev_style+4
+    stz ev_style+6
+    stz ev_style+8
     A8
     lda ev_giveup
     ora s_adrift
@@ -5273,37 +5299,45 @@ sail_score:
     lda s_mark
     cmp #4
     jcc @dnf
-    ; style: roundings, tacks (a roll tack pays 250), surf, a clean race
-    lda s_tacks
+    ; style, by source (ev_style, the card's rows; they sum to STYLE):
+    ; tight roundings, clean tacks, ferry surf, line honours, roll tacks
+    A16
+    lda s_tstyle
+    sta ev_style
+    A8
+    lda s_tacks                 ; (roll tacks are counted in s_tacks too)
+    sec
+    sbc s_rolls
     ldx #PTS_TACK
     jsr mulc
     .a16
-    clc
-    adc s_tstyle
-    sta ev_stat+6
-    A8
-    lda s_rolls
-    ldx #(PTS_ROLL - PTS_TACK)
-    jsr mulc
-    .a16
-    clc
-    adc ev_stat+6
-    sta ev_stat+6
+    sta ev_style+2
     A8
     lda s_surf
     ldx #PTS_SURF
     jsr mulc
     .a16
-    clc
-    adc ev_stat+6
-    ldx s_bumps                 ; (a word: the high byte stays 0)
+    sta ev_style+4
+    lda s_bumps
+    and #$00FF
     bne @dirty
-    clc
-    adc #PTS_CLEAN              ; not a single bump
+    lda #PTS_CLEAN              ; not a single bump
+    sta ev_style+6
 @dirty:
-    sta ev_break+2
     A8
-    jsl style_top               ; ev_stat+6: the biggest style source, named
+    lda s_rolls
+    ldx #PTS_ROLL
+    jsr mulc
+    .a16
+    sta ev_style+8
+    clc
+    adc ev_style
+    adc ev_style+2
+    adc ev_style+4
+    adc ev_style+6
+    sta ev_break+2
+    sta ev_stat+6               ; (the style total)
+    A8
     ; base: the legs and the clock
     lda ev_stat
     ldx #PTS_SEC
@@ -5633,6 +5667,13 @@ issue_n:
     sta s_k
     sta s_kdir
     stz s_split
+    lda s_omode                 ; (any order but the rounding's own turn and its
+    cmp #1                      ; MISS THE BUOY! ends the just-rounded spell: no
+    beq @rj                     ; MARK n! NOW long after the mark)
+    cmp #3
+    beq @rj
+    stz s_rjust
+@rj:
     lda s_omode
     cmp #3
     beq @whole
@@ -5668,8 +5709,8 @@ issue_n:
     sec
     sbc s_wind
     jsl abs8l
-    cmp #(NOGO + 4)
-    bcs @hok
+    cmp #(ARW_MIN + 8)          ; (well clear of it: a slow reader isn't parked in
+    bcs @hok                    ; irons halfway, even if the wind backs a little)
 @hn:
     inx
     cpx #7
@@ -5740,12 +5781,22 @@ issue_n:
     lda #TP_RED
     jmp @taps
 @tack:
-    ; a turn from one side of the wind to the other, both upwind: a tack
+    ; the bow's notch already in the wind (part way round): the rest of it
     lda s_hgoal
     sec
     sbc s_wind
     sta tmp1
     jsl abs8l
+    cmp #ARW_MIN
+    bcs @tk
+    LDPTR1 str_keep             ; KEEP ON! TAP < 2 MORE TIMES
+    jsl cat
+    lda #2
+    sta s_omode
+    lda #TP_YELLOW
+    bra @taps
+@tk:
+    ; a turn from one side of the wind to the other, both upwind: a tack
     cmp #64
     bcs @leg
     lda s_adir
@@ -5789,7 +5840,7 @@ issue_n:
     jsl taps_text
     stz s_omode
     lda s_opal
-    ldx #ORDER_T
+    ldx #(ORDER_T + 4)          ; (the coach deals with it before it goes)
     jml say_coach_l
 
 ; the bow's notch reached the order (or a good course): the second half of a
@@ -5897,6 +5948,8 @@ order_back:
     bra @say
 @part:
     jsl buf_new
+    LDPTR1 str_keep             ; KEEP ON! TAP < 2 MORE TIMES
+    jsl cat
     lda #2
     sta s_omode
     lda tmp2
@@ -5906,8 +5959,412 @@ order_back:
     ldx #$0000
     stx s_ordt
     lda s_opal
-    ldx #ORDER_T
+    ldx #(ORDER_T + 4)
     jml say_coach_l
+
+; The order out (s_ord), every frame (from coach). It stands until it's done
+; or truly obsolete, and hesitating never turns it round:
+;   - done: the bow's notch reaches it, or (not started on yet) she's found a
+;     good course anyway
+;   - a MISS THE BUOY! goes the moment the buoy's no longer ahead on her line
+;   - tapped the wrong way (more to go than it asked): said again once if the
+;     tap was under way before it went up, else it goes (the coach starts
+;     afresh from where she's pointed)
+;   - not started on and the course to steer has moved (REPLAN_T): said
+;     afresh, but only if the fresh one turns the same way
+;   - ORDER_T on: an obsolete one goes (its notch now in the no-go, or more
+;     than 100 off the mark's bearing); else it's said again: afresh if not
+;     started on and the fresh one turns the same way, else the taps to go
+coach_ord:
+    lda s_omd
+    cmp #3
+    bne @nm
+    jsr miss_stale
+    jcs @lapse
+@nm:
+    A16
+    inc s_ordt
+    A8
+    lda s_hgoal
+    cmp s_ord
+    jeq @done
+    lda s_omd
+    cmp #3
+    beq @ww
+    lda s_otch
+    bne @ww
+    lda s_green
+    jne @done
+@ww:
+    lda s_ord                   ; more taps to go than it asked for: wrong way
+    sec
+    sbc s_hgoal
+    jsl abs8l
+    lsr a
+    lsr a
+    lsr a
+    lsr a
+    cmp s_ordn
+    beq @late
+    bcc @late
+    A16
+    lda s_ordt
+    cmp #12
+    A8
+    bcs @lapse
+    lda s_omd
+    cmp #3
+    beq @lapse
+    lda s_reiss                 ; (once: after that it's her steering)
+    bne @lapse
+    lda #$FF
+    sta s_ord
+    stz s_omode
+    jsl issue_order
+    lda #1
+    sta s_reiss
+    rtl
+@lapse:
+    lda #$FF
+    sta s_ord
+    stz s_split
+    stz s_reiss
+    lda s_pprio                 ; (its line goes with it)
+    cmp #2
+    bne @x
+    ldx #$0001
+    stx s_popup
+@x:
+    rtl
+@done:
+    jml order_done
+@late:
+    A16
+    lda s_ordt
+    cmp #ORDER_T
+    A8
+    bcs @due
+    lda s_omd                   ; (a MISS THE BUOY! stands till done or stale)
+    cmp #3
+    beq @x
+    lda s_otch
+    bne @x
+    A16
+    lda s_ordt
+    cmp #REPLAN_T
+    A8
+    bcc @x
+    lda s_adir
+    cmp s_ofin
+    beq @x
+    jsl coach_free_l
+    bcc @x
+    jsr same_way
+    bcc @x
+@fresh:
+    lda #$FF
+    sta s_ord
+    stz s_omode
+    jml issue_order
+@due:
+    lda s_resume                ; (news is over it: back when the news is done)
+    beq @d1
+    ldx #$0000
+    stx s_ordt
+    rtl
+@d1:
+    jsr ord_obsolete
+    bcs @lapse
+    lda s_omd
+    cmp #3
+    beq @back
+    lda s_otch
+    bne @back
+    jsr same_way
+    bcs @fresh
+@back:
+    jml order_back
+
+; carry set if the course to steer is a turn the same way as the order out
+same_way:
+    jsl tt_course
+    beq @n
+    eor s_kdir
+    bmi @n
+    sec
+    rts
+@n:
+    clc
+    rts
+
+; carry set if the order out is obsolete: its notch is in the no-go now (the
+; wind moved), or (not a MISS THE BUOY!) it's more than 100 off the bearing
+; to the mark
+ord_obsolete:
+    lda s_ord
+    sec
+    sbc s_wind
+    jsl abs8l
+    cmp #NOGO
+    bcc @y
+    lda s_omd
+    cmp #3
+    beq @n
+    lda s_ord
+    sec
+    sbc s_brg
+    jsl abs8l
+    cmp #100
+    bcs @y
+@n:
+    clc
+    rts
+@y:
+    sec
+    rts
+
+; carry set if a MISS THE BUOY! is stale: the buoy just rounded isn't ahead
+; on her line any more (abeam, astern, or 80 px or more on)
+miss_stale:
+    jsl sl_here
+    lda s_hgoal
+    ldx s_bmark
+    jsl sl_line
+    A16
+    lda s_lal
+    cmp #3
+    bmi @y
+    cmp #80
+    bcs @y
+    A8
+    clc
+    rts
+@y:
+    A8
+    sec
+    rts
+
+; A8 = a heading -> s_lpx, s_lpy (px) and s_lpx4, s_lpy4 (quarter px):
+; where she'll be when the bow has swung onto it from s_head (TURN_RATE a
+; frame), along the heading halfway between
+sl_turn:
+    sta s_tw+1
+    sec
+    sbc s_head
+    sta s_tw2                   ; (the swing, signed)
+    jsl abs8l
+    lsr a
+    sta s_tw                    ; frames it takes
+    lda s_tw2
+    cmp #$80
+    ror a
+    clc
+    adc s_head
+    sta s_tw+1                  ; the heading halfway
+    A16
+    lda s_speed
+    lsr a
+    lsr a
+    A8
+    sta WRMPYA
+    lda s_tw
+    sta WRMPYB
+    nop
+    nop
+    nop
+    nop
+    A16
+    lda RDMPYL
+    lsr a
+    lsr a
+    lsr a
+    lsr a                       ; speed (8.8) * frames, quarter px
+    cmp #256
+    bcc @r
+    lda #255
+@r:
+    sta s_lr2
+    A8
+    lda s_tw+1
+    jsl sin8
+    ldx s_lr2
+    jsr smul16
+    .a16
+    sta s_lpx4
+    cmp #$8000
+    ror a
+    cmp #$8000
+    ror a
+    sta s_lpx
+    A8
+    lda s_tw+1
+    jsl cos8
+    ldx s_lr2
+    jsr smul16
+    .a16
+    eor #$FFFF
+    inc a
+    sta s_lpy4
+    cmp #$8000
+    ror a
+    cmp #$8000
+    ror a
+    sta s_lpy
+    A8
+    rtl
+
+; A8 = a heading, X = a mark (word offset) -> carry set if that line, from
+; where the bow's swing onto it ends, truly hits the buoy: it's ahead (3-59
+; px) and the closest pass is under TOUCH_R by the touch test's own measure
+; (max + 3/8 min of the x and y gaps), worked in quarter px from her exact
+; position. Leaves sl_line's s_lal / s_lcr.
+sl_hit:
+    stx s_hm
+    pha
+    jsl sl_turn
+    pla
+    ldx s_hm
+    jsl sl_line
+    jsl sl_here
+    A16
+    lda s_lal
+    cmp #3
+    jmi @n16
+    cmp #60
+    jcs @n16
+    lda s_lcr
+    bpl @p
+    eor #$FFFF
+    inc a
+@p:
+    cmp #(TOUCH_R + 3)
+    jcs @n16
+    ; the gap to the buoy from where the swing ends, quarter px
+    ldx s_hm
+    lda f:mark_x,x
+    sec
+    sbc s_x
+    asl a
+    asl a
+    sta s_tw
+    lda s_xf
+    and #$00FF
+    lsr a
+    lsr a
+    lsr a
+    lsr a
+    lsr a
+    lsr a
+    eor #$FFFF
+    sec
+    adc s_tw
+    sec
+    sbc s_lpx4
+    sta s_ldx
+    lda f:mark_y,x
+    sec
+    sbc s_y
+    asl a
+    asl a
+    sta s_tw
+    lda s_yf
+    and #$00FF
+    lsr a
+    lsr a
+    lsr a
+    lsr a
+    lsr a
+    lsr a
+    eor #$FFFF
+    sec
+    adc s_tw
+    sec
+    sbc s_lpy4
+    sta s_ldy
+    A8
+    ; across her line: dx cos + dy sin
+    lda s_lh
+    jsl cos8
+    ldx s_ldx
+    jsr smul16
+    .a16
+    sta s_tw
+    A8
+    lda s_lh
+    jsl sin8
+    ldx s_ldy
+    jsr smul16
+    .a16
+    clc
+    adc s_tw
+    sta s_tw2                   ; (signed, quarter px)
+    A8
+    ; the closest point is that far across her line: (c cos h, c sin h) off
+    ; the buoy
+    lda s_lh
+    jsl cos8
+    ldx s_tw2
+    jsr smul16
+    .a16
+    bpl @a
+    eor #$FFFF
+    inc a
+@a:
+    sta s_tw
+    A8
+    lda s_lh
+    jsl sin8
+    ldx s_tw2
+    jsr smul16
+    .a16
+    bpl @b
+    eor #$FFFF
+    inc a
+@b:
+    cmp s_tw                    ; s_tw = the larger, A = the smaller
+    bcc @m
+    ldx s_tw
+    sta s_tw
+    txa
+@m:
+    lsr a
+    lsr a
+    sta s_lt
+    lsr a
+    clc
+    adc s_lt
+    clc
+    adc s_tw
+    cmp #(TOUCH_R * 4 - 2)      ; (the floors above run up to half a px low: a
+    A8                          ; pass this close is a touch for sure)
+    bcs @n
+    sec
+    rtl
+@n16:
+    A8
+@n:
+    clc
+    rtl
+
+; sprite palette 5 = the boat's (palette 0, the player's colours) lit up,
+; each colour three quarters of the way to white: the roll's window flash
+sail_flash:
+    A16
+    ldx #$0000
+@c:
+    lda pal_buf+256,x
+    lsr a
+    lsr a
+    and #%0001110011100111      ; (a quarter of the colour + 23 of 31: near white)
+    clc
+    adc #%0101111011110111
+    sta pal_buf+256+160,x
+    inx
+    inx
+    cpx #32
+    bne @c
+    A8
+    rtl
 
 ; Just rounded (s_rjust: 2 nothing said yet, 1 MARK n ROUNDED! HOLD COURSE is
 ; up), no order out. The bow's line onto the buoy just rounded: MISS THE
@@ -5926,26 +6383,20 @@ round_gate:
     bcs @go
     rtl
 @go:
-    lda s_hgoal
-    ldx s_bmark
-    jsl sl_line
+    lda s_hgoal                 ; (her line, once the bow's swung onto it, truly
+    ldx s_bmark                 ; hits the buoy: MISS THE BUOY!)
+    jsl sl_hit
+    bcc @nh
+    jml miss_buoy
+@nh:
     A16
     lda s_lal
     cmp #3
     jmi @past
-    lda s_lcr
-    bpl @ap
-    eor #$FFFF
-    inc a
-@ap:
-    cmp #ONTO_X
-    jcs @ahead
-    A8
-    jml miss_buoy
 @ahead:
     A8
     jsl tt_course
-    beq @on
+    jeq @on
     eor s_lcr+1
     bmi @turn                   ; (away from the buoy)
     A16
@@ -5980,8 +6431,17 @@ round_gate:
 @turn:
     stz s_rjust
     stz s_rwait
-    lda #1
+    lda #1                      ; MARK 2! NOW ... (fresh after the mark only)
     sta s_omode
+    A16
+    lda s_tick
+    sec
+    sbc s_rtick
+    cmp #150
+    A8
+    bcc @t1
+    stz s_omode
+@t1:
     jml issue_order
 @on:
     stz s_rwait
@@ -6006,7 +6466,8 @@ round_gate:
     rtl
 
 ; Every frame after a rounding with no order of its own coming (round_gate
-; does that): the bow's line onto the buoy just rounded, within 64 px: MISS
+; does that): her line truly hits the buoy just rounded, within 64 px (sl_hit:
+; from where the bow's swing ends, by the touch test's own measure): MISS
 ; THE BUOY! now, whatever else was out (a late tap of an order given before
 ; the mark counted can still swing her onto it)
 buoy_watch:
@@ -6040,22 +6501,9 @@ buoy_watch:
     cmp #128
     bcs @x16
     A8
-    lda s_hgoal
-    jsl sl_line
-    A16
-    lda s_lal
-    cmp #3
-    bmi @x16
-    cmp #64
-    bcs @x16
-    lda s_lcr
-    bpl @p
-    eor #$FFFF
-    inc a
-@p:
-    cmp #ONTO_X
-    bcs @x16
-    A8
+    lda s_hgoal                 ; (her line truly hits it: X = the mark)
+    jsl sl_hit
+    bcc @x
     lda s_ord                   ; (the order out, if its line clears it)
     sta s_rord
     lda #$FF
@@ -6598,77 +7046,6 @@ judge_pend:
     A8
     rtl
 
-; ev_stat+6 on a finish: the biggest source of style, (source << 12) | its
-; points, for the card to name it (source 0: no style at all, 1 TIGHT
-; ROUNDING, 2 CLEAN TACKS, 3 FERRY SURF, 4 LINE HONOURS). A tie goes to the
-; one listed first.
-style_top:
-    A16
-    lda s_tstyle                ; tight roundings
-    sta tmp0
-    lda #$1000
-    sta tmp1
-    A8
-    lda s_tacks                 ; tacks: 100 each, a roll tack 250
-    ldx #PTS_TACK
-    jsr @mul
-    .a16
-    sta tmp2
-    A8
-    lda s_rolls
-    ldx #(PTS_ROLL - PTS_TACK)
-    jsr @mul
-    .a16
-    clc
-    adc tmp2
-    ldx #$2000
-    jsr @top
-    A8
-    lda s_surf
-    ldx #PTS_SURF
-    jsr @mul
-    .a16
-    ldx #$3000
-    jsr @top
-    lda s_bumps
-    and #$00FF
-    bne @nc
-    lda #PTS_CLEAN
-    ldx #$4000
-    jsr @top
-@nc:
-    lda tmp0
-    beq @z
-    ora tmp1
-@z:
-    sta ev_stat+6
-    A8
-    rtl
-; A16 = points, X = its source: the new top if it's more
-@top:
-    .a16
-    cmp tmp0
-    beq @tx
-    bcc @tx
-    sta tmp0
-    stx tmp1
-@tx:
-    rts
-; A8 = n, X = k -> A16 = n * k
-@mul:
-    .a8
-    sta WRMPYA
-    txa
-    sta WRMPYB
-    nop
-    nop
-    nop
-    nop
-    A16
-    lda RDMPYL
-    rts
-.a8
-
 ; A8 = 0, 32 .. 224, s_rad = r -> s_px, s_py: polar's offset for that angle
 ; (north, then clockwise: r, or r/sqrt 2 each way on the diagonals)
 burst_xy:
@@ -6819,6 +7196,7 @@ str_more:   .byte " MORE", 0
 str_times:  .byte " TIMES", 0
 str_closer: .byte "PASS CLOSER = TIGHT ROUNDING", 0
 str_faster: .byte "TAP FASTER FOR A CLEAN TACK", 0
+str_keep:   .byte "KEEP ON! ", 0
 
 .segment "EVENTS3"
 .a8
