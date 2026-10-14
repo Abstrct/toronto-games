@@ -829,8 +829,8 @@ def run_bot(event, policy_name, seed, max_frames=60 * 240, film=None, latency=0,
                 want = m
                 # a hand can be late, but it never reorders its own decisions
                 due = t + max(0, latency + hrng.randint(-jitter, jitter))
-                if pending:
-                    due = max(due, pending[-1][0])
+                if pending:              # one change per frame: a tap is never swallowed
+                    due = max(due, pending[-1][0] + 1)
                 pending.append((due, m))
         if pending:
             while pending and pending[0][0] <= t:
