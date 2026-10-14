@@ -40,6 +40,9 @@ IRONS! TAP < ONCE", "ADRIFT SOON! ...".
     sail_obey_late1s / sail_obey_slow / sail_obey_ontime: the same with late
                   orders at most a second late / a slow miscounting thumb /
                   never late
+    sail_tell     the tell test for the undocumented trick: obeys the panel,
+                  hikes into each TACK NOW and lets go only when it sees the
+                  boat flash (OAM palette 5); run it at 10-12 frames
 """
 import math
 import os
@@ -825,6 +828,69 @@ class sail_obey_ontime(sail_obey):
 
 
 
+def boat_flash(g):
+    """the boat drawn lit up (sprite palette 5): what the player sees while
+    the undocumented trick's window is open. Read from the OAM, like a pair of
+    eyes on the screen, never from the trick's own state."""
+    oam = g.core.peek(g.sym['oam_buf'], 512)
+    for i in range(128):
+        y = oam[i * 4 + 1]
+        if y < 224 and (oam[i * 4 + 3] >> 1) & 7 == 5:
+            return True
+    return False
+
+
+class sail_tell(sail_obey):
+    """The trick's tell, tested by a first-timer who's seen the title demo:
+    she obeys the coach panel (as sail_obey, never late), and when it says
+    TACK NOW she holds A from her first tap (hikes into the tack). She lets
+    go of A when she sees the boat flash, and not before: run it at 10-12
+    frames of latency (pt.py curve sail -p sail_tell -l 10,11,12) and it
+    should land the trick on most tacks. It counts what the panel shows:
+    tells[] = (tacks tried, ROLL TACK popups)."""
+    late_odds = 0.0
+    redo = False
+    tells = []
+
+    def __init__(self):
+        super().__init__()
+        self.rolling = 0         # frame she started hiking into a tack (0: not)
+        self.flashed = False
+        self.tried = 0
+        self.rolled = 0
+        self.prev = ''
+
+    def schedule(self, t, line, rng):
+        super().schedule(t, line, rng)
+        if 'TACK NOW' in line and self.plan and not self.rolling:
+            self.rolling = self.plan[0][0]
+            self.flashed = False
+            self.tried += 1
+
+    def act(self, t, tel, rng):
+        m = super().act(t, tel, rng)
+        g = _game(self)
+        line = screen_row(g, CALL_ROW)
+        if line != self.prev:
+            self.prev = line
+            if line.startswith('ROLL TACK'):
+                self.rolled += 1
+                type(self).tells.append((self.tried, self.rolled))
+        if self.rolling and t >= self.rolling:
+            if boat_flash(g):
+                self.flashed = True
+            if self.flashed:
+                m &= ~A
+                if not boat_flash(g) and t - self.rolling > 20:
+                    self.rolling = 0
+            elif t - self.rolling > 150:
+                self.rolling = 0                  # never saw it: give up on this one
+                m &= ~A
+            else:
+                m |= A
+        return m
+
+
 class sail_fumble(sail_coach):
     """sail_coach with clumsy thumbs: one order in five gets a tap too many
     or too few; it fixes things only when the coach says so."""
@@ -891,7 +957,7 @@ class sail_flail(Policy):
 
 
 POLICIES = {c.__name__: c for c in (sail_expert, sail_casual, sail_human, sail_pointer, sail_coach, sail_dana, sail_fumble,
-                                    sail_obey, sail_obey_slow, sail_obey_late1s, sail_obey_ontime,
+                                    sail_obey, sail_obey_slow, sail_obey_late1s, sail_obey_ontime, sail_tell,
                                     sail_tack, sail_random, sail_flail)}
 DEFAULTS = {'sail': ['idle', 'hold_a', 'hold_right', 'mash_a', 'random_input', 'sail_random', 'sail_tack', 'sail_flail',
                      'sail_pointer', 'sail_coach', 'sail_dana', 'sail_obey', 'sail_human', 'sail_casual', 'sail_expert']}
