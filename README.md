@@ -69,7 +69,9 @@ event list.
 **Scores.** The result card shows how the score adds up. A score never goes
 below 0: if the penalties are bigger than the rest, the card still shows the
 full sum and says SCORES NEVER GO BELOW 0. A failed Bike run forfeits its
-tokens and style, and the card itemises them in grey (FORFEIT TOKENS X50, FORFEIT STYLE).
+tokens and style, and the card itemises them in grey (FORFEIT TOKENS X50,
+FORFEIT STYLE; one FORFEIT BONUS row on a full card). Where style comes from
+several moves, the card lists each one in grey under + STYLE.
 
 **Medals.** Equal scores share a place and its medal. A score of 0 never
 wins a medal.
@@ -78,7 +80,8 @@ wins a medal.
   the last event comes the podium at Nathan Phillips Square, which names gold,
   silver and bronze, then the final table. Players level on points are split by
   golds, then silvers; the medal table, ticker, podium and final table say SAME
-  PTS: GOLDS BREAK TIES when that decides a place.
+  PTS: GOLDS, NOT SCORE when that decides a place. The SCORE column never
+  breaks a tie.
 - **Solo:** you race the Toronto Record. Matching it wins gold, two thirds of
   it wins silver and one third wins bronze. The event card shows all three
   marks.
@@ -96,15 +99,16 @@ rivals: COURIER and SALMON on Queen St, SUITGUY and TIMBIT on Bay, GREEN P
 and TOWTRUCK in the Annex, and so on.
 - A score that makes the board bumps a ghost off it: "#4 ON THE TORONTO
   BOARD! SO LONG, TOWTRUCK!".
-- A new #1 gets the full moment: "NEW TORONTO RECORD! +450 OVER GREEN P /
-  WE THE NORTH!".
+- A new #1 gets the full moment: WE THE NORTH! beside your name, NEW
+  TORONTO RECORD! and +450 OVER GREEN P.
 
 On the board screen, ◀ ▶ turn the pages, one event per page.
 
 **Title screen.** Leave the title alone and it plays an attract loop: a
 HOW TO PLAY panel, the records, then a real gameplay demo of the next event
 in the rotation. The demos are recorded play, showing off the named tricks.
-When a named trick lands, the demo banner reads WATCH THAT MOVE! Any button
+When a named trick lands, the demo banner reads WATCH THAT MOVE! while its
+callout is up. Any button
 ends a demo and brings you back to the title.
 
 ## Music
