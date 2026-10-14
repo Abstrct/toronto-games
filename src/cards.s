@@ -860,7 +860,7 @@ card_stat_pick:
     .byte 1, 2                  ; park: DOGS DODGED, TACKLES
     .byte 0, 2                  ; cops: SIP 'N' HOPS, HURDLES
     .byte 1, 2                  ; sail: MARKS ROUNDED, BUMPS
-    .byte 0, 1                  ; parking: SPOTS PARKED, CURB KISSES
+    .byte 0, 2                  ; parking: SPOTS PARKED, TICKETS
     .byte 1, 0                  ; subway: STATIONS, GERMS
 
 ; carry set = ev_break adds up to ev_score (0 + 0 - 0 = 0 counts: a score of
@@ -3232,7 +3232,7 @@ ticker_draw:
 ; per-event text
 ev_blurbs:   .addr eb0, eb1, eb2, eb3, eb4, eb5, eb6
 ev_controls: .addr ec0, ec1, ec2, ec3, ec4, ec5, ec6
-ev_fails:    .addr ef0, ef1, ef2, ef3, ef4, ef5, ef6
+ev_fails:    .addr ef0, ef1, ef2, ef3, ef4, ef5_1, ef6
 eb0: .byte "DELIVER THE PACKAGE TO", $0A, "SPADINA. PREFERABLY ALIVE.", 0
 eb1: .byte "MAKE THE 5:42 GO TRAIN.", $0A, "RED ! AHEAD? CHANGE LANES.", 0
 eb2: .byte "QUEEN GATE TO DUNDAS GATE.", $0A, "DODGE DOGS, THEN PAT THEM!", 0
@@ -3245,7 +3245,7 @@ ec1: .byte "LEFT, RIGHT AS DOTS LAND", $0A, "UP/DOWN LANE  A EXCUSE ME", $0A, "Y
 ec2: .byte "D-PAD WALK   A THROW BALL", $0A, "B WHEN ! SHOWS: SIDESTEP", $0A, "B AS HE LUNGES: BONUS!", 0
 ec3: .byte "TAP A AT CHALK. RED: HOLD", $0A, "B: SIP WHILE COP CAN'T SEE", $0A, "B MID-AIR = SIP 'N' HOP", 0
 ec4: .byte "LEFT/RIGHT: TURN  A: HIKE", $0A, "WIND FROM TOP: ZIG-ZAG UP", $0A, "SURF THE FERRY'S WAKE!", 0
-ec5: .byte "UP GAS  DOWN REVERSE", $0A, "BACK IN: DOWN+RIGHT, THEN", $0A, "DOWN+LEFT. A: PARK IT!", 0
+ec5: .byte "UP: REAR BUMPER TO LINE", $0A, "BACK IN: DOWN+RIGHT, THEN", $0A, "DOWN+LEFT. A: PARK IT!", 0
 ec6: .byte "HOLLOW ARROW: GET READY", $0A, "SOLID: D-PAD THAT WAY NOW", $0A, "GOLD DOT STOP-TO-STOP = X3", 0
 ef0: .byte "WIPED OUT!", 0
 ef1: .byte "MISSED THE TRAIN!", 0
@@ -3253,6 +3253,7 @@ ef2: .byte "TACKLED!", 0
 ef3: .byte "BUSTED!", 0
 ef4: .byte "ADRIFT!", 0
 ef5: .byte "TOWED!", 0
+ef5_1: .byte "NO CLEAN PARK!", 0
 ef6: .byte "PATIENT ZERO!", 0
 ; ev_fail 4: an event's second way to fail (the bike's idle kick)
 ev_fails2:   .addr ef2_0, ef1, ef2, ef3, ef4, ef5, ef6
@@ -3266,7 +3267,7 @@ card_break_labels:
     .addr bl_cross, bl_style, bl_tackle     ; park
     .addr bl_run,   bl_style, bl_fine       ; cops
     .addr bl_course, bl_style, bl_bump      ; sail
-    .addr bl_park,  bl_style, bl_dents      ; parking
+    .addr bl_park,  bl_style, bl_dings      ; parking
     .addr bl_ride,  bl_style, bl_germs      ; subway
 bl_tips:   .byte "TIPS+STYLE", 0
 bl_walk:   .byte "WALK", 0
@@ -3284,7 +3285,7 @@ bl_spill:  .byte "SPILLS", 0
 bl_tackle: .byte "TACKLES", 0
 bl_fine:   .byte "COP'S FINE", 0
 bl_bump:   .byte "BUMPS", 0
-bl_dents:  .byte "DENTS+CURBS", 0
+bl_dings:  .byte "DINGS+FINES", 0
 bl_germs:  .byte "GERMS", 0
 
 ; card_fail_note: the line under a failed run's sum, saying why it scored
@@ -3298,7 +3299,7 @@ card_fail_note:
     .addr fn_park,   fn_park_t, fn_park_q, fn_park      ; park
     .addr fn_cops,   fn_cops,   fn_cops_q, fn_cops      ; cops
     .addr fn_sail,   fn_sail_t, fn_sail_t, fn_sail      ; sail
-    .addr fn_pk,     fn_pk,     fn_pk_q,   fn_pk        ; parking
+    .addr fn_pk,     fn_pk,     fn_pk_q,   fn_pk_i      ; parking
     .addr fn_sub,    fn_sub,    fn_sub_q,  fn_sub       ; subway
 fn_bike:   .byte "THIRD WIPEOUT. NO TIPS!", 0
 fn_bike_n: .byte "NOT DELIVERED. NO TIPS!", 0
@@ -3311,7 +3312,8 @@ fn_cops:   .byte "COP CAUGHT YOU: FINED 1/4", 0
 fn_cops_q: .byte "GAVE UP: THE COP FINES 1/4", 0
 fn_sail:   .byte "NOBODY STEERED FOR 10 S", 0
 fn_sail_t: .byte "250 PER MARK ROUNDED", 0
-fn_pk:     .byte "PARK ONE SPOT TO FINISH", 0
+fn_pk:     .byte "HALF IN OR TOWED, ALL 3", 0
+fn_pk_i:   .byte "10 S WITHOUT DRIVING", 0
 fn_pk_q:   .byte "QUITTERS KEEP 450 AT MOST", 0
 fn_sub:    .byte "PATIENT ZERO! STYLE VOID", $0A, "RIDE: 40 A STOP YOU SURFED", 0
 fn_sub_q:  .byte "GAVE UP: STYLE VOID", $0A, "RIDE: 40 A STOP YOU SURFED", 0
@@ -3349,12 +3351,12 @@ card_stat_labels:
     .addr sl_time, sl_dodge, sl_tackle, sl_pat
     .addr sl_sipnhop, sl_lucky, sl_hurdles, sl_spill
     .addr sl_time, sl_buoys, sl_bump, sl_style
-    .addr sl_parked, sl_kisses, sl_onemove, sl_dents
+    .addr sl_parked, sl_kisses, sl_tickets, sl_towed
     .addr sl_germs, sl_stations, sl_chain, sl_style
 sl_parked:   .byte "SPOTS PARKED", 0
 sl_kisses:   .byte "CURB KISSES", 0
-sl_onemove:  .byte "ONE-MOVE PARKS", 0
-sl_dents:    .byte "DENTS", 0
+sl_tickets:  .byte "TICKETS", 0
+sl_towed:    .byte "TOWED", 0
 sl_germs:    .byte "GERMS", 0
 sl_stations: .byte "STATIONS", 0
 sl_streak:   .byte "BEST STREAK", 0
