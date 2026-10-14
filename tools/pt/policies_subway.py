@@ -20,6 +20,15 @@ all leg: the stop's STANDING SURF pays x3), which needs quick, small hands.
 
 subway_human is subway_surfer with a built-in 15-frame (250 ms) hand, so a
 plain `balance` run shows where an average player lands.
+
+subway_newbie is the round-5 first-timer (Dana): 20-frame hands, presses the
+arrow's way as soon as the HOLLOW arrow shows and holds it, only pulls back
+once the dot is red. On the round-5 build it went PATIENT ZERO for 120 every
+time, as Dana did; it should reach Union.
+
+Every ride differs past TMU (the course is drawn from rng on the ride's first
+frame, and run_bot seeds rng), and three of the last four legs carry a gag
+(kinds 4 SIGNAL PROBLEMS and 5 BACKPACK) that the bots read like any lurch.
 """
 import inspect
 
@@ -30,7 +39,7 @@ W_BX, W_BY, W_VX, W_VY, W_FX, W_FY = 0, 2, 4, 6, 8, 10
 W_SEG, W_SPEED, W_LS, W_LT, W_GERMS, W_GRAB, W_KIND = 16, 18, 24, 26, 28, 30, 34
 LS_GAP, LS_WARN, LS_ACT, LS_END = range(4)
 # lurch kind -> (axis, push sign): the arrow points the other way
-PUSH = {0: (0, -1), 1: (1, +1), 2: (1, -1), 3: (0, +1)}
+PUSH = {0: (0, -1), 1: (1, +1), 2: (1, -1), 3: (0, +1), 4: (0, +1), 5: (0, -1)}
 
 
 def s16(v):
@@ -134,6 +143,39 @@ class subway_human(subway_surfer):
         return q.pop(0) if len(q) > self.delay else 0
 
 
-POLICIES = {c.__name__: c for c in (subway_expert, subway_surfer, subway_human)}
-DEFAULTS = {'subway': ['idle', 'hold_right', 'mash_a', 'random_input', 'subway_human', 'subway_expert']}
+class subway_newbie(_Reader):
+    """A first-timer who read the card once (Dana): ~20-frame hands. Presses
+    the arrow's way as soon as ANY arrow shows (hollow too), keeps pressing
+    while the arrow is up unless the dot has run 10 px that way, and only
+    pulls back once the dot turns red. Never chases the gold."""
+    delay = 20
+
+    def act(self, t, tel, rng):
+        q = getattr(self, 'q', None)
+        if q is None:
+            q = self.q = []
+        q.append(self.decide())
+        return q.pop(0) if len(q) > self.delay else 0
+
+    def decide(self):
+        s = self.read()
+        if s['grab']:
+            return 0
+        x = s['x']
+        m = 0
+        if (x[0] ** 2 + x[1] ** 2) ** 0.5 >= 16:          # red: pull back
+            m |= LEFT if x[0] > 4 else RIGHT if x[0] < -4 else 0
+            m |= UP if x[1] > 4 else DOWN if x[1] < -4 else 0
+            return m
+        if s['ls'] in (LS_WARN, LS_ACT):
+            ax, sg = PUSH[s['kind']]
+            # the arrow points against the push
+            if -sg * x[ax] < 10:
+                m |= ((RIGHT if sg < 0 else LEFT) if ax == 0 else (DOWN if sg < 0 else UP))
+        return m
+
+
+POLICIES = {c.__name__: c for c in (subway_expert, subway_surfer, subway_human, subway_newbie)}
+DEFAULTS = {'subway': ['idle', 'hold_right', 'mash_a', 'random_input', 'subway_newbie', 'subway_human',
+                       'subway_expert']}
 CURVE = {'subway': 'subway_surfer'}

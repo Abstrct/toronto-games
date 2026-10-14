@@ -1,36 +1,43 @@
 ; EVENT 7: TTC SURFING — Line 1 southbound, Bloor-Yonge to Union, no hands.
 ;
-; The ride is a fixed course of lurches (course table below): each leg pulls
-; out of a station, takes a curve or two and brakes into the next one. Every
-; lurch is TELEGRAPHED 40 frames before it pushes: a sound (three departure
-; beeps, a wheel squeal for curves, the brake hiss), a status line ("CURVE
-; AHEAD") and a HOLLOW blinking arrow by the ring: get ready, don't lean yet.
-; When the push starts the arrow goes SOLID and the status names the lean
-; ("CURVE! LEAN ^"): lean now. The push then ramps in.
-; Between lurches (doors open, cruising) nothing pushes: the rider finds
-; their feet and the dot settles back to the middle on its own, so nothing
-; ever tips you out unannounced. Track joints are little kicks you can see
-; (the car jumps) and hear (a clack).
+; The ride is a course of lurches (course table below): each leg pulls out
+; of a station, takes a curve or two and brakes into the next one. Legs 1-2
+; never change (the lesson); from the TMU leg on every ride jitters the
+; gaps, lengths and pushes and slips a GAG into three of the last four legs:
+; SIGNAL PROBLEMS (the emergency brake: forward) or a BACKPACK that swings
+; round into you from the right (back). Every lurch is TELEGRAPHED before it
+; pushes (40 frames, a gag 30): a sound (three departure beeps, a wheel
+; squeal, the brake hiss, the horn, a blip), a status line ("CURVE AHEAD")
+; and a HOLLOW blinking arrow by the ring: get ready. When the push starts
+; the arrow goes SOLID and the status names the button ("CURVE! D-PAD v").
+; The push then ramps in.
+; On the hollow arrow a lean is half strength and the rider finds their feet
+; (the dot settles back), so getting ready early never tips you over; between
+; lurches nothing pushes at all. A lean only goes LEAN_LIM px your way:
+; holding the arrow can't carry you into the rim, only the push (or a late
+; correction) can. Track joints are little kicks you can see and hear.
 ;
 ; The balance ring sits over the rider's head on a dark disc of its own.
 ; The dot is the rider's balance: LEFT/RIGHT is the train's go/brake axis,
-; UP/DOWN the curves. Dot physics are slow and heavily damped (no overshoot
-; you can't recover from at a human reaction time) with a gentle tip-over
-; once you lean. Let the dot reach the red rim and you GRAB something, and
-; the sprite acts the gag out: the sticky pole (back), a backpack face-first
-; (forward), a stranger's lap (up, toward the seats), the floor (down).
+; UP/DOWN the curves. Dot physics are slow and heavily damped with a gentle
+; tip-over while a push is on. Let the dot reach the red rim and you GRAB
+; something, and the sprite acts the gag out: the sticky pole (back), a
+; backpack face-first (forward), a stranger's lap (up), the floor (down).
 ;
 ; Scoring (ev_break = base, bonus, penalty):
-;   finished at Union: RIDE 1000 + STYLE - GERMS x40
-;     STYLE: STANDING SURF, a stop-to-stop leg you rode (D-pad) with no grab,
-;            pays 75 x the chain of clean legs (75, 150, ... 450); GOLD DOT
-;            SURF, a clean leg where the dot never left the gold middle,
-;            pays that x3 (the expert's layer: 225 ... 1350); and a point
-;            per 2 frames with the dot gold while a lurch is pushing and
-;            you're working the pad (never for standing still).
-;   PATIENT ZERO (20 germs) or CALL IT A DAY: 40 per station reached on a
-;   leg where you used the pad (standing still earns nothing), no style
-;   (any finish beats any failed run: 1000 - 19x40 = 240 > 5x40).
+;   finished at Union: RIDE 1000 + STYLE - GERMS x40 (the true cost; a
+;   finish can't go below 1000 - 19x40 = 240)
+;     STYLE, four things to master:
+;       STANDING SURF: a leg you rode (D-pad) with no grab pays 75 x the
+;         chain of clean legs in a row (75, 150, ... 450);
+;       GOLD SURF: the dot never left the gold middle from the STAND CLEAR
+;         chime to the next stop: that leg's surf x3 (225 ... 1350);
+;       DEAD CENTRE: while a lurch pushes and you're working the pad, a
+;         point every 2 frames with the dot gold, every frame inside 2 px;
+;       GAGS: +100 for each gag ridden out without grabbing anything.
+;   PATIENT ZERO (20 germs) or CALL IT A DAY: RIDE 40 per LEG LEANED (a leg
+;   finished with the pad used; standing still earns nothing), no style
+;   (any finish beats any failed run: 240 > 5x40).
 ; Once the run is decided (20 germs, or the doors open at Union) the pause
 ; menu is shut and a give-up already in the pipe is ignored.
 ;
@@ -50,14 +57,18 @@ RING_X    = 128
 RING_Y    = 132
 ARROW_D   = 32              ; arrow centre distance from the ring centre
 SIGN_ROW  = 7               ; station sign box rows 7-9, over the windows
-POP_ROW   = 10              ; popups, between the sign and the ring
+POP_TOP   = 4               ; callouts: a padded panel in rows 4-6, under the
+POP_ROW   = 5               ; HUD and over the sign (clear of every arrow)
 RADIUS2   = 400             ; grab when bx^2 + by^2 > 20^2
 DANGER2   = 256             ; dot turns red past 16 px
 SWEET2    = 36              ; sweet spot (the dot turns gold): inside 6 px
 NUM_SEG   = 6
 LEAN      = $0013           ; D-pad lean, 8.8 px/frame^2
+LEAN_LIM  = 8               ; px: no further lean past this your way
 VMAX      = $0090           ; dot speed cap, 8.8 px/frame
 WARN      = 40              ; frames of telegraph before every lurch
+WARN_GAG  = 30              ; a gag's telegraph (the passengers give less notice)
+GAG_PAY   = 100             ; riding a gag out without grabbing anything
 GRAB_T    = 64              ; frames a grab gag takes (lunge, hold, walk back)
 BASE_RIDE = 1000
 GERM_PEN  = 40              ; (x40 is done with shifts in sb_score)
@@ -68,6 +79,8 @@ K_DEP     = 0               ; pull out: pushes the dot back (left)
 K_CL      = 1               ; curve left: pushes the dot down (toward us)
 K_CR      = 2               ; curve right: pushes the dot up
 K_BRK     = 3               ; brake into the next station: pushes forward
+K_SIG     = 4               ; gag: signal problems, the emergency brake: forward
+K_PACK    = 5               ; gag: a backpack swings round into you: back
 
 ; lurch states
 LS_GAP    = 0
@@ -135,8 +148,20 @@ w_gold   = ev_ram + 154     ; 1 = the dot has stayed gold all this leg
 w_hide   = ev_ram + 156     ; 1 = no ring yet (the countdown sits there)
 w_startle = ev_ram + 158    ; frames the passengers jump after a grab
 w_hollow = ev_ram + 160     ; draw_arrow: 1 = the hollow (warning) arrow
+w_gag    = ev_ram + 162     ; 1 = this lurch is a gag and you haven't grabbed yet
+w_dodge  = ev_ram + 164     ; gags ridden out
+w_leg    = ev_ram + 166     ; build_course: leg, gag slot, lurches left
+w_slot   = ev_ram + 168
+w_left   = ev_ram + 170
+w_skip   = ev_ram + 172     ; the leg past TMU without a gag
+w_plen   = ev_ram + 174     ; popup buffer length
+w_built  = ev_ram + 176     ; 1 = this ride's course is drawn up
+w_pend   = ev_ram + 178     ; 1 = a callout waits to be drawn (w_ppal)
+w_ppal   = ev_ram + 180
 COLBUF   = ev_ram + 256     ; two 28-word column buffers (256, 320)
 EV_SEED  = ev_ram + 510
+COURSE   = ev_ram + 512     ; this run's course: 4 bytes a lurch (<= 26 lurches)
+PBUF     = ev_ram + 640     ; popup text (<= 28 characters + 0)
 
 ST_NONE   = 0
 ST_CLEAR  = 1               ; warnings: what's coming, no lean yet
@@ -149,6 +174,11 @@ ST_LEANL  = 7
 ST_CRUISE = 8
 ST_DOORS  = 9
 ST_UNION  = 10
+ST_SIGW   = 11              ; gag warnings and pushes
+ST_SIGP   = 12
+ST_PACKW  = 13
+ST_PACKP  = 14
+ST_TMU    = 15
 
 ; code + tables live in a graphics bank with room to spare (bank $85)
 .segment "GFX0"
@@ -233,10 +263,9 @@ sb_init:
 @c:
     stz ev_ram,x
     inx
-    cpx #512
+    cpx #1024
     bne @c
-    ldx #$2E6B
-    stx EV_SEED
+    jsr seed_course             ; (again on the first frame of the ride)
     ldx #((264 >> 3) & 63)
     stx w_col
     lda #1
@@ -259,8 +288,26 @@ sb_init:
     jsr load_lurch
     rts
 
+; every ride is a little different: the seed comes from rng (which the
+; attract demo fixes), taken again on the ride's first frame
+seed_course:
+    A16
+    lda rng
+    eor #$2E6B
+    bne @sd
+    lda #$2E6B
+@sd:
+    sta EV_SEED
+    A8
+    jmp build_course
+
 ; ------------------------------------------------------------------
 sb_update:
+    lda w_built
+    bne @b
+    inc w_built
+    jsr seed_course             ; (legs 1-2 never change: the lurch loaded stands)
+@b:
     jsr train
     jsr balance
     jsr gag_move
@@ -290,6 +337,9 @@ sb_update:
 
 ; ------------------------------------------------------------------
 ; the course: kind, gap (frames before the warning), strength (8.8 push), length
+; Legs 1-2 are always these (the lesson). From the TMU leg on, every ride
+; jitters the gaps, lengths and pushes a little and slips a gag into three of
+; the last four legs (build_course), so no two rides are the same.
 course:
     ; Bloor-Yonge -> Wellesley: pull out, pull in. Gentle.
     .byte K_DEP, 40, 7, 90
@@ -298,7 +348,7 @@ course:
     .byte K_DEP, 70, 8, 90
     .byte K_CL, 30, 7, 70
     .byte K_BRK, 40, 8, 100
-    ; -> Dundas
+    ; -> TMU (it was Dundas)
     .byte K_DEP, 70, 8, 90
     .byte K_CR, 20, 8, 80
     .byte K_CL, 20, 8, 60
@@ -317,23 +367,143 @@ course:
     .byte K_DEP, 70, 10, 90
     .byte K_CL, 30, 11, 120
     .byte K_BRK, 20, 10, 100
+leg_len: .byte 2, 3, 4, 4, 4, 3
+
+; course -> COURSE, with this ride's jitter and gags
+build_course:
+    lda #4
+    jsr ev_range
+    clc
+    adc #2
+    sta w_skip                  ; legs 2-5: one of them goes without a gag
+    ldx #$0000                  ; source
+    ldy #$0000                  ; destination
+    stz w_leg
+@leg:
+    phx
+    ldx w_leg
+    lda f:leg_len,x
+    plx
+    sta w_left
+    lda #$FF
+    sta w_slot
+    lda w_leg
+    cmp #2
+    bcc @lurch
+    cmp w_skip
+    beq @lurch
+    lda w_left                  ; a gag before any lurch but the pull-out
+    dec a
+    jsr ev_range
+    inc a
+    sta w_slot
+@lurch:
+    lda w_slot
+    bne @copy
+    ; the gag: signal problems or a backpack, 15-44 frames after the last push
+    lda #2
+    jsr ev_range
+    clc
+    adc #K_SIG
+    sta COURSE,y
+    lda #30
+    jsr ev_range
+    clc
+    adc #15
+    sta COURSE+1,y
+    lda #3
+    jsr ev_range
+    clc
+    adc #12
+    sta COURSE+2,y
+    lda #16
+    jsr ev_range
+    clc
+    adc #40
+    sta COURSE+3,y
+    iny
+    iny
+    iny
+    iny
+@copy:
+    lda f:course,x
+    sta COURSE,y
+    lda f:course+2,x
+    sta COURSE+2,y
+    lda f:course+1,x
+    sta COURSE+1,y
+    lda f:course+3,x
+    sta COURSE+3,y
+    lda w_leg
+    cmp #2
+    bcc @next
+    ; jitter: gap -4..+11 (at least 1), length -8..+7, push +0/+1 past TMU
+    lda #16
+    jsr ev_range
+    clc
+    adc COURSE+1,y
+    sec
+    sbc #4
+    beq @g1
+    bcs @g2
+@g1:
+    lda #1
+@g2:
+    sta COURSE+1,y
+    lda #16
+    jsr ev_range
+    clc
+    adc COURSE+3,y
+    sec
+    sbc #8
+    sta COURSE+3,y
+    lda w_leg
+    cmp #3
+    bcc @next
+    lda #2
+    jsr ev_range
+    clc
+    adc COURSE+2,y
+    sta COURSE+2,y
+@next:
+    inx
+    inx
+    inx
+    inx
+    iny
+    iny
+    iny
+    iny
+    dec w_slot
+    dec w_left
+    jne @lurch
+    inc w_leg
+    lda w_leg
+    cmp #NUM_SEG
+    jne @leg
+    rts
 
 ; read the lurch at w_lp, start its gap
 load_lurch:
     ldx w_lp
-    lda f:course,x
+    lda COURSE,x
     sta w_kind
     stz w_kind+1
-    lda f:course+1,x
+    lda COURSE+1,x
     sta w_lt
     stz w_lt+1
-    lda f:course+2,x
+    lda COURSE+2,x
     sta w_str
     stz w_str+1
-    lda f:course+3,x
+    lda COURSE+3,x
     sta w_dur
     stz w_dur+1
     stz w_ls
+    lda w_kind
+    cmp #K_SIG
+    bcc @x
+    sta w_gag                   ; (a gag never follows a gag)
+@x:
     rts
 
 ; the train: lurch state machine, forces, speed
@@ -357,9 +527,24 @@ tr_gap:
     ldx w_speed
     bne @mv
     lda #ST_DOORS
+    ldx w_seg
+    cpx #3
+    bne @mv
+    lda #ST_TMU                 ; the sign says TMU
 @mv:
     sta w_status
+    jsr recover
     jsr jolts
+    ; a gag ridden out: paid once its push has let go and nothing was grabbed
+    lda w_gag
+    bpl @ng
+    A16
+    lda w_fx
+    ora w_fy
+    A8
+    bne @ng
+    jsr gag_paid
+@ng:
     A16
     dec w_lt
     A8
@@ -369,31 +554,52 @@ tr_gap:
     lda #LS_WARN
     sta w_ls
     ldx #WARN
+    lda w_kind
+    cmp #K_SIG
+    bcc @w
+    ldx #WARN_GAG
+    bra @w2
+@w:
+    lda w_gag                   ; (the next lurch came before the push let go)
+    bpl @w2
+    phx
+    jsr gag_paid
+    plx
+@w2:
     stx w_lt
     lda w_kind
     asl a
     TAXB
     lda f:warn_status,x
     sta w_status
+    ldx w_kind
+    lda f:warn_sfx,x
+    jsl sfx_play
     lda w_kind
-    beq @dep
-    cmp #K_BRK
-    beq @brk
-    SFX SFX_WHISTLE             ; the wheels squeal into a curve
-    rts
-@brk:
-    SFX SFX_SPLASH              ; brake hiss; the station wall starts to stream past
+    bne @nd
+    ; please stand clear of the doors: the gold leg starts with the chime
     lda #1
-    sta w_src
+    sta w_gold
     rts
-@dep:
-    SFX SFX_READY               ; please stand clear of the doors: beep...
+@nd:
+    cmp #K_BRK
+    bne @x
+    lda #1                      ; brake hiss: the station wall starts to stream past
+    sta w_src
+@x:
     rts
 
-; per kind: (warning, push) status
+; per kind: (warning, push) status, the warning's sound, the push's sound,
+; and which way it pushes the dot (x, y: 1, -1 or 0)
 warn_status: .byte ST_CLEAR, ST_GO, ST_CURVE, ST_LEANU, ST_CURVE, ST_LEAND, ST_BRAKE, ST_LEANL
+             .byte ST_SIGW, ST_SIGP, ST_PACKW, ST_PACKP
+warn_sfx:    .byte SFX_READY, SFX_WHISTLE, SFX_WHISTLE, SFX_SPLASH, SFX_HORN, SFX_BACK
+push_sfx:    .byte SFX_GO, SFX_WHISTLE, SFX_WHISTLE, SFX_SPLASH, SFX_CRASH, SFX_STEP
+push_sx:     .byte $FF, 0, 0, 1, 1, $FF
+push_sy:     .byte 0, 1, $FF, 0, 0, 0
 
 tr_warn:
+    jsr recover
     jsr jolts
     lda w_kind
     bne @nb
@@ -423,37 +629,53 @@ tr_warn:
     lda f:warn_status,x
     sta w_status
     ; the push
-    A16
-    lda w_str
     ldx w_kind
-    cpx #K_DEP
-    bne @a1
-    eor #$FFFF
-    inc a
+    lda f:push_sx,x
+    jsr signed_str
     sta w_tx
     A8
-    stz w_src                   ; tunnel from here
-    jsr sign_clear
-    SFX SFX_GO
-    rts
-@a1:
-    .a16
-    cpx #K_BRK
-    bne @a2
-    sta w_tx
-    A8
-    SFX SFX_SPLASH
-    rts
-@a2:
-    .a16
-    cpx #K_CL
-    beq @a3
-    eor #$FFFF
-    inc a
-@a3:
+    ldx w_kind
+    lda f:push_sy,x
+    jsr signed_str
     sta w_ty
     A8
-    SFX SFX_WHISTLE
+    ldx w_kind
+    lda f:push_sfx,x
+    jsl sfx_play
+    lda w_kind
+    bne @x
+    stz w_src                   ; tunnel from here
+    jsr sign_clear
+@x:
+    rts
+
+; A8 = 1, 0 or -1 -> A16 = w_str, 0 or -w_str
+signed_str:
+    A16
+    and #$00FF
+    tay
+    lda #$0000
+    cpy #$0000
+    beq @x
+    lda w_str
+    cpy #$0001
+    beq @x
+    eor #$FFFF
+    inc a
+@x:
+    rts
+
+; after the emergency brake the train winds back up to speed
+recover:
+    A16
+    lda w_speed
+    beq @x
+    cmp #$0600
+    bcs @x
+    adc #$0008
+    sta w_speed
+@x:
+    A8
     rts
 
 tr_act:
@@ -474,7 +696,27 @@ tr_act:
     bra @tick
 @nd:
     cmp #K_BRK
+    beq @brk
+    cmp #K_SIG
     bne @cruise
+    ; signal problems: the emergency brake judders the car to a crawl
+    lda frame
+    and #$03
+    bne @tick
+    lda #1
+    sta w_shake
+    A16
+    lda w_speed
+    sec
+    sbc #$0030
+    cmp #$0180
+    bcs @s4
+    lda #$0180
+@s4:
+    sta w_speed
+    A8
+    bra @tick
+@brk:
     lda frame                   ; the brakes bite: the car judders
     and #$07
     bne @nj
@@ -496,6 +738,7 @@ tr_act:
     A8
     bra @tick
 @cruise:
+    jsr recover
     jsr jolts
 @tick:
     A16
@@ -508,6 +751,11 @@ tr_act:
     ldx #$0000
     stx w_tx
     stx w_ty
+    lda w_gag                   ; a gag's push is over: arm its pay
+    beq @ng
+    ora #$80
+    sta w_gag
+@ng:
     lda w_kind
     cmp #K_BRK
     bne @next
@@ -530,6 +778,38 @@ tr_act:
     sta w_lp
     A8
     jmp load_lurch
+
+; a gag ridden out with no grab: +100 and a callout
+gag_paid:
+    A16
+    lda w_style
+    clc
+    adc #GAG_PAY
+    sta w_style
+    A8
+    inc w_dodge
+    LDPTR0 str_dodge1
+    lda w_gag
+    and #$7F
+    cmp #K_SIG
+    beq @s
+    LDPTR0 str_dodge2
+@s:
+    stz w_gag
+    lda #^str_dodge1
+    sta ptr0+2
+    jsr pb_start
+    ldx #GAG_PAY
+    stx tmp1
+    jsr pb_plus
+    lda #TP_GREEN
+    ldx #80
+    jsr pop_show
+    SFX SFX_COIN
+    rts
+
+str_dodge1: .byte "RODE OUT THE E-BRAKE!", 0
+str_dodge2: .byte "DODGED THE BACKPACK!", 0
 
 tr_end:
     A16
@@ -583,9 +863,9 @@ arrive:
     inc w_earn
 @nt:
     stz w_touch
+    stz w_gold                  ; (the next gold leg starts at the chime)
     lda #1
     sta w_clean
-    sta w_gold
     lda w_seg
     cmp #NUM_SEG
     bcc @x
@@ -597,7 +877,7 @@ arrive:
     rts
 
 ; +75 x chain (x3 if the dot stayed gold all leg), and say so:
-;   "STANDING SURF X3  +225"  /  "GOLD DOT SURF X3  +675"
+;   "STANDING SURF CHAIN 2 +150"  /  "GOLD SURF CHAIN 2 X3 +450"
 surf_popup:
     A16
     lda w_chain
@@ -629,57 +909,28 @@ surf_popup:
     adc w_style
     sta w_style
     A8
-    jsr popup_clear
-    lda #TXT_WIN
-    sta txt_bg
-    ldx #(POP_ROW*32 + 4)
-    A16
-    lda #$0118                  ; 24 x 1
-    sta tmp1
-    A8
-    lda #128
-    sta tmp2
-    lda #($20 | (TP_YELLOW << 2))
-    jsl txt_fill
     LDPTR0 str_surf
     lda w_gold
     beq @lab
     LDPTR0 str_gsurf
 @lab:
-    ldx #(POP_ROW*32 + 5)
-    lda #($20 | (TP_YELLOW << 2))
-    jsl txt_print
+    lda #^str_surf
+    sta ptr0+2
+    jsr pb_start
     ldx w_chain
     stx tmp1
-    ldx #(POP_ROW*32 + 20)
-    ldy #1
-    lda #($20 | (TP_WHITE << 2))
-    jsl txt_num
-    ; "+675" or "+1350", no gap after the plus
-    LDPTR0 str_plus
-    ldx #(POP_ROW*32 + 23)
-    ldy tmp3
-    cpy #1000
-    bcc @p3
-    dex
-@p3:
-    phx
-    lda #($20 | (TP_GREEN << 2))
-    jsl txt_print
-    plx
-    inx
-    ldy tmp3
-    sty tmp1
-    ldy #3
-    cpx #(POP_ROW*32 + 24)
+    jsr pb_num
+    lda w_gold
     beq @n3
-    iny
+    LDPTR0 str_x3
+    jsr pb_cat
 @n3:
-    lda #($20 | (TP_GREEN << 2))
-    jsl txt_num
-    stz txt_bg
+    ldx tmp3
+    stx tmp1
+    jsr pb_plus
+    lda #TP_YELLOW
     ldx #90
-    stx w_popup
+    jsr pop_show
     lda w_gold
     beq @c
     SFX SFX_CHEER
@@ -688,9 +939,127 @@ surf_popup:
     SFX SFX_COIN
     rts
 
-str_surf:  .byte "STANDING SURF X", 0
-str_gsurf: .byte "GOLD DOT SURF X", 0
-str_plus:  .byte "+", 0
+str_surf:  .byte "STANDING SURF CHAIN ", 0
+str_gsurf: .byte "GOLD SURF CHAIN ", 0
+str_x3:    .byte " X3", 0
+
+; ---- callouts: a line built in PBUF, shown in a padded panel (rows 4-6)
+; PBUF = the string at ptr0 (pb_cat: PBUF += it; same bank as the label)
+pb_start:
+    ldx #$0000
+    stx w_plen
+pb_cat:
+    ldy #$0000
+    ldx w_plen
+@c:
+    lda [ptr0],y
+    sta PBUF,x
+    beq @x
+    iny
+    inx
+    bra @c
+@x:
+    stx w_plen
+    rts
+
+; PBUF += " +" tmp1
+pb_plus:
+    ldy w_plen
+    lda #' '
+    sta PBUF,y
+    iny
+    lda #'+'
+    sta PBUF,y
+    iny
+    sty w_plen
+    ; fall through
+; PBUF += tmp1 in decimal
+pb_num:
+    ldx #$0000
+@d:
+    A16
+    lda tmp1
+    sta WRDIVL
+    A8
+    lda #10
+    sta WRDIVB
+    nop                         ; 16 cycles for the divide
+    nop
+    nop
+    nop
+    nop
+    nop
+    nop
+    nop
+    A16
+    lda RDDIVL
+    sta tmp1
+    A8
+    lda RDMPYL
+    clc
+    adc #'0'
+    pha
+    inx
+    lda tmp1
+    ora tmp1+1
+    bne @d
+    ldy w_plen
+@p:
+    pla
+    sta PBUF,y
+    iny
+    dex
+    bne @p
+    lda #0
+    sta PBUF,y
+    sty w_plen
+    rts
+
+; A = text palette, X = frames: PBUF in a panel, centred. Drawn by sb_hud
+; at the end of the frame (an arrival can bring the sign, a surf callout and
+; a grab in one frame: the last callout wins)
+pop_show:
+    sta w_ppal
+    stx w_popup
+    lda #1
+    sta w_pend
+    rts
+
+pop_draw:
+    stz w_pend
+    lda w_ppal
+    pha
+    jsr popup_clear
+    lda w_plen
+    clc
+    adc #4
+    sta tmp1                    ; width: the text + a 2-cell margin each side
+    lda #3
+    sta tmp1+1
+    lda #32
+    sec
+    sbc tmp1
+    lsr a
+    A16
+    and #$00FF
+    clc
+    adc #(POP_TOP*32)
+    tax
+    A8
+    lda #$20
+    jsl txt_box
+    LDPTR0 PBUF
+    stz ptr0+2
+    lda #TXT_WIN
+    sta txt_bg
+    pla
+    asl a
+    asl a
+    ora #$20
+    ldx #(POP_ROW*32)
+    jsl txt_print_centre
+    stz txt_bg
+    rts
 
 ; track joints: little random kicks while cruising, from the third leg on
 jolts:
@@ -795,41 +1164,71 @@ balance:
     sta w_touch
     A16
 @nopad:
+    ; on the hollow arrow a lean is half strength and you find your feet
+    ; again: getting ready early never tips you over
+    lda #LEAN
+    ldx w_ls
+    cpx #LS_WARN
+    bne @full
+    lsr a
+@full:
+    sta tmp4
+    ; a lean only goes so far: past LEAN_LIM px your way, pressing on does
+    ; nothing more (it's the push or a late correction that throws you)
     lda pad
     bit #PAD_LEFT
     beq @nl
+    lda w_bx
+    clc
+    adc #(LEAN_LIM << 8)
+    bmi @nl0
     lda w_vx
     sec
-    sbc #LEAN
+    sbc tmp4
     sta w_vx
+@nl0:
     lda pad
 @nl:
     bit #PAD_RIGHT
     beq @nr
+    lda w_bx
+    sec
+    sbc #(LEAN_LIM << 8)
+    bpl @nr0
     lda w_vx
     clc
-    adc #LEAN
+    adc tmp4
     sta w_vx
+@nr0:
     lda pad
 @nr:
     bit #PAD_UP
     beq @nu
+    lda w_by
+    clc
+    adc #(LEAN_LIM << 8)
+    bmi @nu0
     lda w_vy
     sec
-    sbc #LEAN
+    sbc tmp4
     sta w_vy
+@nu0:
     lda pad
 @nu:
     bit #PAD_DOWN
     beq @nd
+    lda w_by
+    sec
+    sbc #(LEAN_LIM << 8)
+    bpl @nd
     lda w_vy
     clc
-    adc #LEAN
+    adc tmp4
     sta w_vy
 @nd:
-    ; v += force + offset/256: while a lurch is warned or pushing, an upright
-    ; body tips further once it leans; between lurches nothing pushes and
-    ; the rider finds their feet (the same term, the other way)
+    ; v += force + offset/256: while a lurch pushes, an upright body tips
+    ; further once it leans; otherwise nothing pushes and the rider finds
+    ; their feet (the same term, the other way)
     lda w_bx
     jsr int_part
     jsr tip
@@ -879,28 +1278,33 @@ balance:
     A16
     bra @x
 @gold:
-    ; DEAD CENTRE: in the sweet spot while a lurch pushes and you're working it
+    ; DEAD CENTRE: in the gold while a lurch pushes and you're working it,
+    ; a point every 2 frames; dead on the middle (inside 2 px), every frame
     lda w_fx
     ora w_fy
     beq @x
     lda w_press
     cmp #40
     bcs @x
+    lda w_r2
+    cmp #4
+    bcc @pt
     inc w_sweet
     lda w_sweet
     and #$0001
     bne @x
+@pt:
     inc w_style
 @x:
     A8
     rts
 
-; A16: the tip-over term (offset px / 256), negated between lurches
+; A16: the tip-over term (offset px / 256), negated unless a lurch pushes
 tip:
     .a16
     ldx w_ls
-    cpx #LS_GAP
-    bne @x
+    cpx #LS_ACT
+    beq @x
     eor #$FFFF
     inc a
 @x:
@@ -977,11 +1381,11 @@ square:
     rts
 .a8
 
-; blank the popup row
+; blank the callout panel
 popup_clear:
-    ldx #(POP_ROW*32)
+    ldx #(POP_TOP*32)
     A16
-    lda #$0120
+    lda #$0320
     sta tmp1
     A8
     stz tmp2
@@ -1028,6 +1432,7 @@ grab:
     sta w_gkind
     stz w_clean
     stz w_gold
+    stz w_gag                   ; (a gag that made you grab pays nothing)
     ldx #24
     stx w_startle
     A16
@@ -1069,26 +1474,20 @@ grab:
     A8
     lda #^grab_msgs
     sta ptr0+2
-    jsr popup_clear
-    lda #TXT_WIN
-    sta txt_bg
-    ldx #(POP_ROW*32)
-    lda #($20 | (TP_GREEN << 2))
-    jsl txt_print_centre
-    stz txt_bg
+    jsr pb_start
+    lda #TP_GREEN
     ldx #70
-    stx w_popup
-    rts
+    jmp pop_show
 
 ; where each gag takes the rider (offset from home, px)
 gag_dx: .word $10000 - 22, 34, $10000 - 40, 4
 gag_dy: .word 0, 0, $10000 - 60, 2
 
 grab_msgs: .addr gm0, gm1, gm2, gm3
-gm0: .byte " GRABBED THE STICKY POLE! ", 0
-gm1: .byte " FACE-FIRST INTO A BACKPACK! ", 0
-gm2: .byte " SAT ON A STRANGER! SORRY! ", 0
-gm3: .byte " HANDS ON THE FLOOR. EW! ", 0
+gm0: .byte "GRABBED THE STICKY POLE!", 0
+gm1: .byte "FACE-FIRST IN A BACKPACK!", 0
+gm2: .byte "SAT ON A STRANGER! SORRY!", 0
+gm3: .byte "HANDS ON THE FLOOR. EW!", 0
 
 ; the rider's gag: lunge to the target, hold (germs!), walk back
 gag_move:
@@ -1279,7 +1678,7 @@ station_names:
 sn_bloor: .byte "BLOOR-YONGE", 0
 sn_well:  .byte "WELLESLEY", 0
 sn_coll:  .byte "COLLEGE", 0
-sn_dund:  .byte "DUNDAS", 0
+sn_dund:  .byte "TMU", 0         ; (it was Dundas until 2024)
 sn_queen: .byte "QUEEN", 0
 sn_king:  .byte "KING", 0
 sn_union: .byte "UNION", 0
@@ -1551,10 +1950,8 @@ draw_arrow:
     TAXB
     lda f:arrow_flip,x
     sta tmp5+1
-    cpx #K_DEP
-    beq @r
-    cpx #K_BRK
-    beq @r
+    lda f:arrow_lr,x
+    bne @r
     lda w_hollow
     bne @uo
     LDPTR1 ms_arrow_u
@@ -1600,8 +1997,11 @@ draw_arrow:
 
 ; per kind: x, y offsets; flips (bit 6 h, bit 7 v)
 arrow_tab:  .word ARROW_D, 0,  0, $10000 - ARROW_D,  0, ARROW_D,  $10000 - ARROW_D, 0
+            .word $10000 - ARROW_D, 0,  ARROW_D, 0
 arrow_step: .word 11, 0,  0, $10000 - 11,  0, 11,  $10000 - 11, 0
-arrow_flip: .byte 0, 0, $80, $40
+            .word $10000 - 11, 0,  11, 0
+arrow_flip: .byte 0, 0, $80, $40, $40, 0
+arrow_lr:   .byte 1, 0, 0, 1, 1, 1      ; 1 = the left/right arrow art
 
 draw_rider:
     A16
@@ -1784,6 +2184,29 @@ draw_people:
     ora #$30
     sta tmp5
     stz tmp5+1
+    ; the backpack gag: he turns to face you on the warning, then turns
+    ; back and his pack swings into you
+    cpx #8
+    bne @nt
+    lda w_kind
+    cmp #K_PACK
+    bne @nt
+    lda w_ls
+    cmp #LS_WARN
+    bne @sw
+    lda #$40
+    sta tmp5+1
+    bra @nt
+@sw:
+    cmp #LS_ACT
+    bne @nt
+    A16
+    lda spr_x
+    sec
+    sbc #6
+    sta spr_x
+    A8
+@nt:
     lda f:pp_kind,x
     cpx #((NUM_PP - 1) * 2)
     bne @k
@@ -1891,6 +2314,10 @@ sb_hud_full:
     rts
 
 sb_hud:
+    lda w_pend
+    beq @np
+    jmp pop_draw                ; (the rest of the HUD waits a frame)
+@np:
     jsr hud_status
     lda frame
     and #$03
@@ -1958,7 +2385,7 @@ hud_status:
     sta w_stat_old
     ldx #(3*32 + 1)
     A16
-    lda #$010E
+    lda #$0112                  ; 18 x 1 (STYLE sits at column 20)
     sta tmp1
     A8
     stz tmp2
@@ -1986,23 +2413,32 @@ str_germs: .byte "GERMS", 0
 str_next:  .byte "NEXT:", 0
 str_style: .byte "STYLE", 0
 status_msgs: .addr ss0, ss1, ss2, ss3, ss4, ss5, ss6, ss7, ss8, ss9, ss10
+             .addr ss11, ss12, ss13, ss14, ss15
 ; warnings orange (get ready), pushes yellow like the solid arrow (lean now)
 status_tp:   .byte ($20 | (TP_WHITE << 2))
              .byte ($20 | (TP_ORANGE << 2)), ($20 | (TP_ORANGE << 2)), ($20 | (TP_ORANGE << 2))
              .byte ($20 | (TP_YELLOW << 2)), ($20 | (TP_YELLOW << 2)), ($20 | (TP_YELLOW << 2))
              .byte ($20 | (TP_YELLOW << 2))
              .byte ($20 | (TP_WHITE << 2)), ($20 | (TP_WHITE << 2)), ($20 | (TP_GREEN << 2))
+             .byte ($20 | (TP_ORANGE << 2)), ($20 | (TP_YELLOW << 2))
+             .byte ($20 | (TP_ORANGE << 2)), ($20 | (TP_YELLOW << 2))
+             .byte ($20 | (TP_WHITE << 2))
 ss0:  .byte " ", 0
 ss1:  .byte "STAND CLEAR!", 0
 ss2:  .byte "CURVE AHEAD", 0
 ss3:  .byte "STATION AHEAD", 0
-ss4:  .byte "GO! LEAN ", TXT_ARROW_R + $20, 0
-ss5:  .byte "CURVE! LEAN ", TXT_ARROW_U + $20, 0
-ss6:  .byte "CURVE! LEAN ", TXT_ARROW_D + $20, 0
-ss7:  .byte "BRAKES! LEAN ", TXT_ARROW_L + $20, 0
+ss4:  .byte "GO! D-PAD ", TXT_ARROW_R + $20, 0
+ss5:  .byte "CURVE! D-PAD ", TXT_ARROW_U + $20, 0
+ss6:  .byte "CURVE! D-PAD ", TXT_ARROW_D + $20, 0
+ss7:  .byte "BRAKES! D-PAD ", TXT_ARROW_L + $20, 0
 ss8:  .byte "CRUISING", 0
 ss9:  .byte "DOORS OPEN", 0
-ss10: .byte "ALL OUT!", 0
+ss10: .byte "OUT OF SERVICE", 0
+ss11: .byte "SIGNAL PROBLEMS!", 0
+ss12: .byte "E-BRAKE! D-PAD ", TXT_ARROW_L + $20, 0
+ss13: .byte "BACKPACK SWING!", 0
+ss14: .byte "BACKPACK! D-PAD ", TXT_ARROW_R + $20, 0
+ss15: .byte "IT'S DUNDAS, BUD", 0
 
 ; ------------------------------------------------------------------
 ; score. Finished at Union: RIDE 1000 + STYLE - 40 per germ.
@@ -2011,9 +2447,9 @@ sb_score:
     A16
     lda w_germs
     sta ev_stat
-    lda w_seg
+    lda w_earn
     and #$00FF
-    sta ev_stat+2               ; stations reached
+    sta ev_stat+2               ; LEGS LEANED: the legs the ride pays for
     lda w_best
     and #$00FF
     sta ev_stat+4               ; best STANDING SURF chain
