@@ -428,9 +428,10 @@ demo_pads:
     txs
     jml demo_abort
 
-; "DEMO - PRESS START" on a text row the running event leaves alone,
-; rewritten every 16 frames in case the event cleared the layer; only in
-; play (pause_ok), so the intro and score cards stay clean
+; " DEMO - PRESS START " on a solid strip (window tiles, so traffic passes
+; under it) on a text row the running event leaves alone, rewritten every 16
+; frames in case the event cleared the layer; only in play (pause_ok), so
+; the intro and score cards stay clean
 demo_banner:
     lda pause_ok
     beq @x
@@ -453,7 +454,7 @@ demo_banner:
     asl a
     asl a
     clc
-    adc #(7*2)
+    adc #(6*2)
     tay
     A8
     ldx #$0000
@@ -462,6 +463,8 @@ demo_banner:
     beq @d
     sec
     sbc #32
+    clc
+    adc #TXT_WIN
     sta txt_map,y
     lda #($20 | (TP_YELLOW << 2))
     sta txt_map+1,y
@@ -476,7 +479,7 @@ demo_banner:
 @x:
     rts
 
-str_demo:  .byte "DEMO - PRESS START", 0
+str_demo:  .byte " DEMO - PRESS START ", 0
 ; per event: the banner row (BIKE BAY PARK COPS SAIL PARKING SUBWAY)
 demo_rows: .byte 4, 4, 4, 4, 5, 4, 26
 .assert * - demo_rows = NUM_EVENTS, error, "demo_rows: one banner row per event"

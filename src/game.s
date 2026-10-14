@@ -108,7 +108,8 @@ game_main:
     ldx #.loword(str_one_more)
     jsl pick_one
     bcc @one
-    jsl final_table             ; changed their mind: back to the final table
+    lda #$01                    ; changed their mind: back to the final table,
+    jsl final_table             ; the cursor where they left it
     bra @chose
 @one:
     jsr only_event
@@ -161,12 +162,18 @@ run_event:
     jsl event_standings
     rts
 
-; a clean slate for the turn: no give-up, no result, no arithmetic. An event
-; that never fills ev_break gets the plain result card.
+; a clean slate for the turn: no give-up, no score, no stats, no arithmetic
+; (nothing carries over from the last player or the last event). An event
+; that never fills ev_break gets a card with SCORE alone under its stats.
 turn_reset:
     stz ev_giveup
     stz ev_fail
     A16
+    stz ev_score
+    stz ev_stat
+    stz ev_stat+2
+    stz ev_stat+4
+    stz ev_stat+6
     stz ev_break
     stz ev_break+2
     stz ev_break+4
