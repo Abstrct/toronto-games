@@ -2,23 +2,22 @@
 
 The car is on screen the whole time, so reading its pose from event RAM is
 what a player sees: where the car is, which way it points, the wheel
-indicator, the grade lamps, the cyclist. What separates the bots is timing:
+indicator, the grade lamps, the cyclist. What separates the bots is timing
+and judgement:
 
-    park_expert   knows the manoeuvre cold and acts on the exact frame:
-                  stops with the bumpers level, counter-steers at the right
-                  angle, straightens on the frame, waits out the cyclist.
-    park_human    the same plan from a player who has learned it, with a
-                  human's anticipation: every decision is made LEAD frames
-                  ahead from the car's visible motion (no frame-perfect
-                  RAM). A practised player knows their own reaction time,
-                  so LEAD is the hand's measured lag (how long a decision
-                  takes to show up on the pad), but nobody anticipates more
-                  than LEAD_MAX frames. A sure hand aims for the curb
-                  kiss, a slow one leaves margin and (from 12 frames) creeps
-                  in reverse; with CURB and ANGLE green it nudges to centre
-                  for the SPACE lamp. Its pull-up mark is the yellow stop
-                  line the game draws. This is the bot `pt.py curve
-                  parking` slows down.
+    park_expert   knows the manoeuvre cold, reads the pose exactly and acts on
+                  the frame: stops where the swing will end dead centre (a
+                  hair past the line in a long spot, then a free tap back),
+                  counter-steers for the curb kiss, straightens on the frame,
+                  backs in right behind the cyclist (CLOSE SHAVE).
+    park_human    the same plan from a player who has practised it: every
+                  decision is made LEAD frames ahead (LEAD = the hand's
+                  measured lag: practice is learning your own timing), but
+                  judged by eye, so each spot it misjudges the stop line, the
+                  counter-steer point and the straight by a little (more the
+                  slower the hand), and it aims with a margin that grows with
+                  its lag. Only a quick hand (lag <= SHAVE_LAG) tries the
+                  close shave. This is the bot `pt.py curve parking` slows.
     park_coach    a first-timer who only follows the coach line in the panel
                   (reads the message the HUD shows, reacts to it).
     park_wiggle   no plan: drives up, backs in at full lock, counter-steers
@@ -32,10 +31,11 @@ from policies import Policy, idle, hold_a, mash_a, random_input, A, B, UP, DOWN,
 O_AX, O_AY, O_TH, O_PHASE, O_SPOT, O_LEN, O_BTOP, O_V, O_STEER, O_NOTCH = 0, 2, 4, 6, 10, 12, 14, 16, 18, 20
 O_CLOCK, O_FLAGS, O_MSGT, O_INSPOT, O_GC, O_GA, O_GS = 24, 32, 42, 78, 66, 68, 70
 O_BX, O_BY, O_BST, O_COACH, O_SHOWN, O_ANIM = 128, 130, 132, 140, 124, 48
-O_TGT = 206
+O_TGT, O_FRONT, O_REAR, O_SHAVE = 206, 232, 234, 286
 CX, CY = 80, 88
 CURB, A_REAR, TGT_Y, BIKE_X = 232, 88, 91, 170
-F_REV = 1
+F_REV, F_FWD = 1, 2
+SWING = 54.5            # the rear axle ends about this far behind where it pulled up
 
 
 def _s16(v):
@@ -45,8 +45,11 @@ def _s16(v):
 class _Parker(Policy):
     every = 1
     LEAD = 0            # frames of anticipation
-    SWAP_GAP = 1      # aim for this curb gap
+    LEAD_MAX = None     # None: a fixed LEAD; else LEAD = min(measured lag, LEAD_MAX)
+    SWAP_GAP = 1.0      # aim for this curb gap
     TAP = 10            # frames per tap (hold), then the same released
+    SHAVE = True        # back in right behind the cyclist
+    CENTRE = True       # pull up for dead centre, then tap back to it
 
     def __init__(self):
         self.stage = None
@@ -57,11 +60,9 @@ class _Parker(Policy):
         self.park_tries = 0
         self.nudges = 0
 
-    NUDGE = False
-
     def view(self):
         g = self.game
-        m = g.core.peek(g.sym['ev_ram'], 256)
+        m = g.core.peek(g.sym['ev_ram'], 300)
         w = lambda o: m[o] | m[o + 1] << 8
         s = lambda o: _s16(w(o))
         st = {'ax': w(O_AX) / 256.0, 'ay': w(O_AY) / 256.0, 'th': s(O_TH) / 65536.0 * 2 * math.pi,
@@ -70,7 +71,8 @@ class _Parker(Policy):
               'inspot': m[O_INSPOT], 'gc': m[O_GC], 'ga': m[O_GA], 'gs': m[O_GS],
               'bx': w(O_BX), 'by': w(O_BY) / 256.0, 'bst': m[O_BST], 'coach': w(O_COACH),
               'cx': [s(CX + 2 * i) for i in range(4)], 'cy': [s(CY + 2 * i) for i in range(4)],
-              'anim': w(O_ANIM), 'hit': m[138], 'tgt': w(O_TGT)}
+              'anim': w(O_ANIM), 'hit': m[138], 'tgt': w(O_TGT), 'front': s(O_FRONT), 'rear': s(O_REAR),
+              'shave': m[O_SHAVE + 1]}
         return st
 
     # ---- the plan ----
@@ -78,15 +80,9 @@ class _Parker(Policy):
         for _ in range(n):
             self.prog += [btn | hold] * (length or self.TAP) + [hold] * self.TAP
 
-    def lock(self, btn, hold=0):
-        # hold the direction until the wheel is locked over
-        self.tap(btn, 1, hold, length=12)
-
     def gap_pred(self, st, th=None):
         th = st['th'] if th is None else th
         return CURB - 11 - st['ax'] - 32 * (1 - math.cos(th)) - 3
-
-    LEAD_MAX = None     # None: a fixed LEAD; else LEAD = min(measured lag, LEAD_MAX)
 
     def feel_lag(self, t, m):
         """how late my decisions land on the pad (a human learns this)"""
@@ -97,13 +93,16 @@ class _Parker(Policy):
         raw = raw[0] | raw[1] << 8
         pad = sum(1 << i for i in range(12) if raw & (1 << (15 - i))) & (UP | DOWN | LEFT | RIGHT | A)
         if not hasattr(self, 'pend'):
-            self.pend, self.lags, self.sent = [], [], None
-        for j, (t0, want) in enumerate(self.pend):
-            if want == pad:
-                # this one landed; anything older was superseded or missed
-                self.lags = (self.lags + [t - t0])[-12:]
-                del self.pend[:j + 1]
-                break
+            self.pend, self.lags, self.sent, self.last_pad = [], [], None, 0
+        if pad != self.last_pad:
+            # the pad just changed: the oldest decision it matches has landed
+            # (anything older was superseded or missed)
+            for j, (t0, want) in enumerate(self.pend):
+                if want == pad:
+                    self.lags = (self.lags + [t - t0])[-12:]
+                    del self.pend[:j + 1]
+                    break
+        self.last_pad = pad
         del self.pend[:-8]
         m &= (UP | DOWN | LEFT | RIGHT | A)
         if m != self.sent:
@@ -117,6 +116,10 @@ class _Parker(Policy):
         m = self._act(t, tel, rng)
         self.feel_lag(t, m)
         return m
+
+    def new_spot(self, st, rng):
+        """per-spot judgement errors (none for the expert)"""
+        self.y_err = self.gap_err = self.th_err = 0.0
 
     def _act(self, t, tel, rng):
         st = self.view()
@@ -137,8 +140,25 @@ class _Parker(Policy):
             self.prev = None
             self.park_tries = 0
             self.nudges = 0
+            self.shave_go = False
+            self.prev_by = None
+            self.let_go = False
+            self.stuck = 0
+            self.coached = None
+            self.new_spot(st, rng)
         prev = self.prev or st
         self.prev = st
+        # pinned on something with a pedal down: do what the instructor says
+        # for the rest of the spot
+        if self.last_m & (UP | DOWN) and st['v'] == 0 and (st['ax'], st['ay']) == (prev['ax'], prev['ay']):
+            self.stuck += 1
+        else:
+            self.stuck = 0
+        if self.stuck > 30 and not self.coached:
+            self.coached = park_coach()
+            self.coached.game = self.game
+        if self.coached:
+            return self.coached.act(t, tel, rng)
         if self.prog:
             return self.prog.pop(0)
         if self.wait:
@@ -160,7 +180,6 @@ class _Parker(Policy):
 
     same = 0
     last_m = 0
-
     hold_now = 0
 
     def stop_dist(self, v, lead):
@@ -180,21 +199,64 @@ class _Parker(Policy):
             return steer
         return DOWN | steer
 
-    def bike_block(self, st):
+    def pull_target(self, st):
+        """where the rear axle stops before backing in"""
+        tgt = st['tgt']
+        if not self.CENTRE:
+            return tgt
+        # the swing ends SWING px back; dead centre is axle y = (btop + 114) / 2.
+        # A hair forward of that (up to 4 px past the line) and a free tap
+        # back beats stopping short (moving forward again costs ONE-MOVE)
+        # (no further up than y 87.5: a curb-kiss swing from there just clears the BMW)
+        want = (st['btop'] + 114) / 2.0 - SWING - 1.5
+        return max(87.5, tgt - 3.5, min(tgt + 6, want))
+
+    def y_margin(self):
+        return 0.0
+
+    def bike_coming(self, st):
+        """she's riding up and hasn't passed my nose yet"""
+        if st['bst'] != 2:
+            return False
+        return st['by'] + 6 > min(st['cy']) - 2
+
+    def bike_block(self, st, lead):
         """wait for the cyclist: she's coming and my nose is out in her line"""
         if st['bst'] != 2:
             return False
         front = min(st['cy'])
         left = min(st['cx'])
+        if self.shave_go:
+            return False
+        if self.SHAVE and self.try_shave and st['flags'] & F_REV == 0 and st['th'] > -0.05:
+            # go when she'll be SHAVE_DY px below my front-left corner as my
+            # hand gets there: the nose swings out right behind her
+            fl = st['cy'][2]
+            spd = max(1.0, self.prev_by - st['by']) if self.prev_by else 1.25
+            self.prev_by = st['by']
+            if st['by'] - spd * lead > fl + self.SHAVE_DY:
+                return True
+            self.shave_go = True
+            return False
         # still below (or level with) my front, and I'm out in the lane or about to be
         return st['by'] > front - 24 and left < BIKE_X + 16
+
+    SHAVE_DY = 8.0
+    try_shave = True
+    stuck = 0
+    coached = None
+    shave_go = False
+    prev_by = None
+    let_go = False
 
     def plan(self, st, prev, rng):
         ay, v, th, notch = st['ay'], st['v'], st['th'], st['notch']
         lead = self.LEAD
         tgt_y = st['tgt']           # the yellow stop line (rear bumper = axle + 6)
         if self.stage == 'up':
-            tgt = tgt_y + self.y_err
+            # (a slow hand stops a little short: more than 4 px past the line
+            # costs the ONE-MOVE)
+            tgt = self.pull_target(st) + self.y_err + self.y_margin()
             if ay - self.stop_dist(v, lead) > tgt + 0.5 and v >= 0:
                 return UP
             if v != 0:
@@ -202,7 +264,7 @@ class _Parker(Policy):
             if ay < tgt_y - 4:
                 self.stage = 'reup'
                 return 0
-            self.stage = 'lock'
+            self.stage = 'back'
             return 0
         if self.stage == 'reup':
             # overshot: back straight up to the mark
@@ -210,12 +272,10 @@ class _Parker(Policy):
                 return DOWN
             if v != 0:
                 return 0
-            self.stage = 'lock'
-            return 0
-        if self.stage == 'lock':
             self.stage = 'back'
+            return 0
         if self.stage == 'back':
-            if self.bike_block(st):
+            if self.bike_block(st, lead):
                 return 0
             # predicted counter-steer gap LEAD frames from now
             g, gp = self.gap_pred(st), self.gap_pred(prev)
@@ -226,11 +286,10 @@ class _Parker(Policy):
                 return self.pedal(st, LEFT)
             return self.pedal(st, RIGHT)
         if self.stage == 'straight':
-            if self.bike_block(st):
-                return 0
             rate = th - prev['th']
-            if th + rate * (lead + 3) < -self.th_err:
+            if not self.let_go and th + rate * (lead + 3) < -self.th_err:
                 return self.pedal(st, LEFT)
+            self.let_go = True          # let go: wait for it to stop
             if v != 0:
                 return 0
             self.stage = 'park'
@@ -238,15 +297,16 @@ class _Parker(Policy):
         if self.stage == 'park':
             if v != 0:
                 return 0
-            # the SPACE lamp isn't green but CURB and ANGLE are: nudge to the middle
-            if self.NUDGE and st['inspot'] and st['gs'] and st['gc'] == 0 and st['ga'] == 0 \
-                    and self.nudges < 3:
-                front = min(st['cy']) - A_REAR
-                rear = st['btop'] - max(st['cy'])
-                if abs(front - rear) >= 2:
+            if self.NUDGE and st['inspot'] and st['gc'] == 0 and st['ga'] == 0 and self.nudges < 3:
+                f, r = st['front'], st['rear']
+                # dead centre (|front - rear| <= 1) by a free tap back; forward
+                # (losing ONE-MOVE) only for the SPACE lamp
+                if r - f >= 2 or (f - r >= 2 and st['gs'] != 0):
                     self.nudges += 1
-                    self.tap(DOWN if front < rear else UP, length=5)
-                    self.wait = 20
+                    self.stage = 'nudge'
+                    self.nudge_to = (f - r) / 2.0
+                    self.nudge_dir = DOWN if f < r else UP
+                    self.nudge_y = ay
                     return 0
             if st['inspot'] and self.park_tries < 3:
                 self.park_tries += 1
@@ -256,35 +316,62 @@ class _Parker(Policy):
             # not in the spot (cyclist made me stop short?): keep backing
             if not st['inspot'] and st['flags'] & F_REV:
                 self.stage = 'straight' if th < 0 else 'up'
+                self.let_go = False
+            return 0
+        if self.stage == 'nudge':
+            # move the car by nudge_to px (+ = back), stopping on it
+            left = abs(self.nudge_to) - abs(ay - self.nudge_y)
+            if left - self.stop_dist(v, lead) > 0.4 and (v == 0 or (v < 0) == (self.nudge_dir == DOWN)):
+                return self.nudge_dir
+            if v != 0:
+                return 0
+            self.stage = 'park'
             return 0
         return 0
 
     y_err = 0.0
     gap_err = 0.0
     th_err = 0.0
+    NUDGE = True
 
 
 class park_expert(_Parker):
     LEAD = 0
-    NUDGE = True
+
+
+SHAVE_LAG = 8
 
 
 class park_human(_Parker):
-    """A practised human: plans ahead by their own reaction time (at most
-    6 frames' worth), aims a little safe."""
+    """A practised human: plans ahead by their own measured lag, judges by
+    eye (per-spot errors that grow with the lag), aims with a margin."""
     LEAD = 6
-    LEAD_MAX = 6
-    CREEP_LAG = 12
-    NUDGE = True
+    LEAD_MAX = 40
+    CREEP_LAG = 30
+
+    def new_spot(self, st, rng):
+        lag = self.lag() or 6
+        self.y_err = rng.gauss(0, 0.4 + 0.07 * lag)
+        self.gap_err = rng.gauss(0, 0.3 + 0.06 * lag)
+        self.th_err = rng.gauss(0, 0.004 + 0.0007 * lag)
+        self.try_shave = lag <= SHAVE_LAG
+        self.CENTRE = lag <= SHAVE_LAG
+        self.SHAVE_DY = 8.0 + rng.gauss(0, 1.5)
+
+    def y_margin(self):
+        return 0.2 * self.lag()
 
     def plan(self, st, prev, rng):
         # a sure hand aims for the curb kiss; a slower one leaves margin
-        self.SWAP_GAP = min(3.5, 0.6 + max(0, self.lag() - 5) * 0.4)
+        self.SWAP_GAP = 1.0 + 0.12 * self.lag()
         return super().plan(st, prev, rng)
 
 
 class park_wiggle(_Parker):
     """Knows the gist, not the timing: random stop point and counter-steer."""
+    SHAVE = False
+    CENTRE = False
+    NUDGE = False
 
     def plan(self, st, prev, rng):
         if self.stage == 'up' and st['v'] == 0 and st['ay'] > 150:
@@ -315,13 +402,14 @@ class park_coach(Policy):
         off = (bank - 0x80) * 0x8000 + (shown & 0x7FFF)
         txt = g.sym.rom[off:off + 32].split(b'\0')[0].decode('latin-1')
         name = None
-        for pre, k in (('GAS ', 'co_up'), ('LET GO!', 'co_brake'), ('PAST IT!', 'co_toofar'),
+        for pre, k in (('GAS ', 'co_up'), ('LET GO OF ', 'co_brake'), ('PAST IT!', 'co_toofar'),
                        ('HOLD DOWN+RIGHT', 'co_back'), ('KEEP DOWN+RIGHT', 'co_ready'), ('NOW!', 'co_now'),
                        ('HOLD DOWN+LEFT', 'co_swing'), ('STRAIGHT! LET', 'co_stop'), ('A: PARK', 'co_park'),
                        ('TOO FAR OUT', 'co_fix'), ('OVER THE CURB', 'co_fix'), ('WAIT!', 'co_wait'),
                        ('DING DING', 'co_wait'), ('HOLD UP+LEFT', 'co_nosein'), ('MIND THE BMW', 'co_clear'),
                        ('TOO SOON', 'co_early'), ('PINNED', 'co_pinned'), ('STUCK! HOLD UP', 'co_pullup'),
-                       ('STUCK! HOLD DOWN', 'co_backup')):
+                       ('STUCK! HOLD DOWN', 'co_backup'), ('TOO LATE!', 'co_late'),
+                       ('HOLD UP+RIGHT', 'co_easeout'), ('ENOUGH!', 'co_easestop')):
             if txt.startswith(pre):
                 name = k
         if name is None or name == self.last:
@@ -331,7 +419,8 @@ class park_coach(Policy):
         hold = {'co_up': UP, 'co_brake': 0, 'co_toofar': DOWN, 'co_back': DOWN | RIGHT,
                 'co_ready': DOWN | RIGHT, 'co_now': DOWN | LEFT, 'co_swing': DOWN | LEFT, 'co_stop': 0,
                 'co_fix': 0, 'co_nosein': UP | LEFT, 'co_clear': DOWN, 'co_early': DOWN | RIGHT,
-                'co_pinned': DOWN, 'co_pullup': UP, 'co_backup': DOWN}.get(name, 0)
+                'co_pinned': DOWN, 'co_pullup': UP, 'co_backup': DOWN, 'co_late': 0,
+                'co_easeout': UP | RIGHT, 'co_easestop': 0}.get(name, 0)
         if name in ('co_park', 'co_fix'):
             self.prog = [A] * 6 + [0] * 30
             return 0

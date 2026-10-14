@@ -1,6 +1,7 @@
 """Parallel Parking: an Annex side street from above (BG1), the player's car
-in 9 rotations (0..80 degrees, turning in), parked cars, tow truck, parking
-officer, hydrant + geyser, gauge markers."""
+in 9 rotations (PCAR_DEG, turning in: fine steps near straight, where the
+ANGLE lamp grades), parked cars, tow truck, parking officer, hydrant +
+geyser, gauge markers."""
 import math
 import random
 from PIL import Image, ImageDraw
@@ -114,19 +115,19 @@ SS = 8                                  # supersampling for the rotated frames
 DETAIL = {7: 2.2, 9: 1.4, 12: 2.0, 13: 2.0, 14: 2.0, 11: 1.3}   # thin parts win ties
 
 
-def draw_player_car(sh, x0, y0, deg):
-    """Car centred in a 48x48 cell, front up, rotated `deg` counter-clockwise.
-    Drawn 8x up and boiled down a pixel at a time (the colour covering most
-    of it, thin details weighted up), so a tilted car keeps one clean edge
-    and an unbroken stripe instead of polygon stair-steps."""
+PCAR_DEG = [0, 4, 8, 14, 22, 32, 44, 58, 72]   # ev_parking.s pcar_frame picks one
+
+
+def car_raster():
+    """The straight car, 48x48 colour indices: drawn 8x up from polygons and
+    boiled down a pixel at a time (the colour covering most of it, thin
+    details weighted up)."""
     big = Image.new('L', (48 * SS, 48 * SS), 0)
     d = ImageDraw.Draw(big)
-    a = -math.radians(deg)
     cx, cy = 24.0 * SS, 24.0 * SS
 
     def poly(pts, col):
-        q = [rot(p, a) for p in pts]
-        d.polygon([(cx + x * SS, cy + y * SS) for x, y in q], fill=col)
+        d.polygon([(cx + x * SS, cy + y * SS) for x, y in pts], fill=col)
 
     W, H = 11, 19.5
     body = [(-W + 2, -H), (W - 2, -H), (W, -H + 3), (W, H - 3), (W - 2, H), (-W + 2, H), (-W, H - 3), (-W, -H + 3)]
@@ -144,6 +145,7 @@ def draw_player_car(sh, x0, y0, deg):
     poly([(6, H - 1.5), (9, H - 1.5), (9, H), (6, H)], 13)
     poly([(-6, -8.5), (-3, -8.5), (-3.5, -7.5), (-6, -7.5)], 14)  # glint
     px = big.load()
+    g = [[0] * 48 for _ in range(48)]
     for oy in range(48):
         for ox in range(48):
             votes = {}
@@ -154,8 +156,60 @@ def draw_player_car(sh, x0, y0, deg):
             if votes.get(0, 0) * 2 > SS * SS:
                 continue
             votes.pop(0, None)
-            best = max(votes, key=lambda k: votes[k] * DETAIL.get(k, 1.0))
-            sh.px(x0 + ox, y0 + oy, best)
+            g[oy][ox] = max(votes, key=lambda k: votes[k] * DETAIL.get(k, 1.0))
+    return g
+
+
+def scale2x(g):
+    """EPX / Scale2x: doubles a pixel grid and keeps its edges and lines."""
+    h, w = len(g), len(g[0])
+    o = [[0] * (2 * w) for _ in range(2 * h)]
+    for y in range(h):
+        for x in range(w):
+            p = g[y][x]
+            a = g[y - 1][x] if y > 0 else p
+            b = g[y][x + 1] if x < w - 1 else p
+            c = g[y][x - 1] if x > 0 else p
+            d = g[y + 1][x] if y < h - 1 else p
+            o[2 * y][2 * x] = a if (c == a and c != d and a != b) else p
+            o[2 * y][2 * x + 1] = b if (a == b and a != c and b != d) else p
+            o[2 * y + 1][2 * x] = c if (d == c and d != b and c != a) else p
+            o[2 * y + 1][2 * x + 1] = d if (b == d and b != a and d != c) else p
+    return o
+
+
+def rotsprite(g, deg):
+    """RotSprite: Scale2x three times, rotate counter-clockwise by `deg`
+    sampling the nearest pixel, take each 8x8 cell's centre. A tilted car
+    keeps an unbroken stripe, solid windows and one clean edge (the
+    polygon rasteriser smeared them at a few degrees)."""
+    big = scale2x(scale2x(scale2x(g)))
+    n = len(big)
+    c = n / 2.0
+    a = math.radians(deg)
+    ca, sa = math.cos(a), math.sin(a)
+    out = [[0] * 48 for _ in range(48)]
+    for oy in range(48):
+        for ox in range(48):
+            dx, dy = ox * 8 + 4 - c, oy * 8 + 4 - c
+            sx, sy = int(c + dx * ca - dy * sa), int(c + dx * sa + dy * ca)
+            if 0 <= sx < n and 0 <= sy < n:
+                out[oy][ox] = big[sy][sx]
+    return out
+
+
+_CAR = []
+
+
+def draw_player_car(sh, x0, y0, deg):
+    """Car centred in a 48x48 cell, front up, rotated `deg` counter-clockwise."""
+    if not _CAR:
+        _CAR.append(car_raster())
+    g = rotsprite(_CAR[0], deg) if deg else _CAR[0]
+    for oy in range(48):
+        for ox in range(48):
+            if g[oy][ox]:
+                sh.px(x0 + ox, y0 + oy, g[oy][ox])
     sh.outline(x0, y0, 48, 48)
 
 
@@ -206,7 +260,7 @@ def build_sprites():
     # player car frames: bands of 48 px, two per band
     for k in range(9):
         band, col = k // 2, k % 2
-        draw_player_car(sh, col * 48, band * 48, k * 10)
+        draw_player_car(sh, col * 48, band * 48, PCAR_DEG[k])
     art_bike.draw_car(sh, 96, 0)                      # parked car (car palettes)
     draw_truck(sh, 96, 48)
     # officer (top-down walker frames from the park, officer palette)
