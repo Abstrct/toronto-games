@@ -8,10 +8,10 @@
 ; STYLE (all of it earned with the hop button or a risk):
 ;   TRACK HOP    hop, and be in the air as you cross a streetcar rail
 ;   POTHOLE HOP  hop clean over a pothole
-;   CLOSE CALL   a car slides past your shoulder
+;   CLOSE CALL   in the way of a car or the 501, slip out just in time
 ;   DRAFTING     tuck in behind the 501: it pulls you along
-; Mix them inside 2.5 s of each other and they chain, x2 x3 x4. Cross a rail
-; lazily on the ground and the groove grabs your wheel: RAIL WOBBLE, half
+; Mix them inside 2.5 s of each other and they chain, x2 .. x8. Cross a rail
+; on the ground and the groove grabs your wheel: RAIL WOBBLE, a quarter of
 ; your speed and the chain. Sit in one line too long and Queen St comes for
 ; you: a fresh pothole in your lane, or the 501 up the tracks behind you.
 .p816
@@ -29,12 +29,12 @@ MAXSPD      = $0300
 ACCEL       = $000A
 BRAKE       = $0024
 COAST       = $0003
+STROKE_T    = 12            ; each tap of A / UP is a pedal stroke this long
 ; steering: hold to slide over at STEER_SPD, let go and it settles in
 ; ~4 frames (a few px), so a tap moves a little and a hold moves a lot
 STEER_SPD   = $0200
 STEER_ACC   = $0040         ; up to speed in 8 frames
 STEER_REL   = $0080         ; let go / reverse: stops in 4
-RAIL_MIN    = $0030         ; slower than max(speed/4, this) sideways = wobble
 HOP_SPD     = $0140         ; a hop needs this much forward speed
 HOP_T       = 20            ; frames in the air
 HOP_CD      = 10            ; frames on the ground before the next hop
@@ -44,7 +44,8 @@ BIKE_LANE   = 186           ; start / respawn here (clear of the 501 and the doo
 INV_GETUP   = 120           ; blink frames after getting back on
 WIPE_COST   = 200           ; points per wipeout on a delivered run
 CHAIN_WIN   = 150           ; 2.5 s to land the next style move
-CHAIN_MAX   = 4
+CHAIN_MAX   = 8
+STYLE_CAP   = 50000
 CAMP_T      = 300           ; 5 s in one line...
 CAMP_BAND   = 12            ; ...means within this many px
 STILL_T     = 480           ; 8 s stopped: FIRED
@@ -96,6 +97,7 @@ b_hopcd  = ev_ram + 42      ; frames until the next hop is allowed
 b_hopsc  = ev_ram + 44      ; 1 = this hop already scored a rail
 b_prow   = ev_ram + 46      ; 1 = a crash message is up on POP_ROW
 b_fired  = ev_ram + 48      ; 1 = stood still too long: YOU'RE FIRED! (ev_fail 4)
+b_stroke = ev_ram + 50      ; frames left in the last pedal stroke (a tap of A)
 ; drawer / HUD bookkeeping (cleared by init, < 512)
 b_oamhw  = ev_ram + 384     ; OAM bytes used last frame (the local clear)
 b_hq     = ev_ram + 386     ; HUD caches: what is on screen now
@@ -133,7 +135,7 @@ E_VY    = ev_ram + 192      ; 8.8 signed
 E_VX    = ev_ram + 224
 E_TIMER = ev_ram + 256
 E_PAL   = ev_ram + 288
-E_FLAGS = ev_ram + 320      ; 1 near-miss counted, 2 door open, 4 bumped
+E_FLAGS = ev_ram + 320      ; 1 close call counted, 2 door open, 4 bumped, 8 fresh, $10 brakes, $20 in its path
 E_REL   = ev_ram + 352
 
 T_NONE     = 0
@@ -586,9 +588,26 @@ steer_and_pedal:
     lda b_dcap
 @cap:
     sta tmp2
+    ; every tap of A / UP is a pedal stroke (so mashing rides as well as
+    ; holding); DOWN on its own brakes, even mid-stroke
+    lda pad_new
+    and #(PAD_A | PAD_UP)
+    beq @nostroke
+    lda #STROKE_T
+    sta b_stroke
+@nostroke:
+    lda b_stroke
+    beq @sk
+    dec b_stroke
+@sk:
     lda pad
     bit #(PAD_A | PAD_UP)
+    bne @pedal
+    bit #PAD_DOWN
+    bne @no_pedal
+    ldx b_stroke
     beq @no_pedal
+@pedal:
     lda b_speed
     clc
     adc #ACCEL
@@ -651,13 +670,6 @@ move_x:
     stz b_vx
 @hi_ok:
     sta b_px
-    ; |vx| for the rail test
-    lda b_vx
-    bpl @abs
-    eor #$FFFF
-    inc a
-@abs:
-    sta tmp1
     A8
     ldy #$0000
 @rail:
@@ -682,10 +694,9 @@ move_x:
     bne @rail
     rts
 
-; crossed a rail with |vx| in tmp1. In the air (a hop): TRACK HOP, once a
-; hop, HOP_GAP of road between scoring ones. On the ground: fine if you're
-; really steering, but drift over lazily and the groove grabs the wheel
-; (RAIL WOBBLE). Keeps Y.
+; crossed a rail. In the air (a hop): TRACK HOP, once a hop, HOP_GAP of
+; road between scoring ones. On the ground the groove grabs the front wheel:
+; RAIL WOBBLE (a quarter of your speed and the chain). Keeps Y.
 rail_cross:
     lda b_hop
     beq @ground
@@ -709,17 +720,6 @@ rail_cross:
     rts
 @ground:
     A16
-    ; wobble below max(speed/4, RAIL_MIN)
-    lda b_speed
-    lsr a
-    lsr a
-    cmp #RAIL_MIN
-    bcs @w
-    lda #RAIL_MIN
-@w:
-    cmp tmp1
-    bcc @x16
-    beq @x16
 @wobble:
     .a16
     lda b_wob
@@ -728,8 +728,12 @@ rail_cross:
     sta b_wob
     lda #8
     sta b_shake
-    lda b_speed
+    lda b_speed                 ; lose a quarter of your speed
     lsr a
+    lsr a
+    eor #$FFFF
+    sec
+    adc b_speed
     sta b_speed
     stz b_chain
     stz b_chaint
@@ -811,7 +815,7 @@ lines: .byte 40, 66, 95, 117, 140, 163, BIKE_LANE
 lines_end:
 .a8
 
-str_wobble: .byte "RAIL WOBBLE! STEER HARDER", 0
+str_wobble: .byte "RAIL WOBBLE! HOP RAILS: B", 0
 
 rails:
     .byte 83, 107, 151, 175
@@ -956,7 +960,7 @@ cm6: .byte "KISSED THE 501!", 0
 
 ; ------------------------------------------------------------------
 ; style_award: A = SM_ move. A different move inside CHAIN_WIN frames
-; raises the chain (x2..x4), the same move again just keeps it alive;
+; raises the chain (x2..x8), the same move again just keeps it alive;
 ; points = base * chain. Banner "TRACK HOP! X3 +45".
 style_award:
     sta b_kind
@@ -997,6 +1001,10 @@ style_award:
     sta tmp1                    ; this move's points
     clc
     adc b_style
+    cmp #STYLE_CAP              ; (keeps RIDE + TIPS inside 16 bits)
+    bcc @cap
+    lda #STYLE_CAP
+@cap:
     sta b_style
     ; banner text
     lda b_kind
@@ -1095,7 +1103,7 @@ style_award:
     pla
     rts
 
-sm_base:  .byte 15, 15, 25, 20
+sm_base:  .byte 60, 100, 60, 80     ; x the chain (x8 max: 800, three digits)
 sm_names: .addr smn0, smn1, smn2, smn3
 smn0: .byte "TRACK HOP!", 0
 smn1: .byte "CLOSE CALL!", 0
@@ -1233,17 +1241,24 @@ draw_player:
     sta tmp5
     jmp bmeta
 @riding:
-    ; RAIL WOBBLE: the front end shakes
+    ; RAIL WOBBLE: the bike snakes left-right, 2 px each way, leaning into it
     lda b_wob
     beq @nowob
     A16
     lda frame
-    and #$0002
+    and #$0004
+    dec a
     dec a
     clc
     adc spr_x
     sta spr_x
-    A8
+    lda frame
+    and #$0004
+    lsr a
+    clc
+    adc #4                      ; lean left (4) / lean right (6)
+    jmp @pick
+    .a8
 @nowob:
     ; pedal phase from the cranks; lean frames when steering hard
     A16
@@ -1586,12 +1601,12 @@ str_end:    .byte "SPADINA", 0
 
 ; ------------------------------------------------------------------
 ; Delivered:  RIDE     1000 + distance/16 (562) + time left/3 (~20 a s)
-;              TIPS     50 a token + STYLE
+;              TIPS     50 a TTC token + STYLE
 ;              WIPEOUTS 200 each
-; Not delivered (wiped out 1, out of time 2, gave up 3, fired 4):
-;              RIDE     distance/24 (up to 375)
-;              TIPS     15 a token (up to 600)
-; so a failed run (<= 975) never beats a delivery (>= 1162).
+; Not delivered (wiped out 1, out of time 2, gave up 3, fired 4): no
+; delivery, no tips. RIDE = distance/24 (up to 375) and that's the score,
+; so a failed run never beats a delivery (>= 1162); the card's reason line
+; says why the tips and the wipeouts don't count.
 ; ev_break = RIDE, TIPS, WIPEOUTS; ev_score = RIDE + TIPS - WIPEOUTS.
 ; Stats: METRES (distance / 6), TOKENS, WIPEOUTS, STYLE.
 bike_score:
@@ -1678,7 +1693,7 @@ bike_score:
     rts
 @dnf:
     .a16
-    ; RIDE = distance/24, TIPS = 15 a token (capped at 40)
+    ; RIDE = distance/24, and nothing else: no delivery, no tips
     lda tmp3
     sta tmp0
     A8
@@ -1687,21 +1702,7 @@ bike_score:
     A16
     lda tmp0
     sta ev_break
-    lda b_tokens
-    cmp #40
-    bcc @tk
-    lda #40
-@tk:
-    sta tmp1
-    asl a
-    asl a
-    asl a
-    asl a
-    sec
-    sbc tmp1                    ; t*15
-    sta ev_break+2
-    clc
-    adc ev_break
+    stz ev_break+2
     sta ev_score
     A8
     lda #$03                    ; gave up
