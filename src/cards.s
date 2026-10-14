@@ -1001,7 +1001,7 @@ card_stat_pick:
     .byte 0, 2                  ; bay: TIME LEFT, SPILLS
     .byte 1, 2                  ; park: DOGS DODGED, TACKLES
     .byte 0, 2                  ; cops: SIP 'N' HOPS, HURDLES
-    .byte 0, 2                  ; sail: TIME LEFT, BUMPS (a finish rounded all 3; COURSE = 1000+25/S)
+    .byte 0, 2                  ; sail: TIME LEFT, BUMPS (a finish rounded all 3; COURSE = 1000+15/S)
     .byte 0, 2                  ; parking: SPOTS PARKED, TICKETS
     .byte 1, 0                  ; subway: STATIONS, GERMS
 ; the same for a failed run (ev_fail 1-4): only stats that still count
@@ -3799,7 +3799,7 @@ eb0: .byte "GET THE PACKAGE TO SPADINA", $0A, "IN TIME. PREFERABLY ALIVE.", 0
 eb1: .byte "MAKE THE 5:42 GO TRAIN.", $0A, "RED ! AHEAD? CHANGE LANES.", 0
 eb2: .byte "QUEEN GATE TO DUNDAS GATE.", $0A, "DODGE DOGS, THEN PAT THEM!", 0
 eb3: .byte "THE BIKE COP SAW THAT", $0A, "TALLBOY. RUN TO SPADINA!", 0
-eb4: .byte "ROUND MARKS 1, 2 AND 3,", $0A, "THEN CROSS THE LINE.", 0
+eb4: .byte "ROUND MARKS 1, 2 AND 3,", $0A, "THEN CROSS THE DOTTED LINE", 0
 eb5: .byte "THREE SPOTS ON BRUNSWICK.", $0A, "PARK IT. DON'T DENT A BMW.", 0
 eb6: .byte "SURF LINE 1 TO UNION.", $0A, "GRAB A POLE, GET GERMS.", 0
 ec0: .byte "D-PAD STEER    A PEDAL", $0A, "B HOP RAILS AND POTHOLES", $0A, "TOKENS 50, WIPEOUT DROPS 2", 0
@@ -3877,7 +3877,7 @@ fn_park_q: .byte "GAVE UP. NO DOGS!", 0
 fn_park_n: .byte "NO STEP NORTH IN 10 S", 0
 fn_cops:   .byte "COP CAUGHT YOU: FINED 1/4", 0
 fn_cops_q: .byte "GAVE UP: THE COP FINES 1/4", 0
-fn_sail:   .byte "10 S GETTING NO CLOSER", $0A, "250 A MARK + PART OF NEXT", 0
+fn_sail:   .byte "15 S GETTING NO CLOSER", $0A, "250 A MARK + PART OF NEXT", 0
 fn_sail_t: .byte "250 A MARK + PART OF NEXT", 0
 fn_sail_h: .byte "NOBODY TOUCHED THE HELM", 0
 fn_pk:     .byte "HALF IN OR TOWED, ALL 3", 0
@@ -3933,7 +3933,7 @@ rt_tenth:   .byte "50 A TENTH", 0
 rt_hurdles: .byte "HURDLES+ROAD", 0
 rt_bike_fin: .byte "1562+20/S", 0
 rt_bike_m:  .byte "1 PER 4 M", 0
-rt_sail:    .byte "1000+25/S", 0   ; ev_sail.s FINISH_MIN + PTS_SEC a second left
+rt_sail:    .byte "1000+15/S", 0   ; ev_sail.s FINISH_MIN + PTS_SEC a second left
 
 ; stat labels: 4 per event (last is padding), 0 = unused
 card_stat_labels:
