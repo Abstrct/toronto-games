@@ -6,7 +6,7 @@
 ; gaps, lengths and pushes and slips a GAG into three of the last four legs:
 ; SIGNAL PROBLEMS (the emergency brake: forward) or a BACKPACK that swings
 ; round into you from the right (back). Every lurch is TELEGRAPHED before it
-; pushes (40 frames, a gag 30): a sound (three departure beeps, a wheel
+; pushes (40 frames, a gag 30): a sound (the PLEASE STAND CLEAR door chime, a wheel
 ; squeal, the brake hiss, the horn, a blip), a status line ("CURVE AHEAD")
 ; and a HOLLOW blinking arrow by the ring: get ready. When the push starts
 ; the arrow goes SOLID and the status names the verb ("CURVE! HOLD v").
@@ -36,14 +36,22 @@
 ;       STANDING SURF: a leg you rode (D-pad) with no grab pays 75 x the
 ;         chain of clean legs in a row (75, 150, ... 450);
 ;       GOLD SURF: the dot never left the gold middle from the STAND CLEAR
-;         chime to the next stop: that leg's surf x3 (225 ... 1350);
+;         chime to the next stop: that leg's surf x3 (225 ... 1350). A slip
+;         that stays inside 9 px and comes back within 8 frames is forgiven
+;         (the dot flickers gold while it can still be saved);
 ;       DEAD CENTRE: while a lurch pushes and you're working the pad, a
 ;         point every 2 frames with the dot gold, every frame inside 2 px;
 ;       GAGS: +100 for each gag you leaned into and rode out without
 ;         grabbing anything.
 ;     and one the card never mentions (an expert's trick):
-;       NO HANDS: glide into a stop off the D-pad for the last 30 frames
-;         of the brake, the dot still gold, on a clean leg: +100.
+;       NO HANDS: glide into a stop off the D-pad for the last 28 frames
+;         of the brake, the dot still gold, on a clean leg: +100. Its tell:
+;         46 frames out on a clean leg you've ridden, with the dot out of
+;         the red, the brake eases (the push lets go, the arrow goes, the
+;         status says GLIDING IN..., a ding) and the ring pulses gold for
+;         the 18 frames in which letting go still counts, then stays gold
+;         while you glide. Off the pad the rider finds their feet.
+;   ev_stat: GERMS, LEGS LEANED, GOLD SURFS, stops reached (the "OF n").
 ;   A LEG LEANED is a leg where you pressed the way the solid arrow points
 ;   while the train pushed (a hold left over from the stop doesn't count).
 ;   PATIENT ZERO (20 germs: the count stops there) or CALL IT A DAY: RIDE 40
@@ -74,6 +82,9 @@ POP_ROW   = 5               ; HUD and over the sign (clear of every arrow)
 RADIUS2   = 400             ; grab when bx^2 + by^2 > 20^2
 DANGER2   = 256             ; dot turns red past 16 px
 SWEET2    = 36              ; sweet spot (the dot turns gold): inside 6 px
+GRACE2    = 81              ; a slip out of the gold that stays inside 9 px...
+GOLD_SLIP = 8               ; ...and comes back within 8 frames keeps a GOLD SURF
+                            ; alive (the dot flickers gold while it can be saved)
 NUM_SEG   = 6
 LEAN      = $0013           ; D-pad lean, 8.8 px/frame^2
 LEAN_LIM  = 4               ; px your way: past this a held lean fades, then braces
@@ -82,7 +93,9 @@ VMAX      = $0090           ; dot speed cap, 8.8 px/frame
 WARN      = 40              ; frames of telegraph before every lurch
 WARN_GAG  = 30              ; a gag's telegraph (the passengers give less notice)
 GAG_PAY   = 100             ; riding a gag out without grabbing anything
-NH_T      = 30              ; NO HANDS: frames off the D-pad into the stop
+NH_CUE    = 46              ; frames before a stop the brake eases (the tell)
+NH_T      = 28              ; NO HANDS: frames off the D-pad into the stop, so
+                            ; the window is open NH_CUE - NH_T = 18 frames
 NH_PAY    = 100
 GRAB_T    = 64              ; frames a grab gag takes (lunge, hold, walk back)
 BASE_RIDE = 1000
@@ -132,7 +145,7 @@ w_cur    = ev_ram + 50
 w_shake  = ev_ram + 52
 w_pal    = ev_ram + 54      ; palette of the passenger who boards at each stop
 w_chain  = ev_ram + 56      ; STANDING SURF chain
-w_best   = ev_ram + 58      ; best chain
+w_golds  = ev_ram + 58      ; GOLD SURFS this ride (ev_stat 2)
 w_clean  = ev_ram + 60      ; 1 = no grab yet this leg
 w_style  = ev_ram + 62      ; style points
 w_sweet  = ev_ram + 64      ; sweet-spot frame counter
@@ -177,6 +190,8 @@ w_nhq    = ev_ram + 182     ; 1 = a NO HANDS callout waits for the surf one
 w_nohand = ev_ram + 184     ; stops glided into hands-free
 w_gtouch = ev_ram + 186     ; 1 = you leaned the arrow's way during this push
 w_fr     = ev_ram + 188     ; the ride's own frame counter (low byte)
+w_ease   = ev_ram + 190     ; 1 = the brake has eased into this stop (the ring's gold)
+w_slip   = ev_ram + 192     ; frames the dot has been out of the gold (GOLD_SLIP)
 COLBUF   = ev_ram + 256     ; two 28-word column buffers (256, 320)
 EV_SEED  = ev_ram + 510
 COURSE   = ev_ram + 512     ; this run's course: 4 bytes a lurch (<= 26 lurches)
@@ -198,6 +213,7 @@ ST_SIGP   = 12
 ST_PACKW  = 13
 ST_PACKP  = 14
 ST_TMU    = 15
+ST_GLIDE  = 16              ; the brake eased: nothing pushes into the stop
 
 .segment "BSS"
 sb_seed: .res 2             ; this competition's ride (player 1 draws it)
@@ -272,7 +288,7 @@ sb_init:
     VLOAD (VRAM_BG2MAP + $400), subway_platform, 2048
     PLOAD 32, subway_pal, 96
     VLOAD VRAM_OBJTILES, subway_spr, (subway_spr_pal - subway_spr)
-    PLOAD 144, subway_spr_pal, 80
+    PLOAD 144, subway_spr_pal, 96     ; sprite palettes 1-6 (6: the ring gone gold)
     lda cur_player
     ldy #$0000
     jsl player_palette
@@ -619,6 +635,7 @@ tr_gap:
     ; please stand clear of the doors: the gold leg starts with the chime
     lda #1
     sta w_gold
+    stz w_slip
     rts
 @nd:
     cmp #K_BRK
@@ -632,25 +649,16 @@ tr_gap:
 ; and which way it pushes the dot (x, y: 1, -1 or 0)
 warn_status: .byte ST_CLEAR, ST_GO, ST_CURVE, ST_LEANU, ST_CURVE, ST_LEAND, ST_BRAKE, ST_LEANL
              .byte ST_SIGW, ST_SIGP, ST_PACKW, ST_PACKP
-warn_sfx:    .byte SFX_READY, SFX_WHISTLE, SFX_WHISTLE, SFX_SPLASH, SFX_HORN, SFX_BACK
+warn_sfx:    .byte SFX_CHIME, SFX_WHISTLE, SFX_WHISTLE, SFX_SPLASH, SFX_HORN, SFX_BACK
 push_sfx:    .byte SFX_GO, SFX_WHISTLE, SFX_WHISTLE, SFX_SPLASH, SFX_CRASH, SFX_STEP
 push_sx:     .byte $FF, 0, 0, 1, 1, $FF
 push_sy:     .byte 0, 1, $FF, 0, 0, 0
 
 tr_warn:
+    ; (pulling out: the door chime's three notes at 40, 26 and 12 frames
+    ; out, PLEASE STAND CLEAR, then GO at the push)
     jsr recover
     jsr jolts
-    lda w_kind
-    bne @nb
-    ; departure beeps at 40, 27 and 14 frames out, GO at the push
-    lda w_lt
-    cmp #27
-    beq @beep
-    cmp #14
-    bne @nb
-@beep:
-    SFX SFX_READY
-@nb:
     A16
     dec w_lt
     A8
@@ -764,6 +772,11 @@ tr_act:
     lda #1
     sta w_shake
 @nj:
+    lda w_lt
+    cmp #NH_CUE
+    bne @ne
+    jsr ease_in
+@ne:
     A16
     lda w_speed
     sec
@@ -859,6 +872,35 @@ gag_paid:
     SFX SFX_COIN
     rts
 
+; The tell for the trick the card never mentions. NH_CUE frames out, on a
+; clean leg you've ridden with the dot out of the red, the brake eases off as
+; the car creeps in: the push lets go (nothing pushes into the stop, so the
+; arrow goes and the status says so), a two-note ding, and the ring pulses
+; gold for the NH_CUE - NH_T frames in which letting go of the pad still
+; counts (ring_pal). Off the pad, the rider finds their feet: the dot drifts
+; back to the middle on its own.
+ease_in:
+    .a8
+    lda w_clean
+    beq @x
+    lda w_touch
+    beq @x
+    A16
+    lda w_r2
+    cmp #DANGER2
+    A8
+    bcs @x
+    lda #1
+    sta w_ease
+    ldx #$0000
+    stx w_tx
+    stx w_ty
+    lda #ST_GLIDE
+    sta w_status
+    SFX SFX_SELECT
+@x:
+    rts
+
 str_dodge1: .byte "RODE OUT THE E-BRAKE!", 0
 str_dodge2: .byte "DODGED THE BACKPACK!", 0
 
@@ -899,11 +941,6 @@ arrive:
     lda w_clean
     beq @broke
     inc w_chain
-    lda w_chain
-    cmp w_best
-    bcc @nb
-    sta w_best
-@nb:
     jsr no_hands
     jsr surf_popup
     bra @leg
@@ -915,6 +952,7 @@ arrive:
     inc w_earn
 @nt:
     stz w_touch
+    stz w_ease
     stz w_gold                  ; (the next gold leg starts at the chime)
     lda #1
     sta w_clean
@@ -952,6 +990,7 @@ surf_popup:
     sta tmp3
     ldx w_gold
     beq @one
+    inc w_golds
     asl a
     clc
     adc tmp3                    ; 225c
@@ -1386,14 +1425,26 @@ balance:
     jmp grab
 @in:
     .a16
-    ; the dot left the gold middle: no GOLD DOT SURF this leg
+    ; the dot left the gold middle: no GOLD SURF this leg, unless it was a
+    ; slip (inside GRACE2, back within GOLD_SLIP frames: the dot flickers)
     cmp #SWEET2
     bcc @gold
+    cmp #GRACE2
     A8
+    bcs @lost
+    inc w_slip
+    lda w_slip
+    cmp #(GOLD_SLIP + 1)
+    bcc @slip
+@lost:
     stz w_gold
+@slip:
     A16
     bra @x
 @gold:
+    A8
+    stz w_slip
+    A16
     ; DEAD CENTRE: in the gold while a lurch pushes and you're working it,
     ; a point every 2 frames; dead on the middle (inside 2 px), every frame
     lda w_fx
@@ -2053,6 +2104,16 @@ draw_ring:
     ldx #MS_DOT_SWEET_BASE
     bra @d
 @ok:
+    ; a slip from a gold leg that can still be saved: it flickers gold
+    lda w_gold
+    beq @ok2
+    lda frame
+    and #$02
+    beq @ok2
+    LDPTR1 ms_dot_sweet
+    ldx #MS_DOT_SWEET_BASE
+    bra @d
+@ok2:
     LDPTR1 ms_dot_ok
     ldx #MS_DOT_OK_BASE
     bra @d
@@ -2078,13 +2139,50 @@ draw_ring:
     lda #$3A
     sta tmp5
     stz tmp5+1
+    jsr ring_pal
     jsl oam_meta
+    rts
+
+; the ring goes gold (sprite palette 6) once the brake has eased into a stop
+; on a clean leg: pulsing while letting go still counts, then steady while
+; you glide in hands-free from inside that window
+ring_pal:
+    .a8
+    lda w_ease
+    beq @x
+    lda w_clean
+    beq @x
+    lda w_ls
+    cmp #LS_ACT
+    bne @x
+    A16
+    lda w_lt
+    cmp #NH_T
+    bcc @late
+    A8
+    lda frame
+    and #$04
+    beq @x
+    bra @gold
+@late:
+    .a16
+    clc
+    adc w_press                 ; off the pad since before the window shut?
+    cmp #NH_T
+    A8
+    bcc @x
+@gold:
+    lda #$3C
+    sta tmp5
+@x:
     rts
 
 ; the lean arrow, pointing the way to press. Warning: a HOLLOW arrow that
 ; blinks (faster as it nears) = get ready. Push: SOLID = lean now.
 draw_arrow:
     stz w_hollow                    ; 0 solid, 1 hollow
+    lda w_ease                      ; the brake eased: nothing to lean against
+    jne @x
     lda w_ls
     cmp #LS_ACT
     beq @show
@@ -2599,7 +2697,7 @@ str_germs: .byte "GERMS", 0
 str_next:  .byte "NEXT:", 0
 str_style: .byte "STYLE", 0
 status_msgs: .addr ss0, ss1, ss2, ss3, ss4, ss5, ss6, ss7, ss8, ss9, ss10
-             .addr ss11, ss12, ss13, ss14, ss15
+             .addr ss11, ss12, ss13, ss14, ss15, ss16
 ; warnings orange (get ready), pushes yellow like the solid arrow (lean now)
 status_tp:   .byte ($20 | (TP_WHITE << 2))
              .byte ($20 | (TP_ORANGE << 2)), ($20 | (TP_ORANGE << 2)), ($20 | (TP_ORANGE << 2))
@@ -2609,6 +2707,7 @@ status_tp:   .byte ($20 | (TP_WHITE << 2))
              .byte ($20 | (TP_ORANGE << 2)), ($20 | (TP_YELLOW << 2))
              .byte ($20 | (TP_ORANGE << 2)), ($20 | (TP_YELLOW << 2))
              .byte ($20 | (TP_WHITE << 2))
+             .byte ($20 | (TP_GREEN << 2))
 ss0:  .byte " ", 0
 ss1:  .byte "STAND CLEAR!", 0
 ss2:  .byte "CURVE AHEAD", 0
@@ -2625,6 +2724,7 @@ ss12: .byte "E-BRAKE! HOLD ", TXT_ARROW_L + $20, 0
 ss13: .byte "BACKPACK SWING!", 0
 ss14: .byte "BACKPACK! HOLD ", TXT_ARROW_R + $20, 0
 ss15: .byte "IT'S DUNDAS, BUD", 0
+ss16: .byte "GLIDING IN...", 0
 
 ; ------------------------------------------------------------------
 ; score. Finished at Union: RIDE 1000 + STYLE - 40 per germ.
@@ -2635,12 +2735,13 @@ sb_score:
     sta ev_stat
     lda w_earn
     and #$00FF
-    sta ev_stat+2               ; LEGS LEANED: the legs the ride pays for
-    lda w_best
+    sta ev_stat+2               ; LEGS LEANED: the legs a failed ride pays for
+    lda w_golds
     and #$00FF
-    sta ev_stat+4               ; best STANDING SURF chain
-    lda w_style
-    sta ev_stat+6               ; style points
+    sta ev_stat+4               ; GOLD SURFS
+    lda w_seg
+    and #$00FF
+    sta ev_stat+6               ; stops reached: both lines' "OF n" (6 at Union)
     lda w_germs
     cmp #20
     bcs @fail

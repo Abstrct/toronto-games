@@ -8,8 +8,15 @@ and leans against both with a short prediction: frame-perfect balance, the
 ceiling (0 germs, the full STANDING SURF chain, lots of DEAD CENTRE).
 
 subway_ace is the expert plus the trick the card never mentions, NO HANDS
-(glide into a stop off the D-pad with the dot still gold: +100 a stop). It is
-the ceiling the default records are judged against.
+(glide into a stop off the D-pad with the dot still gold: +100 a stop). Its
+tell: NH_CUE frames before a stop on a clean leg the brake eases, the arrow
+goes, the status says GLIDING IN..., a ding, and the ring pulses gold for the
+frames in which letting go still counts. It is the ceiling the default
+records are judged against.
+
+subway_cue is subway_surfer plus that tell and nothing else: on GLIDING IN...
+it lets go. At 10-12 frames it must land the trick on most stops it is
+offered (`pt.py curve subway -p subway_cue -l 10,12`).
 
 subway_surfer is the human yardstick (the CURVE bot): it plans only from
 what's on screen. It sees the dot (and judges its drift from the last few
@@ -19,8 +26,9 @@ double arrow when the push starts (lean now), with the status line naming
 the lean. Like the card tells it, it waits for the solid arrow (lead 0) and
 otherwise steers the dot back toward the middle with a dead zone, the way a
 person nudges. `pt.py curve subway` delays all of that by a human reaction.
-The top end comes from GOLD DOT SURF (the dot never left the gold middle
-all leg: the stop's STANDING SURF pays x3), which needs quick, small hands.
+The top end comes from GOLD SURF (the dot never left the gold middle all leg,
+bar slips of up to 8 frames inside 9 px, while the dot flickers gold: the
+stop's STANDING SURF pays x3), which needs quick, small hands.
 
 subway_human is subway_surfer with a built-in 15-frame (250 ms) hand, so a
 plain `balance` run shows where an average player lands.
@@ -51,6 +59,8 @@ from policies import Policy, LEFT, RIGHT, UP, DOWN
 # ev_ram layout (src/ev_subway.s)
 W_BX, W_BY, W_VX, W_VY, W_FX, W_FY = 0, 2, 4, 6, 8, 10
 W_SEG, W_SPEED, W_LS, W_LT, W_GERMS, W_GRAB, W_KIND = 16, 18, 24, 26, 28, 30, 34
+W_STATUS = 42                 # the HUD's status line (what it reads, as an index)
+ST_GLIDE = 16                 # "GLIDING IN...": the brake eased, the ring pulses gold
 LS_GAP, LS_WARN, LS_ACT, LS_END = range(4)
 # lurch kind -> (axis, push sign): the arrow points the other way
 PUSH = {0: (0, -1), 1: (1, +1), 2: (1, -1), 3: (0, +1), 4: (0, +1), 5: (0, -1)}
@@ -77,13 +87,13 @@ class _Reader(Policy):
         if getattr(self, 'g', None) is None:
             self.g = getattr(self, 'game', None) or find_game()
             self.ev = self.g.sym['ev_ram']
-        r = self.g.core.peek(self.ev, 40)
+        r = self.g.core.peek(self.ev, 44)
         w = lambda o: r[o] | r[o + 1] << 8
         return {'x': (s16(w(W_BX)) / 256, s16(w(W_BY)) / 256),
                 'v': (s16(w(W_VX)) / 256, s16(w(W_VY)) / 256),
                 'f': (s16(w(W_FX)), s16(w(W_FY))),
                 'ls': r[W_LS], 'lt': w(W_LT), 'kind': r[W_KIND], 'grab': w(W_GRAB),
-                'speed': w(W_SPEED), 'seg': r[W_SEG]}
+                'speed': w(W_SPEED), 'seg': r[W_SEG], 'status': r[W_STATUS]}
 
 
 def steer(pos, vel, push, look, dz):
@@ -117,32 +127,17 @@ class subway_expert(_Reader):
         return steer(s['x'], s['v'], push, 8, 1.0)
 
 
-class subway_ace(_Reader):
-    """subway_expert plus the trick the card never mentions (NO HANDS): on
-    each brake into a stop, park the dot `park` px behind the middle with no
-    drift, then let go of the pad for the last `off` frames and let the
-    brake carry it through the gold. Frame-perfect like the expert: the
-    ceiling, and proof the trick is reachable."""
-    park = 3.0
-    off = 34
-    settle = 40
+class subway_ace(subway_expert):
+    """subway_expert plus the trick the card never mentions (NO HANDS): when
+    the brake eases into a stop (GLIDING IN..., the ring pulses gold) it lets
+    go of the pad at once and glides in. Frame-perfect like the expert: the
+    ceiling, and the title demo's player."""
 
     def act(self, t, tel, rng):
-        s = self.read()
-        if s['grab']:
+        m = super().act(t, tel, rng)
+        if self.read()['status'] == ST_GLIDE:
             return 0
-        push = [1 if f > 0 else -1 if f < 0 else 0 for f in s['f']]
-        if s['ls'] == LS_WARN and s['lt'] <= 3:
-            ax, sg = PUSH[s['kind']]
-            push[ax] = sg
-        x = list(s['x'])
-        if s['ls'] == LS_ACT and s['kind'] == 3:
-            if s['lt'] <= self.off:
-                return 0
-            if s['lt'] <= self.off + self.settle:
-                x[0] += self.park           # aim a touch behind the middle
-                return steer(x, s['v'], [0, push[1]], 8, 0.4)
-        return steer(x, s['v'], push, 8, 1.0)
+        return m
 
 
 class subway_surfer(_Reader):
@@ -167,10 +162,25 @@ class subway_surfer(_Reader):
         n = max(1, len(hist) - 1)
         v = ((x[0] - x0[0]) / n, (x[1] - x0[1]) / n)
         push = [0, 0]
-        if (s['ls'] == LS_WARN and s['lt'] <= self.lead) or s['ls'] == LS_ACT:
-            ax, sg = PUSH[s['kind']]
+        if ((s['ls'] == LS_WARN and s['lt'] <= self.lead) or s['ls'] == LS_ACT) and s['status'] != ST_GLIDE:
+            ax, sg = PUSH[s['kind']]                # (the arrow goes once the brake eases)
             push[ax] = sg
         return steer(x, v, push, self.look, self.dz)
+
+
+class subway_cue(subway_surfer):
+    """subway_surfer that has learned the tell for the undocumented trick
+    and nothing else about it: when the status line says GLIDING IN... (the
+    arrow goes, a ding, the ring pulses gold) it lets go of the pad until
+    the stop. It never reads the trick's own state (the eased push, the
+    frames off the pad, the window). `pt.py curve subway -p subway_cue -l
+    10,12` must land the trick on most stops it is offered."""
+
+    def act(self, t, tel, rng):
+        m = super().act(t, tel, rng)
+        if self.read()['status'] == ST_GLIDE:
+            return 0
+        return m
 
 
 class subway_human(subway_surfer):
@@ -209,7 +219,7 @@ class subway_newbie(_Reader):
             m |= LEFT if x[0] > 4 else RIGHT if x[0] < -4 else 0
             m |= UP if x[1] > 4 else DOWN if x[1] < -4 else 0
             return m
-        if s['ls'] in (LS_WARN, LS_ACT):
+        if s['ls'] in (LS_WARN, LS_ACT) and s['status'] != ST_GLIDE:     # (no arrow once it eases)
             ax, sg = PUSH[s['kind']]
             # the arrow points against the push
             if -sg * x[ax] < 10:
@@ -240,7 +250,8 @@ class subway_obey(_Reader):
 
     def decide(self):
         s = self.read()
-        if s['ls'] == LS_ACT or (self.hollow and s['ls'] == LS_WARN):
+        arrow = s['status'] != ST_GLIDE         # the arrow goes once the brake eases
+        if arrow and (s['ls'] == LS_ACT or (self.hollow and s['ls'] == LS_WARN)):
             ax, sg = PUSH[s['kind']]
             self.last = (RIGHT if sg < 0 else LEFT) if ax == 0 else (DOWN if sg < 0 else UP)
             self.gone = 0
@@ -264,7 +275,7 @@ class subway_dana(subway_obey):
     linger = 10
 
 
-POLICIES = {c.__name__: c for c in (subway_expert, subway_ace, subway_surfer, subway_human, subway_newbie,
+POLICIES = {c.__name__: c for c in (subway_expert, subway_ace, subway_surfer, subway_cue, subway_human, subway_newbie,
                                     subway_obey, subway_obey20, subway_obey25, subway_dana)}
 DEFAULTS = {'subway': ['idle', 'hold_right', 'mash_a', 'random_input', 'subway_newbie', 'subway_dana', 'subway_obey', 'subway_human',
                        'subway_expert', 'subway_ace']}
