@@ -28,16 +28,18 @@ DASH       = $0300
 ALERT_T    = 36              ; "!" tell before a dog charges (+0..19)
 DODGE_R    = 40              ; a charging dog this close when B goes = DODGE
 SHAVE_R    = 22              ; ... this close, pressed by hand = CLOSE SHAVE
-HAND_BONUS = 25              ; style for a dodge timed by hand (B with him in range)
-SHAVE_BONUS = 75             ; ... and for a CLOSE SHAVE (got set early = no bonus)
+HAND_BONUS = 100             ; on top of DODGE_PTS: a dodge timed by hand (B with him in range)
+SHAVE_BONUS = 100            ; ... and a CLOSE SHAVE: HAND_BONUS + this x the run (set early = no bonus)
 SHAVE_RUN  = 4               ; CLOSE SHAVEs in a row pay x2, x3, x4 (any other dodge or a tackle resets)
+TACKLE_PTS = 150             ; what a tackle costs on the card (TACKLES X150), every run
 BACK_R     = 40              ; walk this close to a barking dog and he backs off
-DODGE_PTS  = 50              ; base points a dodge
+DODGE_PTS  = 50              ; every dog beaten (dodged or fetched): DOGS on the card
 HEAL_RUN   = 3               ; dogs beaten in a row that win back a heart
 DASH_WHIFF = 70              ; sidestep cooldown when nothing was dodged
 DASH_HIT   = 12              ; ... and after a clean dodge
-STUMBLE    = 48              ; a sidestep with no dog about leaves you off balance
-WHIFF_WIN  = 36              ; ... another this soon after you're steady again: x2, then x3 (mashing B crawls)
+STUMBLE    = 48              ; a sidestep with no dog about leaves you off balance ...
+WHIFF_MAX  = 4               ; ... and each one more off balance (x2, x3, x4) ...
+WHIFF_DECAY = 240            ; ... till you go this long without one (then a level back)
 IDLE_T     = 15*60           ; no ground gained for this long: a nap, CALLED IT A DAY
 DOG_CD     = 255             ; frames a dodged / fetching / tackling dog leaves you be
 SLIDE_R    = 160             ; how far to look for a way round an obstacle (the courts)
@@ -111,8 +113,10 @@ k_hurry  = ev_ram + 588      ; 1 = HURRY! line due (shown when no dog is on you)
 k_srun   = ev_ram + 590      ; CLOSE SHAVEs in a row (1..SHAVE_RUN): each pays SHAVE_BONUS x this
 k_best   = ev_ram + 592      ; furthest north reached (y)
 k_still  = ev_ram + 594      ; frames since k_best last moved: IDLE_T = a nap, the walk's over
-k_wrun   = ev_ram + 596      ; whiffs in quick succession (1..3): each stumbles longer
-k_wcool  = ev_ram + 598      ; frames in which another whiff counts as "in succession"
+k_wrun   = ev_ram + 596      ; off balance (0..WHIFF_MAX): whiffs stumble STUMBLE x this
+k_wcool  = ev_ram + 598      ; frames till k_wrun comes down a level (no whiff meanwhile)
+k_coachup = ev_ram + 600     ; 1 = the first dog's "press B" line is the popup that's up
+k_seeded = ev_ram + 602      ; 1 once EV_SEED is set (first frame of the walk)
 k_cbuf   = ev_ram + 640      ; 64 bytes: one BG2 canopy row, unpacked for DMA
 EV_SEED  = ev_ram + 510
 
@@ -234,8 +238,6 @@ park_init:
     stx k_time
     ldx #3
     stx k_balls
-    ldx #$7B31
-    stx EV_SEED
     ldx #$00FF
     ldy #$0000
 @free:
@@ -507,6 +509,19 @@ canopy_source:
 
 ; ------------------------------------------------------------------
 park_update:
+    lda k_seeded                ; the dogs' moods, from the first frame of the
+    bne @sd                     ; walk: a new walk every time (the demo fixes
+    inc k_seeded                ; rng and frame)
+    A16
+    lda rng
+    eor frame
+    eor #$7B31
+    bne @s0
+    lda #$7B31
+@s0:
+    sta EV_SEED
+    A8
+@sd:
     lda k_state
     cmp #ST_WALK
     beq @walk
@@ -593,15 +608,23 @@ park_update:
     beq @c
     dec k_dashcd
 @c:
-    lda k_wcool
+    lda k_wcool                 ; steady again, a level at a time
     beq @wc
     dec k_wcool
+    bne @wc
+    lda k_wrun
+    beq @wc
+    dec k_wrun
+    beq @wc
+    lda #WHIFF_DECAY
+    sta k_wcool
 @wc:
     lda k_popup
     beq @p
     dec k_popup
     bne @p
     A8
+    stz k_coachup
     jsl event_popup_clear
     A16
 @p:
@@ -675,6 +698,7 @@ str_hurry: .byte " HURRY! 20 SECONDS LEFT! ", 0
 ; ptr0 = message, A = text palette: banner on row 9 with a solid backing
 ; so it reads over sprites and busy grass
 popup:
+    stz k_coachup
     pha
     jsl event_popup_clear
     lda #TXT_WIN
@@ -695,16 +719,10 @@ walk_input:
     lda k_dashcd
     cmp #(DASH_HIT + 1)
     bcc @dashing
-    lda k_wcool                 ; whiffed again straight away? off balance longer
-    beq @w1
-    lda k_wrun
-    cmp #3
+    lda k_wrun                  ; each whiff leaves you more off balance
+    cmp #WHIFF_MAX              ; (a level back for every WHIFF_DECAY without one)
     bcs @w2
     inc k_wrun
-    bra @w2
-@w1:
-    lda #1
-    sta k_wrun
 @w2:
     lda k_wrun
     dec a
@@ -713,7 +731,7 @@ walk_input:
     lda f:whiff_stum,x
     sta k_stum
     clc
-    adc #WHIFF_WIN
+    adc #WHIFF_DECAY
     sta k_wcool
     lda k_popup
     bne @dashing
@@ -1118,8 +1136,9 @@ walk_input:
 
 str_oops: .byte " OOPS! NO DOG THERE ", 0
 str_oops2: .byte " OOPS! B WHEN ! SHOWS ", 0
-whiff_stum: .word STUMBLE, STUMBLE*2, STUMBLE*3
+whiff_stum: .word STUMBLE, STUMBLE*2, STUMBLE*3, STUMBLE*4
 str_coach_b: .byte " DOG! PRESS B TO GET SET! ", 0
+str_set:     .byte " SET! YOU STEP AS HE LUNGES ", 0
 
 ; B with a dog on its way ("!" or charging, not yet in range): get set, and
 ; the step goes off by itself as he lunges (a plain DODGE, never a shave)
@@ -1135,6 +1154,13 @@ try_arm:
     sta k_armdx
     A8
     SFX SFX_BLIP
+    lda k_coachup               ; the coach said press B: done, so say so
+    beq @x
+    LDPTR0 str_set
+    lda #TP_GREEN
+    jsr popup
+    ldx #60
+    stx k_popup
 @x:
     rts
 
@@ -1393,6 +1419,7 @@ throw_ball:
 throw_vx: .word 0, 0, $10000 - $0280, $0280
 throw_vy: .word $0280, $10000 - $0280, 0, 0
 str_fetch: .byte " FETCH! ", 0
+str_fetched: .byte " FETCH! +50 ", 0
 
 ball_update:
     lda b_state
@@ -1833,6 +1860,7 @@ think_wander:
     LDPTR0 str_coach_b
     lda #TP_YELLOW
     jsr popup
+    inc k_coachup
     ldx #150
     stx k_popup
     ldx k_cur
@@ -2129,7 +2157,10 @@ tackle:
 dodged:
     A16
     inc k_dodged
-    stz k_wrun
+    lda k_style                 ; DODGE! +50, whatever the timing
+    clc
+    adc #DODGE_PTS
+    sta k_style
     A8
     lda #DS_PAST
     sta D_STATE,x
@@ -2143,7 +2174,7 @@ dodged:
     sty k_calm
     SFX SFX_COIN
     ; got set early (armed): a plain DODGE. Timed by hand with him in range:
-    ; +HAND_BONUS, and right on you: CLOSE SHAVE, +SHAVE_BONUS
+    ; +HAND_BONUS, and right on you: CLOSE SHAVE, +HAND_BONUS + SHAVE_BONUS x the run
     lda k_shok
     beq @plain
     A16
@@ -2215,14 +2246,16 @@ beat_dog:
     A8
     rts
 
-str_dodge: .byte " DODGE! ", 0
-str_timed: .byte " NICE TIMING! +25 ", 0
+; (each line is the dog's whole worth: DODGE_PTS + the timing bonus)
+str_dodge: .byte " DODGE! +50 ", 0
+str_timed: .byte " NICE TIMING! +150 ", 0
 shave_msgs: .addr str_shave, str_shave2, str_shave3, str_shave4
-shave_pts:  .word SHAVE_BONUS, SHAVE_BONUS*2, SHAVE_BONUS*3, SHAVE_BONUS*4
-str_shave:  .byte " CLOSE SHAVE! +75 ", 0
-str_shave2: .byte " CLOSE SHAVE X2! +150 ", 0
-str_shave3: .byte " CLOSE SHAVE X3! +225 ", 0
-str_shave4: .byte " CLOSE SHAVE X4!! +300 ", 0
+shave_pts:  .word HAND_BONUS+SHAVE_BONUS, HAND_BONUS+SHAVE_BONUS*2, HAND_BONUS+SHAVE_BONUS*3, HAND_BONUS+SHAVE_BONUS*4
+str_shave:  .byte " CLOSE SHAVE! +250 ", 0
+str_shave2: .byte " CLOSE SHAVE X2! +350 ", 0
+str_shave3: .byte " CLOSE SHAVE X3! +450 ", 0
+str_shave4: .byte " CLOSE SHAVE X4!! +550 ", 0
+.assert DODGE_PTS = 50 && HAND_BONUS = 100 && SHAVE_BONUS = 100, error, "dodge popups print these"
 
 ; skidding past: slow down, then sit
 think_past:
@@ -2444,7 +2477,8 @@ squirrel_near:
     clc
     rts
 
-str_tackled: .byte " TACKLED! (HE'S FRIENDLY) ", 0
+str_tackled: .byte " TACKLED -150 (HE'S FRIENDLY) ", 0
+.assert TACKLE_PTS = 150, error, "str_tackled prints it"
 
 think_ball:
     lda b_state
@@ -2617,10 +2651,21 @@ go_ball:
     bcs @n
     A16
     inc k_fetch                 ; a dog that was coming for you: fetch!
+    lda k_style
+    clc
+    adc #DODGE_PTS
+    sta k_style
     lda #CALM_END
     sta k_calm
     A8
     jsr beat_dog
+    phx
+    LDPTR0 str_fetched
+    lda #TP_GREEN
+    jsr popup
+    ldx #50
+    stx k_popup
+    plx
 @n:
     lda #DS_BALL
     sta D_STATE,x
@@ -2936,7 +2981,7 @@ draw_player:
     lsr a
     clc
     adc #PF_TUMB1
-    bra @put
+    jmp @put
 @lying:
     lda frame
     lsr a
@@ -2972,6 +3017,23 @@ draw_player:
     lda #PF_S0
     bra @put
 @nd:
+    lda k_stum                  ; off balance after a whiff: arms out, wobbling
+    ora k_stum+1
+    beq @nst
+    A16
+    dec spr_x                   ; (a 2 px sway, mirrored each way)
+    lda frame
+    and #$0008
+    beq @wob
+    inc spr_x
+    inc spr_x
+    lda #$0040
+@wob:
+    A8
+    sta tmp5+1
+    lda #PF_READY
+    bra @put
+@nst:
     lda k_armed
     beq @walk
     lda #PF_READY
@@ -3607,14 +3669,13 @@ park_score:
     sta ev_stat+4
     lda k_style
     sta ev_stat+6               ; DODGE 'N' PAT: pats + timing bonuses
-    ; Every run reads the same way on the card:
+    ; Every run reads the same way on the card, CROSSING + DOGS - TACKLES:
     ;   CROSSING  finished: 750 + 15/s left under par (90 s) + 25/ball left
-    ;             short of Dundas: up to 750 for the ground covered (the
-    ;             square of the share walked: the last stretch counts most)
-    ;             + 50 a dog dodged or fetched, either way
-    ;   STYLE     DODGE 'N' PAT (pats, NICE TIMING, CLOSE SHAVE), either way
-    ;   TACKLES   150 a tackle, either way; never takes a finish under 750
-    ;             or anything under 0
+    ;             short of Dundas: 75 a tenth of the walk covered (0..747)
+    ;   DOGS      every popup's worth: 50 a dog dodged or fetched, the
+    ;             timing bonuses (NICE TIMING, CLOSE SHAVE) and the pats
+    ;   TACKLES   TACKLE_PTS a tackle, the whole cost, every run
+    ; and a sum under 0 scores 0 (the card says NEVER BELOW 0)
     lda k_fin                   ; through the gate: a finish, even if GIVE UP
     and #$00FF                  ; came during the walk-in
     beq @failed
@@ -3631,7 +3692,6 @@ park_score:
     and #$00FF
     ldy #25
     jsr madd
-    lda #750                    ; the floor a finish keeps
     bra @sum
 @failed:
     .a16
@@ -3648,30 +3708,14 @@ park_score:
     sta tmp0
     A8
     lda #10
-    jsl div16                   ; q = metres-ish, 0..249
-    lda tmp0
-    sta WRMPYA
-    sta WRMPYB
-    nop
-    nop
-    nop
-    nop
-    ldx RDMPYL
-    stx tmp0
-    lda #83
-    jsl div16                   ; q^2 / 83: 0..747
+    jsl div16                   ; q = 0..249, a tenth of the walk = 24.9
     A16
     lda tmp0
+    asl a
+    adc tmp0                    ; x3: 75 a tenth, 0..747
     sta tmp4
-    lda #$0000                  ; a run that didn't finish has no floor
 @sum:
     .a16
-    sta tmp5
-    lda k_dodged
-    clc
-    adc k_fetch
-    ldy #DODGE_PTS
-    jsr madd
     lda tmp4
     sta ev_break                ; base
     lda k_style
@@ -3679,29 +3723,23 @@ park_score:
     clc
     adc tmp4
     sta tmp4                    ; base + bonus
-    sec
-    sbc tmp5
-    bcs @room
-    lda #$0000
-@room:
-    sta tmp0                    ; the most the tackles can take
     lda #$0000
     ldy k_tackle
     beq @pz
 @pl:
     clc
-    adc #150                    ; 150 a tackle
+    adc #TACKLE_PTS
     dey
     bne @pl
 @pz:
-    cmp tmp0
-    bcc @pen
-    lda tmp0
-@pen:
-    sta ev_break+4              ; penalty
-    eor #$FFFF
+    sta ev_break+4              ; penalty: the true cost
+    sta tmp0
+    lda tmp4
     sec
-    adc tmp4
+    sbc tmp0
+    bcs @pos
+    lda #$0000                  ; never below 0
+@pos:
     sta ev_score
     A8
     lda k_fin
