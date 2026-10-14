@@ -31,6 +31,10 @@ the event's physics (src/ev_cops.s):
   cops_prompt a first-timer who obeys only on-screen prompts, no
               anticipation (`pt curve -p cops_prompt -l 20,22,25`)
   cops_allsip sips over every hop, never minds the BUZZ (it goes red)
+  cops_gold   plays the undocumented trick off its tell alone: the BUZZ meter's
+              colour on the HUD (gold just under the red). `python3
+              tools/pt/policies_cops.py gold 10,12,15` counts how often it lands
+  cops_lost   Marcus's lost first-timer (20-30 frame hand): must beat mash_a
   cops_noob   an honest first-timer: +-5 frames off the chalk, freezes on one
               hurdle in four, sips without minding the BUZZ (run it through
               `pt curve -p cops_noob -l 15,24`: it should outlast the 30 s
@@ -47,6 +51,8 @@ policies.py; `hold_b_mash_a` (sip + bunny-hop forever) and `tap_a` (a short
 tap every 40 frames) are new ones.
 """
 import inspect
+import os
+import sys
 
 from policies import Policy, A, B
 
@@ -624,6 +630,86 @@ class cops_prompt(Policy):
         return m
 
 
+class cops_lost(cops_noob):
+    """Marcus's lost first-timer (run it with a 20-30 frame hand): the chalk
+    means little to it (jumps up to 8 frames off it), it freezes on a third of
+    the hurdles and runs into them, often forgets to hold A for a bin, and
+    sips now and then without minding the cop's meter. Its real but clumsy
+    attempt should still beat a masher (`mash_a`, `random_input`)."""
+    ERR = 8
+    miss = 0.33
+    careless = 0.5
+    ground_q, air_q = 6, 8
+
+    def act(self, t, tel, rng):
+        m = super().act(t, tel, rng)
+        # a tap where a bin wanted a hold, half the time
+        if m & A and t >= self.a_until - 1 and self.a_until - t > 12 and rng.random() < 0.5:
+            self.a_until = t + self.TAP
+        return m
+
+
+class cops_gold(cops_eyes):
+    """The tell's proof: a player who has noticed that the BUZZ meter turns
+    gold (and the can glows) just under the red, and plays on that alone. It
+    reads the meter from the HUD's text layer (its colour and fill), never the
+    BUZZ itself:
+    - pink: gulp on the ground (cop off screen, nothing close) to fill it up;
+    - gold: stop gulping; sip through the next hop (the cop off screen);
+    - red: no sips until it's pink again.
+    `tries` counts hops it took with B on a gold meter, `landed` the ones that
+    paid the undocumented trick (read from RAM afterwards, only to score the
+    bot: `python3 tools/pt/policies_cops.py gold`)."""
+    ERR = 2
+
+    def __init__(self):
+        super().__init__()
+        self.tries = self.landed = 0
+        self.watch = None       # c_brave when we took off on gold
+
+    def meter(self):
+        tm = self.g.core.peek(self.g.sym['txt_map'] + (1 * 32 + 16) * 2, 8)
+        pal = (tm[1] >> 2) & 7
+        fill = sum(max(0, min(4, tm[2 * i] - 73)) for i in range(4))
+        return {7: 'pink', 1: 'gold', 2: 'red'}.get(pal, 'pink'), fill
+
+    def act(self, t, tel, rng):
+        if self.g is None:
+            self.g = getattr(self, "game", None) or _game()
+        s = _State(self.g)
+        brave = _w(self.g.core.peek(self.g.sym['ev_ram'] + 340, 2), 0)
+        if self.watch is not None:
+            if s.air:
+                self.flew = True
+            elif self.flew or t > self.watch_t + 90:
+                self.landed += brave > self.watch
+                self.watch = None
+        col, fill = self.meter()
+        # what the hand will do: gulp on pink, hop-sip on gold, nothing on red
+        self.ground_buzz = 16 if col == 'pink' else -1
+        self.air_buzz = self.air_buzz_big = 16 if col == 'gold' else -1
+        self.air_q = 16 if col == 'gold' else 6
+        took_off = t >= self.a_until
+        # cops_eyes judges room from s.buzz >> 4: give it only what the meter shows
+        m = self._act_seen(t, tel, rng, fill)
+        if took_off and t < self.a_until and m & B and col == 'gold':
+            self.tries += 1
+            self.watch, self.watch_t, self.flew = brave, t, False
+        return m
+
+    def _act_seen(self, t, tel, rng, fill):
+        orig = _State.__init__
+
+        def seen(st, g, _orig=orig):
+            _orig(st, g)
+            st.buzz = fill << 4
+        _State.__init__ = seen
+        try:
+            return cops_eyes.act(self, t, tel, rng)
+        finally:
+            _State.__init__ = orig
+
+
 class cops_allsip(cops_eyes):
     """Dana's "sip on every hop": an air sip over every hurdle the cop can't
     see, never one on the ground, never minding the BUZZ. It should hit the
@@ -633,8 +719,50 @@ class cops_allsip(cops_eyes):
     air_q = 16
 
 
-POLICIES = {c.__name__: c for c in [cops_safe, cops_pro, cops_pro_rt, cops_human, cops_rookie, cops_human15, cops_eyes, cops_noob, cops_firstgo, cops_ace, cops_prompt, cops_allsip,
+POLICIES = {c.__name__: c for c in [cops_safe, cops_pro, cops_pro_rt, cops_human, cops_rookie, cops_human15, cops_eyes, cops_noob, cops_firstgo, cops_ace, cops_prompt, cops_allsip, cops_gold, cops_lost,
                                     hold_b_mash_a, tap_a]}
 DEFAULTS = {'cops': ['idle', 'hold_b', 'hold_a', 'mash_a', 'hold_b_mash_a', 'tap_a', 'cops_jump', 'cops_safe',
                      'cops_pro', 'cops_human', 'cops_human15', 'cops_eyes', 'cops_rookie', 'random_input']}
 CURVE = {'cops': 'cops_eyes'}
+
+
+if __name__ == '__main__' and sys.argv[1:2] == ['gold']:
+    # the tell's proof: cops_gold at a 10-15 frame hand lands the undocumented
+    # trick more often than not when it goes for it
+    import random as _r
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    import pt
+    lats = [int(x) for x in (sys.argv[2] if len(sys.argv) > 2 else '10,12,15').split(',')]
+    n = int(sys.argv[3]) if len(sys.argv) > 3 else 6
+    for lat in lats:
+        T = L = 0
+        sc = []
+        for seed in range(1, n + 1):
+            pol = cops_gold()
+            g = pt.Game()
+            pol.game = g
+            pt.goto_target(g, 'cops')
+            rng = _r.Random(seed)
+            g.core.poke(g.sym['rng'], bytes([rng.randrange(1, 256), rng.randrange(256)]))
+            hrng = _r.Random(seed * 7919 + 1)
+            pending, hold, want = [], 0, 0
+            for t in range(60 * 120):
+                m = pol.act(t, g.last, rng)
+                if m != want and hrng.random() >= 0.03:
+                    want = m
+                    due = t + max(0, lat + hrng.randint(-(lat // 4), lat // 4))
+                    if pending:
+                        due = max(due, pending[-1][0] + 1)
+                    pending.append((due, m))
+                while pending and pending[0][0] <= t:
+                    hold = pending.pop(0)[1]
+                g.step(1, hold)
+                if t % 15 == 0 and t > 60 and not g.scene().startswith('cops.play'):
+                    break
+            g.step(300, 0)
+            sc.append(g.state(full=False)['ev_score'])
+            T += pol.tries
+            L += pol.landed
+            g.core.close()
+        print('latency %2d: went for it %3d times, landed %3d (%.0f%%); scores %s'
+              % (lat, T, L, 100.0 * L / max(1, T), sc))

@@ -21,8 +21,8 @@
 ; holds the chain; one way off the chalk ends it (so does a spill, a
 ; scramble, a seen or a sloshed sip). Sip on the ground next to a green bin
 ; and a raccoon nicks your can. Run into a hurdle and you stop dead against
-; it (STUCK! TAP A TO SCRAMBLE): A then scrambles you over (no spill, no
-; points), else you go down. The first 30 s are a warm-up: the cop hangs back,
+; it (STUCK! TAP A TO SCRAMBLE): A then scrambles you over (no spill, the
+; hurdle's 50 but no take-off points), else you go down. The first 30 s are a warm-up: the cop hangs back,
 ; can't bust you, and the game tells you what each obstacle needs; you stand
 ; against a hurdle longer, and hopping at nothing only gets a word, not
 ; WINDED. Then he finds his legs over 4 s.
@@ -30,7 +30,10 @@
 ; red (TIPSY) the cop gains on you until he's on screen, watching, and a sip
 ; is SLOSHED: no points, chain over. So a top run picks its sips (the big
 ; hurdles, DEAD ON take-offs) and rides the BUZZ high without going red.
-; Score (ev_break): RUN (50 a hurdle hopped) + STYLE (take-offs, sips, SIP 'N'
+; From COURAGE to TIPSY the BUZZ meter turns gold and the runner's can glows
+; (pulsing): the tell that a SIP 'N' HOP now pays the bigger base, and the
+; banner's sum line starts GOLD.
+; Score (ev_break): RUN (50 a hurdle hopped or scrambled over) + STYLE (take-offs, sips, SIP 'N'
 ; HOPs). The finish tally and the card add it up the same way.
 ; A spill costs no points (bar that hop's take-off and its 50): it costs
 ; ground on the cop and your chain. Busted: the COP'S FINE takes a quarter of
@@ -173,6 +176,9 @@ c_jto    = ev_ram + 336      ; take-off points this jump (taken back if it spill
 c_jbz    = ev_ram + 338      ; the BUZZ before this jump's sip
 c_brave  = ev_ram + 340      ; LIQUID COURAGE SIP 'N' HOPs
 c_hchain = ev_ram + 342      ; the chain the HUD shows ($FF: redraw)
+c_cansv  = ev_ram + 344      ; the runner's can colours (palette 0: 12, 13, 14), 6 bytes
+c_glow   = ev_ram + 350      ; 1: the can's lit up (the BUZZ is gold)
+c_hopwarn = ev_ram + 352     ; 1: the warm-up's said HOPS AT NOTHING WIND YOU once
 EV_SEED  = ev_ram + 510
 
 NUM_ENT = 10
@@ -287,6 +293,7 @@ cops_init:
     LDPTR0 cops_sky
     jsr ev_sky
     jsr ev_clear
+    jsl cops_glow_init
     ldx #RUN_SPD
     stx c_speed
     ldx #(GAP_START*256)
@@ -752,7 +759,9 @@ take_off:
     rts
 
 ; A while you're up against a hurdle: over it you go, the hard way. No spill,
-; no points for it, no chalk, and the chain's gone.
+; and it's a hurdle got over (the run's 50, and HURDLES counts it: the screen
+; told you to, so doing it pays more than mashing), but no take-off points,
+; no chalk, and the chain's gone.
 scramble:
     ldx c_bumpe
     lda E_FLAGS,x
@@ -774,6 +783,11 @@ scramble:
     stz c_chain
     A16
     inc c_scram
+    inc c_jumps
+    lda c_hpts
+    clc
+    adc #HURDLE_PTS
+    sta c_hpts
     A8
     LDPTR1 str_scram2
     jsr set_line2
@@ -938,8 +952,12 @@ sip_done:
     bne @can
     lda #6
     sta c_can
+    ; a fresh can is only news on your feet: mid-air the SIP 'N' HOP's banner
+    ; is on its way, and the two together read as one reward
+    lda c_air
+    bne @can
     LDPTR0 str_crack
-    lda #TP_YELLOW
+    lda #TP_WHITE
     ldx #40
     jsr popup_t
 @can:
@@ -1145,12 +1163,16 @@ jump_physics:
     cmp #WASTE_MAX
     jcc @x
     stz c_waste
-    ; in the warm-up it's only a word of advice
+    ; in the warm-up the first time it's only a word of advice; after that
+    ; it does what the word said
     A16
     lda c_t
     cmp #WARM_T
     A8
     bcs @wnd
+    lda c_hopwarn
+    bne @wnd
+    inc c_hopwarn
     LDPTR1 str_hop2
     jsr set_line2
     LDPTR0 str_hop1
@@ -1332,6 +1354,9 @@ sip_n_hop:
     ; line 2, when there's a sum to show: "20 X5 CHAIN X3 DEAD ON" (the parts
     ; that multiply: no "X1 CHAIN", and nothing at all for a plain base)
     jsr buf_ptr
+    lda c_jbz
+    cmp #COURAGE
+    bcs @two
     lda c_chain
     cmp #2
     bcs @two
@@ -1342,6 +1367,13 @@ sip_n_hop:
     jmp popup_t
 @two:
     ldy #(c_buf2 - c_buf)
+    ; off a gold BUZZ the base says so: "GOLD 21 X3 CHAIN"
+    lda c_jbz
+    cmp #COURAGE
+    bcc @ng
+    LDPTR0 str_gold
+    jsr buf_str
+@ng:
     A16
     lda tmp4
     and #$00FF
@@ -2303,6 +2335,7 @@ cops_draw:
     sta bg2x
     A8
     jsr draw_runner
+    jsl cops_glow
     jsr draw_cop
     jsr draw_obstacles
     jmp draw_marks
@@ -2849,11 +2882,17 @@ cops_hud:
     lsr a
     lsr a
     sta tmp3
-    ; pink; red once you're TIPSY (a sip now is SLOSHED)
+    ; pink; gold from COURAGE (a SIP 'N' HOP now pays a bigger base); red
+    ; once you're TIPSY (a sip now is SLOSHED)
     lda c_buzz
     cmp #BUZZ_TIPSY
+    bcs @red
+    cmp #COURAGE
     lda #($20 | (TP_PINK << 2))
     bcc @bc
+    lda #($20 | (TP_YELLOW << 2))
+    bra @bc
+@red:
     lda #($20 | (TP_RED << 2))
 @bc:
     ldx #(1*32 + 16)
@@ -2973,8 +3012,8 @@ meter_n:
 
 
 ; ------------------------------------------------------------------
-; run points so far -> c_base: 50 a hurdle hopped (a scramble or a spill pays
-; none), the card's RUN 50 A HURDLE
+; run points so far -> c_base: 50 a hurdle hopped or scrambled over (a spill
+; pays none), the card's RUN 50 A HURDLE
 calc_base:
     ldx c_hpts
     stx c_base
@@ -3088,12 +3127,11 @@ str_c_dry3: .byte "DEAD ON! B MID-AIR PAYS X3", 0
 str_chalk: .byte "ON THE CHALK", 0
 str_dead:  .byte "DEAD ON THE CHALK", 0
 str_close: .byte "BIT LATE, BUD", 0
-str_scram: .byte "SCRAMBLED OVER IT!", 0
+str_scram: .byte "SCRAMBLED OVER IT! +50", 0     ; HURDLE_PTS
 str_scram2: .byte "NEXT TIME: A AT THE CHALK", 0
 str_brave: .byte "LIQUID COURAGE", 0
 str_wind:  .byte "WINDED! STOP BUNNY-HOPPING", 0
 str_c_cop: .byte "COP'S WATCHING! DON'T SIP!", 0
-str_crack: .byte "*CRACK* FRESH TALLBOY", 0
 str_seen:  .byte "OI! THE COP SAW THAT!", 0
 str_binc: .byte "RACCOON! HE NICKED YOUR CAN", 0
 str_snh:  .byte "SIP 'N' HOP", 0
@@ -3139,3 +3177,72 @@ str_oof_stuck: .byte "STUCK? TAP A TO SCRAMBLE", 0
 str_oof_bin:   .byte "GREEN BIN: HOLD A AT RED", 0
 str_hop1:      .byte "HOP AT THE CHALK, BUD!", 0
 str_hop2:      .byte "HOPS AT NOTHING WIND YOU", 0
+str_crack:     .byte "*CRACK* NEW CAN: 6 SIPS", 0
+str_gold:      .byte "GOLD ", 0
+
+; ------------------------------------------------------------------
+; the tell: from COURAGE up to TIPSY the BUZZ meter is gold (cops_hud), and
+; the runner's can glows with it, pulsing (8 frames lit, 8 not) so it reads
+; at a glance on the runner, not just up in the HUD. Runner palette 0
+; (CGRAM 128..143): 12 can stripe, 13 can, 14 can top.
+CAN_PAL = pal_buf + (128 + 12) * 2
+
+.a8
+.i16
+cops_glow_init:
+    A16
+    lda CAN_PAL
+    sta c_cansv
+    lda CAN_PAL+2
+    sta c_cansv+2
+    lda CAN_PAL+4
+    sta c_cansv+4
+    A8
+    stz c_glow
+    rtl
+
+.a8
+.i16
+cops_glow:
+    lda c_state
+    cmp #ST_ESCAPE
+    bcs @off
+    lda c_buzz
+    cmp #COURAGE
+    bcc @off
+    cmp #BUZZ_TIPSY
+    bcs @off
+    lda frame
+    and #$08
+    beq @off
+    lda #$01
+    bra @set
+@off:
+    lda #$00
+@set:
+    cmp c_glow
+    beq @x
+    sta c_glow
+    lda c_glow                  ; (Z: lit or not; A16 leaves Z alone)
+    A16
+    beq @dim
+    lda #$03BF                  ; stripe: gold
+    sta CAN_PAL
+    lda #$7FFF                  ; can: white, foaming over (reads on any jersey)
+    sta CAN_PAL+2
+    lda #$7FFF                  ; top: white foam
+    sta CAN_PAL+4
+    bra @dirty
+@dim:
+    lda c_cansv
+    sta CAN_PAL
+    lda c_cansv+2
+    sta CAN_PAL+2
+    lda c_cansv+4
+    sta CAN_PAL+4
+@dirty:
+    A8
+    lda #$01
+    sta pal_dirty
+@x:
+    rtl
