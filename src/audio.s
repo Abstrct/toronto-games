@@ -311,6 +311,17 @@ music_play:
     pla
     sta mus_id
     jsr echo_on
+    ; per-song master volume: evens out loudness and leaves headroom for effects
+    lda mus_id
+    A16
+    and #$00FF
+    tax
+    A8
+    lda f:song_mvol,x
+    ldx #$0C                ; MVOL L
+    jsr dsp_write
+    ldx #$1C                ; MVOL R
+    jsr dsp_write
     lda mus_id
     A16
     and #$00FF
@@ -778,3 +789,18 @@ echo_on:
 @x:
     rts
 
+; master volume per song (SONG_* order). $7F is full scale; most songs sit a
+; little under it so stacked sound effects don't clip, the sparse regatta song
+; gets the full level, and the podium reprise (fireworks on top) the least.
+song_mvol:
+    .byte $6C   ; 0 title       KC Incidental
+    .byte $70   ; 1 menu        Bobcaygeese
+    .byte $6C   ; 2 bike        Gold Guns Gulls
+    .byte $70   ; 3 standings   Ahead by a Centimetre
+    .byte $64   ; 4 bay         Whelp, I'm Alive
+    .byte $64   ; 5 tallboy     Hay, Officer
+    .byte $7F   ; 6 regatta     Brother Downwind
+    .byte $70   ; 7 off-leash   If I Had a Million Collars
+    .byte $5C   ; 8 podium      Podium Reprise
+    .byte $6C   ; 9 parking     Green P Shuffle
+    .byte $64   ; 10 subway     Please Stand Clear
