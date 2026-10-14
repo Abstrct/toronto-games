@@ -17,6 +17,7 @@ REC_ROW = 16 * NUM_EVENTS        ; records: rank-major, 5 rows of (5 events x 16
 .segment "BSS"
 c_rank:       .res 1            ; score_card: place on the Toronto board, $FF = none
 c_brk:        .res 1            ; score_card: 1 = ev_break adds up, show the sum
+c_si:         .res 1            ; score_card: ev_stat index of the line being drawn
 c_margin:     .res 2            ; score_card: lead over the old record
 c_order:      .res MAX_PLAYERS  ; final_sort: players by medal points, golds, total
 c_place:      .res MAX_PLAYERS  ; final_sort: 0-based place, shared by equal keys
@@ -378,15 +379,30 @@ score_card:
     lda cur_player
     ldx #(5*32 + 5)
     jsl print_player_name
-    ; up to four stat lines (a label of 0 = unused): rows 7, 9, 11, 13, or
-    ; 7..10 when the arithmetic needs the room
+    ; stat lines at a 16 px pitch (a label of 0 = unused): all four on rows
+    ; 7..13, or, when the arithmetic needs the room, the event's two picks
+    ; (card_stat_pick) on rows 7 and 9
     stz tmp7
 @stat:
+    lda c_brk
+    beq @all
+    lda event_idx
+    asl a
+    clc
+    adc tmp7
+    TAXB
+    A8
+    lda f:card_stat_pick,x
+    bra @si
+@all:
+    lda tmp7
+@si:
+    sta c_si
     lda event_idx
     asl a
     asl a
     clc
-    adc tmp7
+    adc c_si
     A16
     and #$00FF
     asl a
@@ -401,13 +417,8 @@ score_card:
     asl a
     asl a
     asl a                       ; row * 32
+    asl a                       ; every other row
     sta tmp0
-    A8
-    lda c_brk
-    A16
-    bne @pitch1
-    asl tmp0                    ; every other row
-@pitch1:
     lda tmp0
     clc
     adc #(7*32 + 5)
@@ -424,7 +435,7 @@ score_card:
     clc
     adc #16
     tax
-    lda tmp7
+    lda c_si
     and #$00FF
     asl a
     tay
@@ -437,22 +448,35 @@ score_card:
 @nostat:
     A8
     inc tmp7
+    lda c_brk
+    beq @four
+    lda tmp7
+    cmp #2
+    jne @stat
+    bra @stats_done
+@four:
     lda tmp7
     cmp #4
-    bne @stat
+    jne @stat
+@stats_done:
     lda c_brk
     beq @plain
     jsr break_lines
-    PRINT 7, 15, TP_YELLOW, str_score
+    PRINT 7, BRK_ROW + 3, TP_YELLOW, str_score
+    A16
+    lda ev_score
+    sta tmp1
+    A8
+    ldx #((BRK_ROW + 3)*32 + 21)
     bra @total
 @plain:
     PRINT 5, 15, TP_WHITE, str_score
-@total:
     A16
     lda ev_score
     sta tmp1
     A8
     ldx #(15*32 + 21)
+@total:
     ldy #5
     lda #($20 | (TP_YELLOW << 2))
     jsl txt_num
@@ -550,6 +574,18 @@ score_card:
     jsl fade_out
     rtl
 
+BRK_ROW = 11                    ; first row of the BASE / + BONUS / - PENALTY / = SCORE lines
+
+; the two stat lines shown next to the arithmetic: ev_stat indices per event
+card_stat_pick:
+    .byte 1, 2                  ; bike: TTC TOKENS, WIPEOUTS
+    .byte 0, 1                  ; bay: TIME LEFT, PASSED
+    .byte 1, 2                  ; park: DOGS DODGED, TACKLES
+    .byte 0, 2                  ; cops: SIP 'N' HOPS, HURDLES
+    .byte 0, 1                  ; sail: TIME LEFT, BUOYS
+    .byte 0, 2                  ; parking: (set with the parking card)
+    .byte 1, 0                  ; subway: STATIONS, GERMS
+
 ; carry set = ev_break holds a sum (not all zero) that adds up to ev_score
 break_ok:
     A16
@@ -592,7 +628,7 @@ break_lines:
     lda tmp7
     and #$00FF
     clc
-    adc #12
+    adc #BRK_ROW
     asl a
     asl a
     asl a
@@ -639,7 +675,7 @@ break_lines:
     A16
     txa
     clc
-    adc #13
+    adc #(BRK_ROW + 1)
     asl a
     asl a
     asl a
@@ -2526,24 +2562,24 @@ ev_blurbs:   .addr eb0, eb1, eb2, eb3, eb4, eb5, eb6
 ev_controls: .addr ec0, ec1, ec2, ec3, ec4, ec5, ec6
 ev_fails:    .addr ef0, ef1, ef2, ef3, ef4, ef5, ef6
 eb0: .byte "DELIVER THE PACKAGE TO", $0A, "SPADINA. PREFERABLY ALIVE.", 0
-eb1: .byte "MAKE THE 5:42 GO TRAIN.", $0A, "PERFECTS BUILD POWER WALK", 0
-eb2: .byte "QUEEN GATE TO DUNDAS GATE.", $0A, "DODGE A DOG, THEN PAT HIM!", 0
+eb1: .byte "MAKE THE 5:42 GO TRAIN.", $0A, "RED ! AHEAD? CHANGE LANES.", 0
+eb2: .byte "QUEEN GATE TO DUNDAS GATE.", $0A, "DODGE DOGS, THEN PAT THEM!", 0
 eb3: .byte "THE BIKE COP SAW THAT", $0A, "TALLBOY. RUN TO SPADINA!", 0
-eb4: .byte "REACH TO 1, BEAT UP TO 2,", $0A, "RUN TO 3, THEN THE LINE.", 0
+eb4: .byte "ROUND BUOYS 1, 2 AND 3,", $0A, "THEN CROSS THE LINE.", 0
 eb5: .byte "THREE SPOTS ON BRUNSWICK.", $0A, "EACH ONE A LITTLE TIGHTER.", 0
-eb6: .byte "RIDE TO UNION HANDS-FREE.", $0A, "EVERY GRAB = MORE GERMS.", 0
-ec0: .byte "D-PAD STEER A GO B BRAKE", $0A, "STEER HARD OVER RAILS: HOP", $0A, "TUCK IN BEHIND THE 501!", 0
-ec1: .byte "L,R,L,R: ONE STEP PER TICK", $0A, "UP/DN LANE  A: EXCUSE ME", $0A, "Y ON GOLD TICK: PRESTO!", 0
-ec2: .byte "B ON ", $22, "!", $22, ": SIDESTEP AWAY", $0A, "HOLD LEFT/RIGHT TO CHOOSE", $0A, "A  TENNIS BALL: FETCH!", 0
-ec3: .byte "TAP A HOP, HOLD A BIG JUMP", $0A, "HOLD B SIP WHEN COP'S GONE", $0A, "SIP MID-JUMP = SIP 'N' HOP", 0
-ec4: .byte "LEFT RIGHT  STEER", $0A, "A  HIKE OUT IN GUSTS", $0A, "ROUND CLOSE, SURF FERRY!", 0
+eb6: .byte "RIDE TO UNION HANDS-FREE.", $0A, "GRAB A POLE, GET GERMS.", 0
+ec0: .byte "D-PAD STEER    A PEDAL", $0A, "B HOP          DOWN BRAKE", $0A, "HOP RAILS, DRAFT THE 501!", 0
+ec1: .byte "LEFT, RIGHT AS DOTS LAND", $0A, "UP/DOWN LANE  A EXCUSE ME", $0A, "Y ON A GOLD DOT: PRESTO!", 0
+ec2: .byte "D-PAD WALK   A THROW BALL", $0A, "B WHEN ! SHOWS: SIDESTEP", $0A, "B AS HE LUNGES: BONUS!", 0
+ec3: .byte "JUMP AT THE CHALK MARKS", $0A, "TAP A HOP  HOLD A BIG JUMP", $0A, "B MID-AIR = SIP 'N' HOP", 0
+ec4: .byte "LEFT/RIGHT TAP: TURN", $0A, "INTO THE WIND? ZIG-ZAG!", $0A, "A HIKE OUT  SURF THE WAKE", 0
 ec5: .byte "A  STOP IN THE GREEN", $0A, "A  CRANK THE WHEEL", $0A, "A  STRAIGHTEN OUT", 0
-ec6: .byte "D-PAD  LEAN TO BALANCE", $0A, "KEEP THE DOT IN THE RING", $0A, "FEWEST GERMS WINS", 0
+ec6: .byte "D-PAD: KEEP DOT IN RING", $0A, "LEAN THE WAY ARROWS POINT", $0A, "CLEAN LEGS = SURF BONUS", 0
 ef0: .byte "WIPED OUT!", 0
 ef1: .byte "MISSED THE TRAIN!", 0
 ef2: .byte "TACKLED!", 0
 ef3: .byte "BUSTED!", 0
-ef4: .byte "OUT OF TIME!", 0
+ef4: .byte "ADRIFT!", 0
 ef5: .byte "TOWED!", 0
 ef6: .byte "PATIENT ZERO!", 0
 ; ev_fail 4: an event's second way to fail (the bike's idle kick)
@@ -2553,14 +2589,16 @@ ef2_0: .byte "YOU'RE FIRED!", 0
 ; result card arithmetic (ev_break): base, bonus, penalty labels per event,
 ; 12 characters at most. BASE + BONUS - PENALTY = SCORE.
 card_break_labels:
-    .addr bl_dist,  bl_style, bl_wipe       ; bike
-    .addr bl_arrive, bl_style, bl_spill     ; bay
-    .addr bl_cross, bl_pats,  bl_tackle     ; park
+    .addr bl_ride,  bl_tips,  bl_wipe       ; bike
+    .addr bl_walk,  bl_style, bl_spill      ; bay
+    .addr bl_cross, bl_style, bl_tackle     ; park
     .addr bl_run,   bl_style, bl_fine       ; cops
-    .addr bl_race,  bl_style, bl_bump       ; sail
+    .addr bl_course, bl_style, bl_bump      ; sail
     .addr bl_parks, bl_style, bl_dents      ; parking
     .addr bl_ride,  bl_style, bl_germs      ; subway
-bl_dist:   .byte "DISTANCE", 0
+bl_tips:   .byte "TIPS", 0
+bl_walk:   .byte "WALK", 0
+bl_course: .byte "COURSE", 0
 bl_arrive: .byte "ARRIVAL", 0
 bl_cross:  .byte "CROSSING", 0
 bl_run:    .byte "RUN", 0
@@ -2572,27 +2610,29 @@ bl_pats:   .byte "PATS", 0
 bl_wipe:   .byte "WIPEOUTS", 0
 bl_spill:  .byte "SPILLS", 0
 bl_tackle: .byte "TACKLES", 0
-bl_fine:   .byte "FINE", 0
+bl_fine:   .byte "SPILLS+FINE", 0
 bl_bump:   .byte "BUMPS", 0
 bl_dents:  .byte "DENTS", 0
 bl_germs:  .byte "GERMS", 0
 
 ; stat labels: 4 per event (last is padding), 0 = unused
 card_stat_labels:
-    .addr sl_dist, sl_tokens, sl_wipe, sl_style
+    .addr sl_metres, sl_tokens, sl_wipe, sl_style
     .addr sl_time, sl_pass, sl_spill, sl_style
     .addr sl_time, sl_dodge, sl_tackle, sl_pat
-    .addr sl_lucky, sl_dist, sl_hurdles, sl_fine
+    .addr sl_sipnhop, sl_lucky, sl_hurdles, sl_spill
     .addr sl_time, sl_buoys, sl_bump, sl_style
     .addr sl_parked, sl_curb, sl_dents, 0
-    .addr sl_germs, sl_stations, sl_streak, 0
+    .addr sl_germs, sl_stations, sl_chain, sl_style
 sl_parked:   .byte "CLEAN PARKS", 0
 sl_curb:     .byte "BEST GAP PX", 0
 sl_dents:    .byte "DENTS", 0
 sl_germs:    .byte "GERMS", 0
 sl_stations: .byte "STATIONS", 0
 sl_streak:   .byte "BEST STREAK", 0
-sl_dist:   .byte "DISTANCE", 0
+sl_metres: .byte "METRES", 0
+sl_sipnhop: .byte "SIP 'N' HOPS", 0
+sl_chain:  .byte "SURF CHAIN", 0
 sl_tokens: .byte "TTC TOKENS", 0
 sl_style:  .byte "STYLE", 0
 sl_pat:    .byte "DODGE 'N' PAT", 0

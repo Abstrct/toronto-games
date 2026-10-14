@@ -772,7 +772,7 @@ skins:
 REC_BYTES = 16 * NUM_EVENTS * 5
 ; bump the last character whenever default_records changes: carts with the
 ; old signature are re-seeded (and lose their saved board) on the next boot
-.define REC_SIG "TG05"
+.define REC_SIG "TG06"
 records_load:
     ldx #$0000
 @sig:
@@ -866,35 +866,35 @@ rec_sig: .byte REC_SIG
 
 default_records:
     ; EV_BIKE  Bike Courier
-    REC 3800, "COURIER"
-    REC 3200, "FIXIE"
+    REC 4000, "COURIER"
+    REC 3300, "FIXIE"
     REC 2600, "TTC GUS"
-    REC 2000, "PEDICAB"
-    REC 1500, "SALMON"
+    REC 1900, "PEDICAB"
+    REC 1300, "SALMON"
     ; EV_BAY   Bay St Power Walk
-    REC 3600, "SUITGUY"
-    REC 3000, "BAYBANKR"
-    REC 2400, "MEL"
-    REC 1900, "INTERN"
+    REC 3000, "SUITGUY"
+    REC 2600, "BAYBANKR"
+    REC 2200, "MEL"
+    REC 1800, "INTERN"
     REC 1400, "DECAF"
     ; EV_PARK  Off-Leash Alert
-    REC 3400, "DOODLE"
-    REC 2900, "GOLDIE"
-    REC 2400, "FRISBEE"
-    REC 1900, "HIPSTER"
-    REC 1400, "SQUIRREL"
+    REC 3000, "DOODLE"
+    REC 2400, "GOLDIE"
+    REC 1800, "FRISBEE"
+    REC 1200, "HIPSTER"
+    REC 600, "SQUIRREL"
     ; EV_COPS  Tallboy Trot
     REC 3600, "RACCOON"
     REC 3000, "BIKE COP"
     REC 2400, "BANDIT"
-    REC 1900, "BUSKER"
-    REC 1400, "NANA"
+    REC 1800, "BUSKER"
+    REC 1200, "NANA"
     ; EV_SAIL  Harbour Regatta
-    REC 3400, "GOOSE"
-    REC 2900, "SKIPPER"
-    REC 2400, "FERRYMAN"
-    REC 1900, "KAYAKER"
-    REC 1400, "SEAGULL"
+    REC 3300, "GOOSE"
+    REC 2800, "SKIPPER"
+    REC 2300, "FERRYMAN"
+    REC 1800, "KAYAKER"
+    REC 1300, "SEAGULL"
     ; EV_PARKING  Parallel Parking
     REC 3400, "GREEN P"
     REC 2900, "VALET"
@@ -902,11 +902,11 @@ default_records:
     REC 1900, "LEARNER"
     REC 1400, "TOWTRUCK"
     ; EV_SUBWAY   TTC Surfing
-    REC 3400, "HANDRAIL"
+    REC 3300, "HANDRAIL"
     REC 2900, "COMMUTER"
-    REC 2400, "TOURIST"
-    REC 1900, "STROLLER"
-    REC 1400, "LINE 1"
+    REC 2500, "TOURIST"
+    REC 2000, "STROLLER"
+    REC 1500, "LINE 1"
 default_records_end:
 .assert default_records_end - default_records = REC_BYTES, error, "default_records: five REC lines per event"
 ; ==================================================================
