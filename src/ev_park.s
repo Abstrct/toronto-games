@@ -3,10 +3,12 @@
 ; live along the path, and each one comes for you once (one at a time, only
 ; from on screen): a white "!" while he barks, then he runs in, CROUCHES (a
 ; red "!", shaking) and LUNGES. B on the white "!" gets you set and you step
-; aside as he lunges (DODGE); B by hand while he crouches = NICE TIMING; B
-; late in the lunge = CLOSE SHAVE (x2, x3, x4 in a row). Or throw a tennis
-; ball (A). A dodged dog skids, sits and waits: walk up and pat him for
-; DODGE 'N' PAT (25 x the chain, up to x5; a tackle breaks it).
+; aside as he lunges (DODGE); B by hand while he crouches or as he springs =
+; NICE TIMING; B late in the lunge = CLOSE SHAVE (double NICE: the bold play
+; pays, x2 and x3 in a row pay more). Or throw a tennis ball (A). A dodged
+; dog skids, sits and waits: walk up and pat him for DODGE 'N' PAT (10 x the
+; chain, up to x5; a tackle breaks it). Callouts sit in a rounded panel at
+; the top of the lawn (park_pend, bank $80), never over the dogs.
 ; Not on the card: a CLOSE SHAVE stepping INTO his side (d-pad toward him
 ; as you press B) is a MATADOR, +MATADOR_PTS on top.
 ; Tree canopies are on BG2 (high priority) so dogs and you go behind them.
@@ -23,25 +25,27 @@ FINISH_Y   = 40
 MAX_Y      = START_Y + 2     ; feet and shadow stay clear of the bottom HUD bar
 TIME_LIMIT = 120*60           ; a careful walk fits: the clock isn't the hard part
 CROSS_FIN  = 500             ; CROSSING for reaching Dundas ...
-CROSS_SEC  = 25              ; ... + this a second left on the clock
+CROSS_SEC  = 25              ; ... + this a second left on the clock (card: 500+25/S)
 CROSS_TENTH = 50             ; short of Dundas: this a whole tenth of the walk
 HURRY_T    = 20*60           ; TIME goes red, one HURRY! line
 DOWN_T     = 120             ; frames on your back after a tackle
-WALK       = $00E0
+WALK       = $0120           ; 1.125 px a frame: the walk is ~37 s of a turn
 SPOT_R     = 80              ; a dog this close (manhattan) spots you
-SPOT_TOP   = 40              ; ... but only from where you can see it
+SPOT_TOP   = 80              ; ... but only from where you can see it (his "!", 31 px over his feet, clear of the callout panel)
 SPOT_BOT   = 192             ; (screen y of its feet: never from off-screen)
 DUE_R      = 100             ; ... and any dog you've come this close to level with: his turn
 CATCH_Y    = 160             ; a due dog below this screen y runs up alongside you first
 DASH       = $0300
-ALERT_T    = 36              ; "!" tell before a dog charges (+0..19)
+ALERT_T    = 32              ; "!" tell before a dog charges (+0..19): time for a 25 f human to press B
 DODGE_R    = 40              ; he crouches this close (red "!"): B by hand while he does = NICE TIMING
-SHAVE_R    = 22              ; ... and lunging this close = CLOSE SHAVE
+CROUCH_GAP = 30              ; walk at a crouched dog and he scoots back to keep this gap (the red "!" keeps its time)
+SHAVE_R    = 28              ; ... and lunging this close = CLOSE SHAVE (18 px to the tackle: ~7 frames)
 LUNGE_V    = $0280           ; lunge speed (px/frame 8.8, along his line to you): 22 -> 10 px is 5 frames
-LUNGE_T    = 40              ; a lunge that hasn't landed by now gives up
+LUNGE_T    = 64              ; a lunge that hasn't landed by now gives up (walking on never outruns one)
 HAND_BONUS = 100             ; on top of DODGE_PTS: a dodge timed by hand (B with him in range)
-SHAVE_BONUS = 50             ; ... and a CLOSE SHAVE: HAND_BONUS + this x (the run + 1) (set early = no bonus)
-SHAVE_RUN  = 4               ; CLOSE SHAVEs in a row pay x2, x3, x4 (any other dodge or a tackle resets)
+SHAVE_PTS  = 300             ; on top of DODGE_PTS: a CLOSE SHAVE (400 = 2x NICE TIMING: worth a tackle's risk)
+SHAVE_STEP = 50              ; ... and this more for each one in a row before it (x2 450, x3 500)
+SHAVE_RUN  = 3               ; CLOSE SHAVEs in a row pay x2, x3 (any other dodge or a tackle resets)
 MATADOR_PTS = 150            ; a CLOSE SHAVE stepping into his side: OLE! (not on the card)
 TACKLE_PTS = 150             ; what a tackle costs on the card (TACKLES X150), every run
 BACK_R     = 40              ; walk this close to a barking dog and he backs off
@@ -58,7 +62,7 @@ TRIP_T     = 90              ; frames on the grass after a trip (he has this lon
 IDLE_T     = 10*60           ; no ground gained for this long: a nap (ev_fail 4)
 DOG_CD     = 255             ; frames a dodged / fetching / tackling dog leaves you be
 SLIDE_R    = 160             ; how far to look for a way round an obstacle (the courts)
-CALM_DODGE = 50              ; after a dodge nobody new starts on you for this long
+CALM_DODGE = 75              ; after a dodge nobody new starts on you for this long (his result line is read, he sits, before the next "!")
 CALM_END   = 40              ; ... after any other charge ends
 PAST_T     = 22              ; a dodged dog skids on this long ...
 SIT_T      = 160             ; ... then sits, tail going, waiting for a pat
@@ -125,7 +129,7 @@ k_hurt   = ev_ram + 582      ; hearts lost (3 = out); k_tackle counts every tack
 k_streak = ev_ram + 584      ; dogs beaten since the last tackle / heart back
 k_coach  = ev_ram + 586      ; 1 once the first dog's "press B" coaching has shown
 k_hurry  = ev_ram + 588      ; 1 = HURRY! line due (shown when no dog is on you), 2 = shown
-k_srun   = ev_ram + 590      ; CLOSE SHAVEs in a row (1..SHAVE_RUN): x1, x2, x3, x4
+k_srun   = ev_ram + 590      ; CLOSE SHAVEs in a row (1..SHAVE_RUN): x1, x2, x3
 k_best   = ev_ram + 592      ; furthest north reached (y)
 k_still  = ev_ram + 594      ; frames since k_best last moved: IDLE_T = a nap, the walk's over
 k_wrun   = ev_ram + 596      ; off balance (0..WHIFF_MAX): whiffs stumble STUMBLE x this
@@ -137,6 +141,11 @@ k_trip   = ev_ram + 606      ; 1 = down from a trip: a lunging dog can still pil
 k_coach2 = ev_ram + 608      ; 1 once the "he's crouching: B now" line has shown
 k_matad  = ev_ram + 610      ; MATADORs
 k_heal   = ev_ram + 612      ; 1 = a heart came back: say so once the popup's free
+k_pend   = ev_ram + 614      ; callout panel to draw: 1 clear, 2 box, 3 text, 4 clear only (one a frame)
+k_ppal   = ev_ram + 616      ; ... its text palette
+k_pptr   = ev_ram + 618      ; ... its line (3 bytes)
+k_ordlo  = ev_ram + 622      ; 9 bytes: draw order's world y, low bytes (parallel to k_order)
+k_ordhi  = ev_ram + 631      ; 9 bytes: ... high bytes
 k_cbuf   = ev_ram + 640      ; 64 bytes: one BG2 canopy row, unpacked for DMA
 EV_SEED  = ev_ram + 510
 
@@ -222,6 +231,7 @@ ev_park:
     jsr stream_rows
     jsr park_draw
     jsr park_hud
+    jsl park_pend               ; the callout panel, a step a frame
     lda k_state
     cmp #ST_DONE
     bne @loop
@@ -649,7 +659,8 @@ park_update:
     bne @p
     A8
     stz k_coachup
-    jsl event_popup_clear
+    lda #4                      ; (the panel comes down in park_pend)
+    sta k_pend
     A16
 @p:
     lda k_state
@@ -731,22 +742,23 @@ park_update:
 @xh:
     rts
 
-str_made: .byte " MADE IT TO DUNDAS! ", 0
-str_heal: .byte " HEART BACK! 3 DOGS IN A ROW ", 0
-str_nap:  .byte " ZZZ... A NAP ON THE GRASS ", 0
-str_hurry: .byte " HURRY! 20 SECONDS LEFT! ", 0
+str_made: .byte "MADE IT TO DUNDAS!", 0
+str_heal: .byte "3 IN A ROW: HEART BACK!", 0
+str_nap:  .byte "ZZZ... A NAP ON THE GRASS", 0
+str_hurry: .byte "HURRY! 20 SECONDS LEFT!", 0
 
-; ptr0 = message, A = text palette: banner on row 9 with a solid backing
-; so it reads over sprites and busy grass
+; ptr0 = message, A = text palette: a callout in the rounded panel at the
+; top of the lawn, clear of the dogs' approach. Queued: park_pend draws it
+; over the next few frames (a frame with eight dogs can't take it all)
 popup:
     stz k_coachup
-    pha
-    jsl event_popup_clear
-    lda #TXT_WIN
-    sta txt_bg
-    pla
-    jsl event_popup
-    stz txt_bg
+    sta k_ppal
+    ldx ptr0
+    stx k_pptr
+    lda ptr0+2
+    sta k_pptr+2
+    lda #1
+    sta k_pend
     rts
 
 walk_input:
@@ -1193,10 +1205,10 @@ walk_input:
     rts
 .a8
 
-str_oops: .byte " OOPS! NO DOG THERE ", 0
-str_oops2: .byte " OOPS! B WHEN ! SHOWS ", 0
-str_oops3: .byte " WOBBLY! ONE MORE AND YOU FALL ", 0
-str_trip:  .byte " TRIPPED! HERE COMES A DOG... ", 0
+str_oops: .byte "OOPS! NO DOG THERE", 0
+str_oops2: .byte "OOPS! B WHEN ! SHOWS", 0
+str_oops3: .byte "WOBBLY! ONE MORE: YOU FALL", 0
+str_trip:  .byte "TRIPPED! HERE HE COMES...", 0
 whiff_stum: .word STUMBLE, STUMBLE*2, STUMBLE*3
 .assert WHIFF_MAX = 3, error, "whiff_stum has a stumble per level"
 
@@ -1277,8 +1289,8 @@ trip:
     stx k_popup
 @x:
     rts
-str_coach_b: .byte " DOG! PRESS B TO GET SET! ", 0
-str_set:     .byte " SET! YOU STEP AS HE LUNGES ", 0
+str_coach_b: .byte "DOG! PRESS B TO GET SET!", 0
+str_set:     .byte "SET! YOU STEP AS HE LUNGES", 0
 
 ; B with a dog on its way ("!" or charging, not yet in range): get set, and
 ; the step goes off by itself as he lunges (a plain DODGE, never a shave)
@@ -1383,27 +1395,15 @@ armed_fire:
     SFX SFX_JUMP
     jmp dodge_check
 
-; X = a live dog -> carry set if B now dodges him: crouched (the red "!",
-; however far: he's coiled for you), or lunging within DODGE_R.
-; tmp1-tmp3 = dog_dist (dodged reads them)
+; X = a live dog -> carry set if B now dodges him: crouched (the red "!")
+; or lunging, however far: he's coiled for you or in the air at you. (A
+; lunge from past DODGE_R, you having walked on while he crouched, used to
+; fall through to the armed step: a 2-frame DODGE +100 hole as the red "!"
+; went out.) tmp1-tmp3 = dog_dist (dodged reads them)
 in_reach:
     jsr dog_dist
     lda D_STATE,x
-    cmp #DS_CROUCH
-    beq @y
-    cmp #DS_LUNGE
-    bne @n
-    A16
-    lda tmp1
-    cmp #DODGE_R
-    A8
-    bcs @n
-@y:
-    sec
-    rts
-@n:
-    clc
-    rts
+    jmp in_window
 
 ; carry set if a lunging dog is within DODGE_R (clobbers tmp1-tmp3)
 near_lunger:
@@ -1607,8 +1607,8 @@ throw_ball:
 
 throw_vx: .word 0, 0, $10000 - $0280, $0280
 throw_vy: .word $0280, $10000 - $0280, 0, 0
-str_fetch: .byte " FETCH! ", 0
-str_fetched: .byte " FETCH! +100 ", 0
+str_fetch: .byte "FETCH!", 0
+str_fetched: .byte "FETCH! +100", 0
 
 ball_update:
     lda b_state
@@ -1783,7 +1783,7 @@ squirrel_update:
     stz sq_state
     rts
 
-str_squirrel: .byte " THE WHITE SQUIRREL! ", 0
+str_squirrel: .byte "THE WHITE SQUIRREL!", 0
 
 ; bring dogs in as the camera reaches them
 spawn_dogs:
@@ -1849,9 +1849,10 @@ spawn_dogs:
     bne @t
     rts
 
-; per-kind: max speed, acceleration
-kind_max: .word $01A0, $0180, $0200, $01C0
-kind_acc: .word $0018, $0012, $0020, $0028
+; per-kind: max speed, acceleration (a quick run in: the wait for him is
+; part of every dog, and the turn was long)
+kind_max: .word $0200, $01E0, $0280, $0230
+kind_acc: .word $001E, $0018, $0028, $0032
 
 dogs_update:
     ; how many dogs are on you right now (only one at a time may be)
@@ -1914,9 +1915,10 @@ dog_think:
     ; the white squirrel beats everything a dog was doing on your account
     lda sq_state
     beq @nosq
-    lda D_STATE,x
-    cmp #DS_BALL
-    bcs @nosq                   ; wander / alert / charge only
+    lda D_STATE,x               ; the dog after you ("!" or running in) only:
+    beq @nosq                   ; one sniffing about hasn't had his go yet, and
+    cmp #DS_BALL                ; a squirrel shouldn't cost you him
+    bcs @nosq
     jsr squirrel_near
     bcc @nosq
     lda #DS_SQUIRREL
@@ -2324,8 +2326,8 @@ give_up:
 
 ; crouch frames before the lunge, per kind (doodle, lab, husky, corgi): a
 ; dog's own rhythm, to learn (+0..7 each time: read the leap to shave)
-crouch_t: .byte 22, 18, 16, 26
-str_coach_r: .byte " RED ! = B NOW FOR +200 ", 0
+crouch_t: .byte 26, 23, 22, 30   ; + the lunge: >= 32 frames from the red "!" to a tackle
+str_coach_r: .byte "RED ! = B NOW FOR +200", 0
 
 ; crouched in range, shaking: the B window is open (NICE TIMING)
 think_crouch:
@@ -2341,6 +2343,15 @@ think_crouch:
     A16
     stz D_VX,x
     stz D_VY,x
+    lda tmp1                    ; you walk up at him: he scoots back north,
+    cmp #CROUCH_GAP             ; coiled, so walking on never cuts his red "!"
+    bcs @hold                   ; short (past him, he just turns: the lunge
+    lda tmp3                    ; runs you down)
+    bmi @hold
+    beq @hold
+    lda #($10000 - WALK)
+    sta D_VY,x
+@hold:
     A8
     dec D_TIMER,x
     bne @x
@@ -2591,7 +2602,7 @@ dodged:
     sty k_calm
     SFX SFX_COIN
     ; got set early (armed): a plain DODGE. Timed by hand with him in range:
-    ; +HAND_BONUS, and right on you: CLOSE SHAVE, +HAND_BONUS + SHAVE_BONUS x (the run + 1)
+    ; +HAND_BONUS, and right on you: CLOSE SHAVE, +SHAVE_PTS + SHAVE_STEP x the run before it
     lda k_shok
     jeq @plain
     A16
@@ -2612,7 +2623,7 @@ dodged:
     .a16
     inc k_shaves
     A8
-    lda k_srun                  ; shaves in a row: x2, x3, x4
+    lda k_srun                  ; shaves in a row: x2, x3
     cmp #SHAVE_RUN
     bcs @sr
     inc k_srun
@@ -2700,20 +2711,19 @@ beat_dog:
     rts
 
 ; (each line is the dog's whole worth: DODGE_PTS + the timing bonus)
-str_dodge: .byte " DODGE! +100 ", 0
-str_timed: .byte " NICE TIMING! +200 ", 0
-shave_msgs: .addr str_shave, str_shave2, str_shave3, str_shave4
-shave_pts:  .word HAND_BONUS+SHAVE_BONUS*2, HAND_BONUS+SHAVE_BONUS*3, HAND_BONUS+SHAVE_BONUS*4, HAND_BONUS+SHAVE_BONUS*5
-matador_msgs: .addr str_mat, str_mat2, str_mat3, str_mat4
-str_shave:  .byte " CLOSE SHAVE! +300 ", 0
-str_shave2: .byte " CLOSE SHAVE X2! +350 ", 0
-str_shave3: .byte " CLOSE SHAVE X3! +400 ", 0
-str_shave4: .byte " CLOSE SHAVE X4!! +450 ", 0
-str_mat:    .byte " OLE! MATADOR! +450 ", 0
-str_mat2:   .byte " OLE! MATADOR X2! +500 ", 0
-str_mat3:   .byte " OLE! MATADOR X3! +550 ", 0
-str_mat4:   .byte " OLE! MATADOR X4!! +600 ", 0
-.assert DODGE_PTS = 100 && HAND_BONUS = 100 && SHAVE_BONUS = 50 && MATADOR_PTS = 150, error, "dodge popups print these"
+str_dodge: .byte "DODGE! +100", 0
+str_timed: .byte "NICE TIMING! +200", 0
+shave_msgs: .addr str_shave, str_shave2, str_shave3
+shave_pts:  .word SHAVE_PTS, SHAVE_PTS+SHAVE_STEP, SHAVE_PTS+SHAVE_STEP*2
+matador_msgs: .addr str_mat, str_mat2, str_mat3
+str_shave:  .byte "CLOSE SHAVE! +400", 0
+str_shave2: .byte "CLOSE SHAVE X2! +450", 0
+str_shave3: .byte "CLOSE SHAVE X3!! +500", 0
+str_mat:    .byte "OLE! MATADOR! +550", 0
+str_mat2:   .byte "OLE! MATADOR X2! +600", 0
+str_mat3:   .byte "OLE! MATADOR X3!! +650", 0
+.assert DODGE_PTS = 100 && HAND_BONUS = 100 && SHAVE_PTS = 300 && SHAVE_STEP = 50 && MATADOR_PTS = 150, error, "dodge popups print these"
+.assert SHAVE_RUN = 3, error, "shave_msgs / shave_pts / matador_msgs: one per run step"
 
 ; skidding past: slow down, then sit
 think_past:
@@ -2837,11 +2847,11 @@ pat_dog:
     rts
 
 pat_msgs: .addr pm1, pm2, pm3, pm4, pm5
-pm1: .byte " GOOD DOG! DODGE 'N' PAT +10 ", 0
-pm2: .byte " DODGE 'N' PAT X2! +20 ", 0
-pm3: .byte " DODGE 'N' PAT X3! +30 ", 0
-pm4: .byte " DODGE 'N' PAT X4! +40 ", 0
-pm5: .byte " DODGE 'N' PAT X5!! +50 ", 0
+pm1: .byte "DODGE 'N' PAT! +10", 0
+pm2: .byte "DODGE 'N' PAT X2! +20", 0
+pm3: .byte "DODGE 'N' PAT X3! +30", 0
+pm4: .byte "DODGE 'N' PAT X4! +40", 0
+pm5: .byte "DODGE 'N' PAT X5!! +50", 0
 
 ; tackled you: stay on top, tail going, till you're back up
 think_lick:
@@ -2935,7 +2945,7 @@ squirrel_near:
     clc
     rts
 
-str_tackled: .byte " TACKLED! -150 (SO FRIENDLY) ", 0
+str_tackled: .byte "TACKLED! -150. SO FRIENDLY", 0
 .assert TACKLE_PTS = 150, error, "str_tackled prints it"
 
 think_ball:
@@ -3179,11 +3189,11 @@ owner_shout:
     rts
 
 shouts: .addr sh0, sh1, sh2, sh3, sh4
-sh0: .byte " HE'S FRIENDLY! ", 0
-sh1: .byte " SHE JUST WANTS TO PLAY! ", 0
-sh2: .byte " HE'S NEVER DONE THIS! ", 0
-sh3: .byte " HE'S A GOOD BOY! ", 0
-sh4: .byte " SORRY, HE'S A RESCUE! ", 0
+sh0: .byte "HE'S FRIENDLY!", 0
+sh1: .byte "SHE JUST WANTS TO PLAY!", 0
+sh2: .byte "HE'S NEVER DONE THIS!", 0
+sh3: .byte "HE'S A GOOD BOY!", 0
+sh4: .byte "SORRY, HE'S A RESCUE!", 0
 
 ; integrate velocity
 dog_move:
@@ -3227,7 +3237,9 @@ dog_move:
 ; draw everything sorted by y (lower on screen = nearer = drawn first)
 park_draw:
     jsl oam_clear
-    ; collect: dogs 0..7, player = 8, ball = 9 (if any)
+    ; collect: dogs 0..7, player = $80, each with its world y alongside
+    ; (k_ordlo/hi: the sort reads those, not the dogs, eight dogs being a
+    ; full frame)
     ldy #$0000
     ldx #$0000
 @c:
@@ -3236,6 +3248,10 @@ park_draw:
     beq @nc
     txa
     sta k_order,y
+    lda D_Y,x
+    sta k_ordlo,y
+    lda D_Y+1,x
+    sta k_ordhi,y
     iny
 @nc:
     inx
@@ -3244,6 +3260,10 @@ park_draw:
     bne @c
     lda #$80                    ; player marker
     sta k_order,y
+    lda k_y
+    sta k_ordlo,y
+    lda k_y+1
+    sta k_ordhi,y
     iny
     sty k_cnt                   ; count
     ; selection sort by y, descending
@@ -3257,21 +3277,10 @@ park_draw:
     iny
     cpy k_cnt
     bcs @sw
-    phx
-    lda k_order,y
-    jsr order_y
-    sta tmp1
-    lda tmp0+1
-    sta tmp1+1
-    plx
-    phx
-    lda k_order,x
-    jsr order_y
-    plx
-    A16
-    lda tmp1
-    cmp tmp0
-    A8
+    lda k_ordlo,y               ; y item's y - x item's y (16 bits)
+    cmp k_ordlo,x
+    lda k_ordhi,y
+    sbc k_ordhi,x
     bcc @i
     ; y item is lower on screen: swap into x
     lda k_order,x
@@ -3280,6 +3289,18 @@ park_draw:
     sta k_order,x
     pla
     sta k_order,y
+    lda k_ordlo,x
+    pha
+    lda k_ordlo,y
+    sta k_ordlo,x
+    pla
+    sta k_ordlo,y
+    lda k_ordhi,x
+    pha
+    lda k_ordhi,y
+    sta k_ordhi,x
+    pla
+    sta k_ordhi,y
     bra @i
 @sw:
     ldx tmp5
@@ -3376,22 +3397,6 @@ draw_squirrel:
 @d:
     stx tmp6
     jsl oam_meta
-    rts
-
-; A = order entry -> tmp0 = world y (A8 out)
-order_y:
-    bmi @p
-    TAXB
-    lda D_Y,x
-    sta tmp0
-    lda D_Y+1,x
-    sta tmp0+1
-    rts
-@p:
-    lda k_y
-    sta tmp0
-    lda k_y+1
-    sta tmp0+1
     rts
 
 ; screen y from world y in A16 -> spr_y
@@ -4276,6 +4281,102 @@ madd:
 .a8
 
 .include "park_meta.inc"
+
+; ------------------------------------------------------------------
+; Callouts (bank $80: EVENTS2 is shared and nearly full). A rounded panel
+; like the other six events' on rows PAN_ROW..+2, the line centred on its
+; middle row. It sits at the top of the lawn, under the HUD: a dog only
+; spots you from SPOT_TOP down, so neither he nor his "!" goes under it.
+PAN_ROW = 3
+.assert k_ordhi + NUM_ENT + 1 <= k_cbuf, error, "draw order y arrays fit under k_cbuf"
+.assert SPOT_TOP >= (PAN_ROW + 3) * 8 + 32, error, "a barking dog and his ! stay below the callout panel"
+.segment "CODE"
+.a8
+.i16
+; once a frame: the queued callout (k_pend), one step a frame and never on
+; the HUD's frame: 1 blank the panel rows, 2 the box, 3 the line (26
+; characters at most); 4 just blanks them (the callout's time is up)
+park_pend:
+    lda k_pend
+    beq @x
+    lda frame
+    and #$03
+    beq @x                      ; park_hud's frame: it has enough on
+    lda k_pend
+    cmp #2
+    beq @box
+    cmp #3
+    beq @text
+    cmp #1
+    bne @clr
+    inc k_pend
+    bra park_panel_clear
+@clr:
+    stz k_pend
+    bra park_panel_clear
+@text:
+    stz k_pend
+    jsr pend_ptr
+    lda #TXT_WIN
+    sta txt_bg
+    lda k_ppal
+    asl a
+    asl a
+    ora #$20
+    ldx #((PAN_ROW + 1)*32)
+    jsl txt_print_centre
+    stz txt_bg
+@x:
+    rtl
+@box:
+    inc k_pend
+    jsr pend_ptr
+    ldy #$0000
+@len:
+    lda [ptr0],y
+    beq @got
+    iny
+    bra @len
+@got:
+    tya
+    clc
+    adc #4                      ; a border and a blank cell each side
+    sta tmp1
+    lda #3
+    sta tmp1+1
+    lda #32
+    sec
+    sbc tmp1
+    lsr a
+    A16
+    and #$00FF
+    clc
+    adc #(PAN_ROW*32)
+    tax
+    A8
+    lda #$20
+    jsl txt_box
+    rtl
+
+pend_ptr:
+    ldx k_pptr
+    stx ptr0
+    lda k_pptr+2
+    sta ptr0+2
+    rts
+
+; blank the callout panel's rows
+park_panel_clear:
+    ldx #(PAN_ROW*32)
+    A16
+    lda #$0320                  ; 32 x 3
+    sta tmp1
+    A8
+    stz tmp2
+    lda #$20
+    jsl txt_fill
+    rtl
+.segment "EVENTS2"
 
 ; ------------------------------------------------------------------
 ; data built by tools/art_park.py that the shared assets.s doesn't carry

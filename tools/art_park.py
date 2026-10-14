@@ -155,8 +155,10 @@ def blanket(d, cx, cy, c1, c2, owner_shirt):
 
 def gate(d, y, top, cd=None):
     """Trinity Bellwoods gate: stone pillars, iron arch, fence either side.
-    cd: the canopy layer, for the Dundas gate you walk out under: the arch
-    goes there too, and feet in or past the gateway are behind it"""
+    cd: the canopy layer: the arch goes there too, so whoever's walked
+    through it is drawn behind it. Dundas (top, the way out): feet in or past
+    the gateway are behind it. Queen (the way in): feet north of the gate
+    line, up to where a 32 px sprite no longer reaches the arch"""
     for x in range(0, W, 6):
         d.rectangle([x, y, x + 1, y + 14], fill=COL['iron'])
     d.rectangle([0, y + 2, W - 1, y + 3], fill=COL['iron'])
@@ -172,7 +174,10 @@ def gate(d, y, top, cd=None):
     if cd is not None:
         cd.arc([gx - 32, y - 40, gx + 32, y + 8], 180, 360, fill=COL['iron'], width=3)
         cd.arc([gx - 26, y - 34, gx + 26, y + 2], 180, 360, fill=COL['iron'], width=1)
-        mark_behind(gx - 36, 0, gx + 36, y + 14)
+        if top:
+            mark_behind(gx - 36, 0, gx + 36, y + 14)
+        else:
+            mark_behind(gx - 48, y - 44, gx + 48, y + 14)
     mark_solid(0, y, gx - 33, y + 14)
     mark_solid(gx + 33, y, W - 1, y + 14)
     mark_solid(gx - 44, y - 6, gx - 32, y + 18)
@@ -359,7 +364,7 @@ def park_image():
             continue
         c1, c2, sh = blankets[i % 3]
         blanket(d, x, y, c1, c2, sh)
-    gate(d, H - 60, False)
+    gate(d, H - 60, False, cd)
     gate(d, 52, True, cd)
     return img, can, court, dc
 
