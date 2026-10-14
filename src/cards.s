@@ -50,7 +50,7 @@ c_blink:      .res 1            ; single prompt blinks
 c_lock:       .res 1            ; frames of lockout left
 c_relc:       .res 1            ; quiet frames still needed before arming
 c_relq:       .res 1            ; quiet frames a card needs (card_setup: REL_FRAMES)
-c_hint:       .res 1            ; LET GO OF THE BUTTONS is showing
+c_hint:       .res 1            ; LET GO OF THE BUTTONS is showing (frames, to 255)
 c_def:        .res 1            ; c_opts: the choice the cursor starts on
 c_prompt:     .res 2            ; single prompt string (this bank)
 c_sel:        .res 1
@@ -2767,7 +2767,8 @@ str_amp:       .byte " & ", 0
 ; The d-pad doesn't count: a thumb resting on it is not a mash. If buttons
 ; are still down when the timed lockout ends, the prompt row says so
 ; (LET GO OF THE BUTTONS) instead of the card looking hung; mashing never
-; extends the timed part, only the short quiet spell.
+; extends the timed part, only the short quiet spell, and once LET GO has
+; been up for four quiet spells' worth of frames the next fresh A counts.
 ; c_opts 1/2 offer three choices instead, 3 a NO / YES; the d-pad or SELECT
 ; moves the cursor (from c_def) at once, only A waits for the lockout.
 ; Runs the c_hook extras every frame. -> A = choice
@@ -2808,10 +2809,18 @@ card_wait:
     lda c_relc
     beq @armed
     lda c_hint                  ; still mashing: tell them what we're waiting for
-    bne @lock
+    bne @mash
     inc c_hint
     jsr card_hint
     bra @lock
+@mash:
+    inc c_hint                  ; LET GO has been up for four quiet spells and
+    lda c_relq                  ; they're still tapping: that's a player trying
+    asl a                       ; to move on, not a carried-over mash, so the
+    asl a                       ; next fresh A goes through
+    cmp c_hint
+    bcs @lock
+    bra @armed
 @armed:
     stz c_hint
     jsr card_prompt
