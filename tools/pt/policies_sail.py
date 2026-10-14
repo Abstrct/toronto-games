@@ -29,6 +29,7 @@ O_FX, O_FERRYD, O_FWAIT, O_IRONS, O_BRG = 44, 46, 60, 56, 250
 O_CAMX, O_CAMY = 34, 36
 O_SURF, O_SURFT, O_SURFOK = 190, 192, 194
 O_HGOAL = 288
+O_ADIR = 320         # the yellow arrow's notch (shows the tack on a beat)
 NOGO = 28
 NOTCH = 16
 
@@ -64,7 +65,7 @@ def _game(pol):
 def read_boat(pol):
     g = _game(pol)
     base = g.sym['ev_ram']
-    m = g.core.peek(base, 300)
+    m = g.core.peek(base, 360)
     w = lambda o: m[o] | m[o + 1] << 8
     sw = lambda o: w(o) - 0x10000 if w(o) & 0x8000 else w(o)
     pad = g.core.peek(g.sym['pad'], 2)
@@ -73,7 +74,7 @@ def read_boat(pol):
             'ferryd': sw(O_FERRYD), 'fwait': w(O_FWAIT), 'irons': m[O_IRONS],
             'brg': m[O_BRG], 'rmark': m[180], 'rmin': w(182), 'hgoal': m[O_HGOAL],
             'camx': w(O_CAMX), 'camy': w(O_CAMY), 'surf': m[O_SURF], 'surfok': m[O_SURFOK],
-            'pad': pad[0] | pad[1] << 8,
+            'pad': pad[0] | pad[1] << 8, 'adir': m[O_ADIR],
             'floats': [(w(64 + 2 * i), w(74 + 2 * i)) for i in range(5)]}
 
 
@@ -104,6 +105,7 @@ class _Sailor(Policy):
     hysteresis = 12      # how far past the layline before tacking
     hike = True
     offset = 0           # aim this many px beside the mark (tight rounding)
+    radial_d = 40        # this close, aim at the point offset px out toward us
     settle = 6           # frames to look at the bow line after it moves
     slop = 0             # extra frames a hold runs on (sloppy hands)
 
@@ -132,7 +134,7 @@ class _Sailor(Policy):
         # pass the buoy close on the side we're already on
         dx, dy = b['x'] - mx, b['y'] - my
         d = math.hypot(dx, dy) or 1
-        if d > 60:
+        if d > self.radial_d:
             px, py = -dy / d, dx / d
             return (mx + px * self.offset, my + py * self.offset)
         return (mx + dx / d * self.offset, my + dy / d * self.offset)
@@ -210,9 +212,11 @@ class _Sailor(Policy):
     def fumble(self, n, rng):
         return n
 
+    long_way = True      # gybe round rather than tack through the wind, if it's not much further
+
     def route(self, b, goal, n):
         """turn the long way round rather than through the wind, if it's not much further"""
-        if abs(n) < 5:
+        if abs(n) < 5 or not self.long_way:
             return n
         def crosses(k):
             step = 1 if k > 0 else -1
@@ -329,6 +333,7 @@ class sail_casual(_Sailor):
     beat_margin = 10
     settle = 14
     slop = 6
+    long_way = False     # tacks through the wind like a sailor
 
     def fumble(self, n, rng):
         if rng.random() < 0.12:
@@ -341,29 +346,17 @@ class sail_casual(_Sailor):
 
 class sail_human(_Sailor):
     """A first-timer who sails from the screen: points the bow line at the
-    yellow arrow (16 directions); when the arrow is inside the no-go ticks,
-    zig-zags at a guessed angle and tacks late. Taps are sloppy (holds run
-    long and turn a notch too far now and then), settles slowly, hikes in
-    most gusts."""
-    hysteresis = 28
-    beat_margin = 12
+    yellow arrow (16 directions as drawn). On the beat the arrow shows the
+    tack and swings across at TACK NOW; the human sees it a beat late (the
+    curve's latency) and sometimes ignores the first swing. Taps are sloppy
+    (holds run long and turn a notch too far now and then), settles slowly,
+    hikes in most gusts."""
     settle = 20
     slop = 10
+    long_way = False     # TACK NOW! STEER LEFT: steers left
 
     def desired(self, b):
-        a = notch_of(b['brg'])                       # the arrow as drawn
-        wind8 = (((b['wind'] + 16) >> 5) & 7) * 32   # the HUD vane: 8 directions
-        rel = sdiff(a, wind8)
-        if abs(rel) >= 48:
-            self.tack = 0
-            return a
-        if self.tack == 0:
-            self.tack = 1 if rel >= 0 else -1
-        elif self.tack > 0 and rel < -self.hysteresis:
-            self.tack = -1
-        elif self.tack < 0 and rel > self.hysteresis:
-            self.tack = 1
-        return self.beat_notch(b['wind'], self.tack)
+        return b['adir']
 
     def fumble(self, n, rng):
         r = rng.random()
@@ -378,12 +371,13 @@ class sail_human(_Sailor):
 
 
 class sail_pointer(_Sailor):
-    """Follows the arrow straight at the mark, like the panel did."""
+    """Follows the yellow arrow and nothing else, never hikes: the panel's honest run."""
     hike = False
     settle = 12
+    long_way = False
 
     def desired(self, b):
-        return notch_of(b['brg'])
+        return b['adir']
 
 
 POLICIES = {c.__name__: c for c in (sail_expert, sail_casual, sail_human, sail_pointer)}
