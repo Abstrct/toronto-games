@@ -96,6 +96,11 @@ Caveats:
   rhythm events need their own human model (e.g. timing noise around the beat, plus latency only on hazards).
 - Plug-ins choose the bot with `CURVE = {'<event>': 'policy'}`.
 
+## Presentation lint
+
+`pt.py lint [targets]` samples each scene and flags text in the top/bottom 8 scanlines (hidden by CRT overscan)
+and sprites overlapping text glyphs. These are heuristics; a sprite meant to sit behind a card panel is fine.
+
 ## Findings that re-check themselves
 
 `pt.py bug SESSION "title" -c "COND"` stores a repro relative to the session's last `goto` (when it has one),

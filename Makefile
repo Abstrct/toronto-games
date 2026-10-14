@@ -52,3 +52,13 @@ run: app
 	open "$(APP)"
 
 .PHONY: run app
+
+# playtest harness (tools/pt): golden scenes, fuzzing, bot balance, presentation lint, human curves
+qa: $(ROM)
+	python3 tools/pt/pt.py golden check
+	python3 tools/pt/pt.py fuzz -n 12 -f 36000
+	python3 tools/pt/pt.py balance -n 6
+	python3 tools/pt/pt.py lint
+	for e in bike bay park cops sail parking subway; do python3 tools/pt/pt.py curve $$e -n 3; done
+
+.PHONY: qa
