@@ -1,7 +1,35 @@
 ; EVENT 7: TTC SURFING — Line 1 southbound, Bloor-Yonge to Union, no hands.
-; The train accelerates, brakes, takes curves and lurches; each pushes your
-; balance dot (the ring over your head). The D-pad leans against it. Let the
-; dot leave the ring and you grab whatever's closest: germs. Fewest wins.
+;
+; The ride is a fixed course of lurches (course table below): each leg pulls
+; out of a station, takes a curve or two and brakes into the next one. Every
+; lurch is TELEGRAPHED 40 frames before it pushes: a sound (three departure
+; beeps, a wheel squeal for curves, the brake hiss), a status line and a big
+; yellow arrow by the ring showing which way to lean (it blinks while it's a
+; warning and goes solid when the push starts). The push then ramps in.
+;
+; The balance ring sits over the rider's head on a dark disc of its own.
+; The dot is the rider's balance: LEFT/RIGHT is the train's go/brake axis,
+; UP/DOWN the curves. Dot physics are slow and heavily damped (no overshoot
+; you can't recover from at a human reaction time) with a gentle tip-over
+; once you lean. Let the dot reach the red rim and you GRAB something, and
+; the sprite acts the gag out: the sticky pole (back), a backpack face-first
+; (forward), a stranger's lap (up, toward the seats), the floor (down).
+;
+; Scoring (ev_break = base, bonus, penalty):
+;   finished at Union: RIDE 1000 + STYLE - GERMS x40
+;     STYLE: STANDING SURF, a leg ridden with no grab, pays 75 x the chain
+;            of clean legs (75, 150, ... 450); and DEAD CENTRE, a point per
+;            2 frames with the dot in the sweet spot while a lurch is pushing
+;            and you're working the pad (never for standing still).
+;   PATIENT ZERO (20 germs) or CALL IT A DAY: 40 per station reached on a
+;   leg where you used the pad (standing still earns nothing), no style
+;   (any finish beats any failed run: 1000 - 19x40 = 240 > 5x40).
+; Once the run is decided (20 germs, or the doors open at Union) the pause
+; menu is shut and a give-up already in the pipe is ignored.
+;
+; The windows stream the outside a column at a time into BG2 (64x32): tunnel
+; while moving, the station wall sliding in from the right as the train
+; brakes, so arrivals decelerate instead of hard-cutting.
 .p816
 .smart -
 .include "globals.inc"
@@ -10,67 +38,107 @@
 .import subway_tiles, subway_bg1, subway_tunnel, subway_platform, subway_pal, subway_spr, subway_spr_pal
 
 RIDER_X   = 128
-RIDER_Y   = 196
+RIDER_Y   = 210             ; feet
 RING_X    = 128
-RING_Y    = 84
-SIGN_ROW  = 5               ; station sign box rows 5-7, over the window tops
-POP_ROW   = 13              ; grab popups, under the ring
-RADIUS2   = 169             ; grab when bx^2 + by^2 > 13^2
+RING_Y    = 132
+ARROW_D   = 32              ; arrow centre distance from the ring centre
+SIGN_ROW  = 7               ; station sign box rows 7-9, over the windows
+POP_ROW   = 10              ; popups, between the sign and the ring
+RADIUS2   = 400             ; grab when bx^2 + by^2 > 20^2
+DANGER2   = 256             ; dot turns red past 16 px
+SWEET2    = 25              ; sweet spot: inside 5 px
 NUM_SEG   = 6
-VRAM_PLAT = $4C00           ; spare 32x32 map for the station wall
+LEAN      = $0013           ; D-pad lean, 8.8 px/frame^2
+VMAX      = $0090           ; dot speed cap, 8.8 px/frame
+WARN      = 40              ; frames of telegraph before every lurch
+GRAB_T    = 64              ; frames a grab gag takes (lunge, hold, walk back)
+BASE_RIDE = 1000
+GERM_PEN  = 40              ; (x40 is done with shifts in sb_score)
+FAIL_STN  = 40              ; (x40 by shifts too)
 
-; train phases per segment
-TP_ACCEL  = 0
-TP_CRUISE = 1
-TP_BRAKE  = 2
-TP_STOP   = 3
+; lurch kinds (course table)
+K_DEP     = 0               ; pull out: pushes the dot back (left)
+K_CL      = 1               ; curve left: pushes the dot down (toward us)
+K_CR      = 2               ; curve right: pushes the dot up
+K_BRK     = 3               ; brake into the next station: pushes forward
+
+; lurch states
+LS_GAP    = 0
+LS_WARN   = 1
+LS_ACT    = 2
+LS_END    = 3               ; doors open at Union
 
 w_bx     = ev_ram + 0       ; balance offset, 8.8 px (signed)
 w_by     = ev_ram + 2
 w_vx     = ev_ram + 4
 w_vy     = ev_ram + 6
-w_fx     = ev_ram + 8       ; train force this frame (8.8)
+w_fx     = ev_ram + 8       ; train force now (8.8, ramps toward the target)
 w_fy     = ev_ram + 10
-w_tp     = ev_ram + 12      ; train phase
-w_tt     = ev_ram + 14      ; frames left in the phase
-w_seg    = ev_ram + 16      ; segment 0-5
-w_speed  = ev_ram + 18      ; train speed 8.8 (window scroll)
-w_scroll = ev_ram + 20      ; BG2 scroll 8.8
-w_curve  = ev_ram + 22      ; frames left in a curve
-w_cdir   = ev_ram + 24      ; curve force (signed 8.8)
-w_next   = ev_ram + 26      ; frames to the next cruise event
+w_tx     = ev_ram + 12      ; train force target
+w_ty     = ev_ram + 14
+w_seg    = ev_ram + 16      ; stations reached 0-6
+w_speed  = ev_ram + 18      ; train speed 8.8 px/frame (window scroll)
+w_frac   = ev_ram + 20      ; scroll fraction
+w_lp     = ev_ram + 22      ; course offset of the current lurch
+w_ls     = ev_ram + 24      ; lurch state
+w_lt     = ev_ram + 26      ; frames left in the state
 w_germs  = ev_ram + 28
-w_grab   = ev_ram + 30      ; frames left in a grab
-w_gkind  = ev_ram + 32      ; 0 pole 1 backpack 2 window 3 stranger
-w_streak = ev_ram + 34      ; frames since the last grab
-w_best   = ev_ram + 36
-w_popup  = ev_ram + 38
-w_status = ev_ram + 40      ; status line id
-w_plat   = ev_ram + 42      ; 1 = windows show the platform
-w_done   = ev_ram + 44
-w_cur    = ev_ram + 46
-w_lurch  = ev_ram + 48
-w_pal    = ev_ram + 50      ; boarding: palette of the swap-in passenger
+w_grab   = ev_ram + 30      ; frames left in a grab gag
+w_gkind  = ev_ram + 32      ; 0 pole 1 backpack 2 lap 3 floor
+w_kind   = ev_ram + 34      ; current lurch kind
+w_str    = ev_ram + 36      ; its strength
+w_dur    = ev_ram + 38      ; its length
+w_popup  = ev_ram + 40
+w_status = ev_ram + 42
+w_stat_old = ev_ram + 44
+w_done   = ev_ram + 46
+w_over   = ev_ram + 48      ; 1 = the run is decided: no pause, no give-up
+w_cur    = ev_ram + 50
 w_shake  = ev_ram + 52
-w_stat_old = ev_ram + 54
-EV_SEED  = ev_ram + 510
-NUM_ENT  = 1                ; (evcommon's ev_alloc is unused here)
-E_TYPE   = ev_ram + 120
-
+w_pal    = ev_ram + 54      ; palette of the passenger who boards at each stop
+w_chain  = ev_ram + 56      ; STANDING SURF chain
+w_best   = ev_ram + 58      ; best chain
+w_clean  = ev_ram + 60      ; 1 = no grab yet this leg
+w_style  = ev_ram + 62      ; style points
+w_sweet  = ev_ram + 64      ; sweet-spot frame counter
+w_press  = ev_ram + 66      ; frames since the D-pad was last touched
+w_jolt   = ev_ram + 68      ; frames to the next track joint
+w_col    = ev_ram + 70      ; last BG2 column streamed
+w_src    = ev_ram + 72      ; 0 tunnel, 1 platform
+w_rx     = ev_ram + 74      ; rider offset from home (px, signed)
+w_ry     = ev_ram + 76
+w_end    = ev_ram + 78      ; frames left at Union
+w_buf    = ev_ram + 80      ; column buffer toggle (0 / 64)
+w_sx     = ev_ram + 82      ; BG2 scroll, integer px 0-511
+w_walk   = ev_ram + 84      ; boarding passenger x
+w_gx     = ev_ram + 86      ; gag target offset
+w_gy     = ev_ram + 88
+w_r2     = ev_ram + 90      ; dot distance^2 this frame
+w_bx_old = ev_ram + 92
+w_hseg   = ev_ram + 94      ; station the HUD shows
 NUM_GERMS = 8
-G_X      = ev_ram + 64      ; germ particles: x, y (words), life
-G_Y      = ev_ram + 80
-G_L      = ev_ram + 96
+G_X      = ev_ram + 96      ; germ particles: x, y (words), life
+G_Y      = ev_ram + 112
+G_L      = ev_ram + 128
+E_TYPE   = ev_ram + 144     ; (evcommon's ev_alloc is unused here)
+NUM_ENT  = 1
+w_touch  = ev_ram + 150     ; 1 = the D-pad was used this leg
+w_earn   = ev_ram + 152     ; stations reached on legs you actually rode
+COLBUF   = ev_ram + 256     ; two 28-word column buffers (256, 320)
+EV_SEED  = ev_ram + 510
 
 ST_NONE   = 0
-ST_ACCEL  = 1
-ST_CRUISE = 2
-ST_LEFT   = 3
-ST_RIGHT  = 4
-ST_BRAKE  = 5
-ST_DOORS  = 6
+ST_CLEAR  = 1
+ST_GO     = 2
+ST_CRUISE = 3
+ST_LEFT   = 4
+ST_RIGHT  = 5
+ST_BRAKE  = 6
+ST_DOORS  = 7
+ST_UNION  = 8
 
-.segment "EVENTS3"
+; code + tables live in a graphics bank with room to spare (bank $85)
+.segment "GFX0"
 .a8
 .i16
 
@@ -82,14 +150,19 @@ ev_subway:
     jsr sb_draw
     jsl event_card
     jsr sb_hud_full
+    lda #0
+    jsr station_sign
     jsl event_countdown
     lda #SONG_SUBWAY
     jsl music_play
 @loop:
     jsl wait_frame
-    jsr sb_windows              ; right after vblank: swap tunnel / platform
     lda ev_giveup
-    bne @quit
+    beq @play
+    lda w_over                  ; already PATIENT ZERO / at Union: too late to call it
+    beq @quit
+    stz ev_giveup
+@play:
     jsr sb_update
     jsr sb_draw
     jsr sb_hud
@@ -99,18 +172,24 @@ ev_subway:
     jsr sb_score
     bra @card
 @quit:
-    ; gave up from the pause menu (fewer stops ridden must not mean fewer germs)
     jsl music_stop
-    jsr sb_score
-    ldx #$0000
-    stx ev_score
-    lda #$03
-    sta ev_fail
+    jsr sb_score                ; scored like a failed run (ev_fail 3 from the card)
 @card:
+    A16
+    stz bg1x
+    stz bg1y
+    A8
+    jsl wait_frame
+    ; nothing under the HUD's top row may peek out round the card
+    ldx #(2*32)
+    A16
+    lda #$0D20                  ; 32 x 13: rows 2-14
+    sta tmp1
+    A8
+    stz tmp2
+    lda #$20
+    jsl txt_fill
     jsl score_card
-    ; leave the normal BG2 map behind
-    lda #((VRAM_BG2MAP >> 8) | 1)
-    sta BG2SC
     plb
     rtl
 
@@ -122,8 +201,9 @@ sb_init:
     jsl load_text_gfx
     VLOAD VRAM_BGTILES, subway_tiles, (subway_bg1 - subway_tiles)
     VLOAD VRAM_BG1MAP, subway_bg1, 2048
-    VLOAD VRAM_BG2MAP, subway_tunnel, 4096
-    VLOAD VRAM_PLAT, subway_platform, 2048
+    ; both halves of BG2 start as the Bloor-Yonge platform wall
+    VLOAD VRAM_BG2MAP, subway_platform, 2048
+    VLOAD (VRAM_BG2MAP + $400), subway_platform, 2048
     PLOAD 32, subway_pal, 96
     VLOAD VRAM_OBJTILES, subway_spr, (subway_spr_pal - subway_spr)
     PLOAD 144, subway_spr_pal, 80
@@ -133,6 +213,8 @@ sb_init:
     lda #$17
     sta tm_sh
     stz txt_bg
+    lda #((VRAM_BG2MAP >> 8) | 1)
+    sta BG2SC
     ldx #$0000
 @c:
     stz ev_ram,x
@@ -141,61 +223,33 @@ sb_init:
     bne @c
     ldx #$2E6B
     stx EV_SEED
-    ; start in the station at Bloor-Yonge, doors closing
+    ldx #((264 >> 3) & 63)
+    stx w_col
     lda #1
-    sta w_plat
-    lda #((VRAM_PLAT >> 8) | 0)
-    sta BG2SC
-    lda #TP_STOP
-    sta w_tp
-    ldx #40
-    stx w_tt
-    lda #ST_DOORS
-    sta w_status
+    sta w_src
+    sta w_clean
     lda #3
     sta w_pal
-    rts
-
-; windows: tunnel while moving, the station wall when slow at a stop
-sb_windows:
-    lda w_plat
-    bne @inplat
-    ; in the tunnel: arriving (braking and slow)?
-    lda w_tp
-    cmp #TP_BRAKE
-    bne @x
-    A16
-    lda w_speed
-    cmp #$0180
-    A8
-    bcs @x
-    lda #1
-    sta w_plat
-    lda #((VRAM_PLAT >> 8) | 0)
-    sta BG2SC
-    rts
-@inplat:
-    ; leaving: accelerating past a walking pace
-    lda w_tp
-    cmp #TP_ACCEL
-    bne @x
-    A16
-    lda w_speed
-    cmp #$0200
-    A8
-    bcc @x
-    stz w_plat
-    lda #((VRAM_BG2MAP >> 8) | 1)
-    sta BG2SC
-@x:
+    ldx #232
+    stx w_walk
+    ldx #80
+    stx w_jolt
+    ldx #ST_DOORS
+    stx w_status
+    ldx #$FF
+    stx w_stat_old
+    ldx #$0000
+    stx w_lp
+    jsr load_lurch
     rts
 
 ; ------------------------------------------------------------------
 sb_update:
     jsr train
     jsr balance
+    jsr gag_move
     jsr germs_update
-    ; patient zero: the ride ends once the 20th germ's grab has played out
+    ; patient zero: the ride ends once the 20th germ's gag has played out
     A16
     lda w_germs
     cmp #20
@@ -218,151 +272,412 @@ sb_update:
     A8
     rts
 
-; the train: phases, forces, speed
-train:
-    stz w_fx
-    stz w_fx+1
-    stz w_fy
-    stz w_fy+1
-    ; strength grows a little each segment: tmp7 = seg * 2
-    lda w_seg
-    asl a
-    sta tmp7
-    stz tmp7+1
-    lda w_tp
-    cmp #TP_ACCEL
-    bne @n0
-    jmp tr_accel
-@n0:
-    cmp #TP_CRUISE
-    bne @n1
-    jmp tr_cruise
-@n1:
-    cmp #TP_BRAKE
-    bne @n2
-    jmp tr_brake
-@n2:
-    jmp tr_stop
+; ------------------------------------------------------------------
+; the course: kind, gap (frames before the warning), strength (8.8 push), length
+course:
+    ; Bloor-Yonge -> Wellesley: pull out, pull in. Gentle.
+    .byte K_DEP, 20, 7, 90
+    .byte K_BRK, 60, 7, 100
+    ; -> College
+    .byte K_DEP, 70, 8, 90
+    .byte K_CL, 30, 7, 70
+    .byte K_BRK, 40, 8, 100
+    ; -> Dundas
+    .byte K_DEP, 70, 8, 90
+    .byte K_CR, 20, 8, 80
+    .byte K_CL, 20, 8, 60
+    .byte K_BRK, 30, 8, 100
+    ; -> Queen
+    .byte K_DEP, 70, 9, 90
+    .byte K_CL, 20, 9, 70
+    .byte K_CR, 10, 9, 70
+    .byte K_BRK, 30, 9, 100
+    ; -> King: the S-bend
+    .byte K_DEP, 70, 10, 90
+    .byte K_CR, 20, 10, 50
+    .byte K_CL, 1, 10, 50
+    .byte K_BRK, 30, 10, 100
+    ; -> Union: the long curve into the loop
+    .byte K_DEP, 70, 10, 90
+    .byte K_CL, 30, 11, 120
+    .byte K_BRK, 20, 10, 100
 
-tr_accel:
-    lda #ST_ACCEL
+; read the lurch at w_lp, start its gap
+load_lurch:
+    ldx w_lp
+    lda f:course,x
+    sta w_kind
+    stz w_kind+1
+    lda f:course+1,x
+    sta w_lt
+    stz w_lt+1
+    lda f:course+2,x
+    sta w_str
+    stz w_str+1
+    lda f:course+3,x
+    sta w_dur
+    stz w_dur+1
+    stz w_ls
+    rts
+
+; the train: lurch state machine, forces, speed
+train:
+    lda w_ls
+    cmp #LS_WARN
+    bne @n1
+    jmp tr_warn
+@n1:
+    cmp #LS_ACT
+    bne @n2
+    jmp tr_act
+@n2:
+    cmp #LS_END
+    bne tr_gap
+    jmp tr_end
+
+tr_gap:
+    ; doors open at a stop, cruising between lurches
+    lda #ST_CRUISE
+    ldx w_speed
+    bne @mv
+    lda #ST_DOORS
+@mv:
     sta w_status
-    ; pushed toward the back (left): 0.035 px/f^2 and up
+    jsr jolts
     A16
-    lda #9
-    clc
-    adc tmp7
+    dec w_lt
+    A8
+    beq @warn
+    rts
+@warn:
+    lda #LS_WARN
+    sta w_ls
+    ldx #WARN
+    stx w_lt
+    lda w_kind
+    asl a
+    TAXB
+    lda f:warn_status,x
+    sta w_status
+    lda w_kind
+    beq @dep
+    cmp #K_BRK
+    beq @brk
+    SFX SFX_WHISTLE             ; the wheels squeal into a curve
+    rts
+@brk:
+    SFX SFX_SPLASH              ; brake hiss; the station wall starts to stream past
+    lda #1
+    sta w_src
+    rts
+@dep:
+    SFX SFX_READY               ; please stand clear of the doors: beep...
+    rts
+
+warn_status: .byte ST_CLEAR, ST_GO, ST_LEFT, ST_LEFT, ST_RIGHT, ST_RIGHT, ST_BRAKE, ST_BRAKE
+
+tr_warn:
+    jsr jolts
+    lda w_kind
+    bne @nb
+    ; departure beeps at 40, 27 and 14 frames out, GO at the push
+    lda w_lt
+    cmp #27
+    beq @beep
+    cmp #14
+    bne @nb
+@beep:
+    SFX SFX_READY
+@nb:
+    A16
+    dec w_lt
+    A8
+    beq @go
+    rts
+@go:
+    lda #LS_ACT
+    sta w_ls
+    ldx w_dur
+    stx w_lt
+    lda w_kind
+    asl a
+    inc a
+    TAXB
+    lda f:warn_status,x
+    sta w_status
+    ; the push
+    A16
+    lda w_str
+    ldx w_kind
+    cpx #K_DEP
+    bne @a1
     eor #$FFFF
     inc a
-    sta w_fx
+    sta w_tx
+    A8
+    stz w_src                   ; tunnel from here
+    jsr sign_clear
+    SFX SFX_GO
+    rts
+@a1:
+    .a16
+    cpx #K_BRK
+    bne @a2
+    sta w_tx
+    A8
+    SFX SFX_SPLASH
+    rts
+@a2:
+    .a16
+    cpx #K_CL
+    beq @a3
+    eor #$FFFF
+    inc a
+@a3:
+    sta w_ty
+    A8
+    SFX SFX_WHISTLE
+    rts
+
+tr_act:
+    lda w_kind
+    cmp #K_DEP
+    bne @nd
+    ; pulling out: speed up
+    A16
     lda w_speed
     clc
-    adc #$0010
+    adc #$0011
     cmp #$0600
-    bcc @s
+    bcc @s1
     lda #$0600
-@s:
+@s1:
     sta w_speed
-    dec w_tt
-    A8
-    bne @x
-    lda #TP_CRUISE
-    sta w_tp
-    lda #200
-    jsr ev_range
-    A16
-    and #$00FF
-    clc
-    adc #260
-    sta w_tt
-    lda #30
-    sta w_next
-    A8
-@x:
-    rts
-
-tr_cruise:
-    ; curves and jolts on a schedule from the course seed
-    A16
-    lda w_curve
-    beq @nocurve
-    dec w_curve
-    lda w_cdir
-    sta w_fy
-    A8
-    lda w_cdir+1
-    bmi @cr
-    lda #ST_LEFT
-    bra @cs
-@cr:
-    lda #ST_RIGHT
-@cs:
-    sta w_status
-    bra @tick
-@nocurve:
-    A8
-    lda #ST_CRUISE
-    sta w_status
-    A16
-    dec w_next
-    A8
-    bne @tick
-    lda #60
-    jsr ev_range
-    A16
-    and #$00FF
-    clc
-    adc #40
-    sta w_next
-    A8
-    lda #10
-    jsr ev_range
-    cmp #7
-    bcs @jolt
-    ; a curve: 60-100 frames, either way
-    lda #40
-    jsr ev_range
-    A16
-    and #$00FF
-    clc
-    adc #60
-    sta w_curve
-    lda #8
-    clc
-    adc tmp7
-    sta w_cdir
-    A8
-    lda #2
-    jsr ev_range
-    beq @tick
-    A16
-    lda w_cdir
-    eor #$FFFF
-    inc a
-    sta w_cdir
     A8
     bra @tick
-@jolt:
-    ; track joint: a kick in a random direction
-    jsr kick
+@nd:
+    cmp #K_BRK
+    bne @cruise
+    A16
+    lda w_speed
+    sec
+    sbc #$000F
+    bcs @s2
+    lda #$0000
+@s2:
+    cmp #$0040                  ; creep the last few px in
+    bcs @s3
+    lda #$0040
+@s3:
+    sta w_speed
+    A8
+    bra @tick
+@cruise:
+    jsr jolts
 @tick:
     A16
-    dec w_tt
+    dec w_lt
+    A8
+    beq @end
+    rts
+@end:
+    ; the push lets go (it ramps out)
+    ldx #$0000
+    stx w_tx
+    stx w_ty
+    lda w_kind
+    cmp #K_BRK
+    bne @next
+    jsr arrive
+    lda w_seg
+    cmp #NUM_SEG
+    bcc @next
+    lda #LS_END
+    sta w_ls
+    ldx #100
+    stx w_end
+    lda #ST_UNION
+    sta w_status
+    rts
+@next:
+    A16
+    lda w_lp
+    clc
+    adc #4
+    sta w_lp
+    A8
+    jmp load_lurch
+
+tr_end:
+    A16
+    dec w_end
     A8
     bne @x
-    lda #TP_BRAKE
-    sta w_tp
-    ldx #0
-    stx w_curve
+    lda #1
+    sta w_done
 @x:
     rts
 
-; random impulse to the balance velocity
+; pulled into a station
+arrive:
+    ldx #$0000
+    stx w_speed
+    lda w_grab
+    bne @ns
+    A16
+    lda w_vx                    ; the classic snap back as it stops
+    sec
+    sbc #$0050
+    sta w_vx
+    A8
+@ns:
+    lda #1
+    sta w_shake
+    SFX SFX_BELL
+    lda w_seg
+    inc a
+    jsr station_sign
+    inc w_seg
+    ; someone boards: swap the door passenger, walk them in
+    lda w_pal
+    inc a
+    cmp #5
+    bcc @pp
+    lda #1
+@pp:
+    sta w_pal
+    ldx #280
+    stx w_walk
+    ; STANDING SURF: a whole leg without touching anything
+    lda w_clean
+    beq @broke
+    inc w_chain
+    lda w_chain
+    cmp w_best
+    bcc @nb
+    sta w_best
+@nb:
+    jsr surf_popup
+    bra @leg
+@broke:
+    stz w_chain
+@leg:
+    lda w_touch                 ; partial credit only for legs you rode
+    beq @nt
+    inc w_earn
+@nt:
+    stz w_touch
+    lda #1
+    sta w_clean
+    lda w_seg
+    cmp #NUM_SEG
+    bcc @x
+    ; doors open at Union: the ride is decided
+    lda #1
+    sta w_over
+    stz pause_ok
+@x:
+    rts
+
+; +75 x chain, and say so
+surf_popup:
+    A16
+    lda w_chain
+    and #$00FF
+    sta tmp1                    ; c
+    asl a                       ; 2c
+    sta tmp3
+    asl a
+    asl a                       ; 8c
+    sta tmp4
+    asl a
+    asl a
+    asl a                       ; 64c
+    clc
+    adc tmp4
+    clc
+    adc tmp3
+    clc
+    adc tmp1                    ; 75c
+    sta tmp3
+    clc
+    adc w_style
+    sta w_style
+    A8
+    jsr popup_clear
+    lda #TXT_WIN
+    sta txt_bg
+    ldx #(POP_ROW*32 + 6)
+    A16
+    lda #$0117                  ; 23 x 1
+    sta tmp1
+    A8
+    lda #128
+    sta tmp2
+    lda #($20 | (TP_YELLOW << 2))
+    jsl txt_fill
+    LDPTR0 str_surf
+    ldx #(POP_ROW*32 + 7)
+    lda #($20 | (TP_YELLOW << 2))
+    jsl txt_print
+    ldx w_chain
+    stx tmp1
+    ldx #(POP_ROW*32 + 22)
+    ldy #1
+    lda #($20 | (TP_WHITE << 2))
+    jsl txt_num
+    LDPTR0 str_plus
+    ldx #(POP_ROW*32 + 24)
+    lda #($20 | (TP_GREEN << 2))
+    jsl txt_print
+    ldx tmp3
+    stx tmp1
+    ldx #(POP_ROW*32 + 25)
+    ldy #3
+    lda #($20 | (TP_GREEN << 2))
+    jsl txt_num
+    stz txt_bg
+    ldx #90
+    stx w_popup
+    SFX SFX_COIN
+    rts
+
+str_surf: .byte "STANDING SURF X", 0
+str_plus: .byte "+", 0
+
+; track joints: little random kicks while cruising, from the third leg on
+jolts:
+    lda w_seg
+    cmp #2
+    bcc @x
+    A16
+    lda w_speed
+    cmp #$0600
+    A8
+    bcc @x
+    A16
+    dec w_jolt
+    A8
+    bne @x
+    lda #70
+    jsr ev_range
+    A16
+    and #$00FF
+    clc
+    adc #50
+    sta w_jolt
+    A8
+    jsr kick
+@x:
+    rts
+
 kick:
     lda #4
     jsr ev_range
     asl a
     TAXB
+    lda w_grab
+    bne @s
     A16
     lda f:kick_vx,x
     clc
@@ -373,101 +688,50 @@ kick:
     adc w_vy
     sta w_vy
     A8
+@s:
     lda #1
     sta w_shake
     SFX SFX_STEP
     rts
 
-kick_vx: .word $0060, $10000 - $0060, $0026, $10000 - $0026
-kick_vy: .word $0026, $10000 - $0026, $0060, $10000 - $0060
-
-tr_brake:
-    lda #ST_BRAKE
-    sta w_status
-    A16
-    lda #10
-    clc
-    adc tmp7
-    sta w_fx
-    lda w_speed
-    sec
-    sbc #$000E
-    bcs @s
-    lda #$0000
-@s:
-    sta w_speed
-    bne @x16
-    ; stopped: the classic snap back, doors open
-    lda w_vx
-    sec
-    sbc #$00C0
-    sta w_vx
-    A8
-    lda #TP_STOP
-    sta w_tp
-    ldx #110
-    stx w_tt
-    lda #ST_DOORS
-    sta w_status
-    lda #1
-    sta w_shake
-    SFX SFX_BELL
-    jsr station_sign
-    inc w_seg
-    ; someone gets on: swap a passenger
-    lda w_pal
-    inc a
-    cmp #5
-    bcc @pp
-    lda #1
-@pp:
-    sta w_pal
-    rts
-@x16:
-    A8
-    rts
-
-tr_stop:
-    lda #ST_DOORS
-    sta w_status
-    ; a boarding passenger bumps you
-    A16
-    lda w_tt
-    cmp #50
-    A8
-    bne @nb
-    lda w_seg
-    beq @nb
-    jsr kick
-@nb:
-    A16
-    dec w_tt
-    A8
-    bne @x
-    jsr sign_clear
-    ; last stop?
-    lda w_seg
-    cmp #NUM_SEG
-    bcc @go
-    lda #1
-    sta w_done
-    rts
-@go:
-    lda #TP_ACCEL
-    sta w_tp
-    ldx #100
-    stx w_tt
-    SFX SFX_BELL
-@x:
-    rts
+kick_vx: .word $0030, $10000 - $0030, $0000, $0000
+kick_vy: .word $0000, $0000, $0030, $10000 - $0030
 
 ; ------------------------------------------------------------------
-; balance: train force + your lean + a little instability, damped
-; (tuned with a reaction-delay sim: ~130 ms reflexes ride clean, ~200 ms
-;  collect about 6 germs, ~270 ms about 18)
+; balance: train force + your lean + a gentle tip-over, heavily damped
 balance:
     A16
-    inc w_streak
+    lda w_press
+    cmp #999
+    bcs @pc
+    inc w_press
+@pc:
+    ; forces ramp toward their targets, 1/256 per frame
+    lda w_fx
+    cmp w_tx
+    beq @rx
+    bmi @ux
+    dec w_fx
+    bra @rx
+@ux:
+    inc w_fx
+@rx:
+    lda w_fy
+    cmp w_ty
+    beq @ry
+    bmi @uy
+    dec w_fy
+    bra @ry
+@uy:
+    inc w_fy
+@ry:
+    A8
+    lda w_ls
+    cmp #LS_END
+    bne @live
+    rts                         ; doors open at Union: you made it
+@live:
+    A16
     lda w_grab
     beq @free
     dec w_grab
@@ -475,13 +739,21 @@ balance:
     rts
 @free:
     .a16
-    ; input: the D-pad leans against the push
+    lda pad
+    and #(PAD_LEFT | PAD_RIGHT | PAD_UP | PAD_DOWN)
+    beq @nopad
+    stz w_press
+    A8
+    lda #1
+    sta w_touch
+    A16
+@nopad:
     lda pad
     bit #PAD_LEFT
     beq @nl
     lda w_vx
     sec
-    sbc #$001C
+    sbc #LEAN
     sta w_vx
     lda pad
 @nl:
@@ -489,7 +761,7 @@ balance:
     beq @nr
     lda w_vx
     clc
-    adc #$001C
+    adc #LEAN
     sta w_vx
     lda pad
 @nr:
@@ -497,7 +769,7 @@ balance:
     beq @nu
     lda w_vy
     sec
-    sbc #$001C
+    sbc #LEAN
     sta w_vy
     lda pad
 @nu:
@@ -505,49 +777,33 @@ balance:
     beq @nd
     lda w_vy
     clc
-    adc #$001C
+    adc #LEAN
     sta w_vy
 @nd:
-    ; v += train force + bx/256 (an upright body tips further once it leans)
+    ; v += force + offset/256 (an upright body tips further once it leans)
     lda w_bx
     jsr int_part
     clc
     adc w_fx
     clc
     adc w_vx
+    jsr damp
     sta w_vx
+    clc
+    adc w_bx
+    sta w_bx
     lda w_by
     jsr int_part
     clc
     adc w_fy
     clc
     adc w_vy
+    jsr damp
     sta w_vy
-    ; damping: v -= v/8
-    lda w_vx
-    jsr asr3
-    eor #$FFFF
-    inc a
     clc
-    adc w_vx
-    sta w_vx
-    lda w_vy
-    jsr asr3
-    eor #$FFFF
-    inc a
-    clc
-    adc w_vy
-    sta w_vy
-    ; position
-    lda w_bx
-    clc
-    adc w_vx
-    sta w_bx
-    lda w_by
-    clc
-    adc w_vy
+    adc w_by
     sta w_by
-    ; outside the ring? (integer parts squared)
+    ; distance^2 (integer px)
     lda w_bx
     jsr int_part
     jsr square
@@ -557,11 +813,50 @@ balance:
     jsr square
     clc
     adc tmp1
+    sta w_r2
     cmp #RADIUS2
+    bcc @in
     A8
-    bcc @x
-    jsr grab
+    jmp grab
+@in:
+    .a16
+    ; DEAD CENTRE: in the sweet spot while a lurch pushes and you're working it
+    cmp #SWEET2
+    bcs @x
+    lda w_fx
+    ora w_fy
+    beq @x
+    lda w_press
+    cmp #40
+    bcs @x
+    inc w_sweet
+    lda w_sweet
+    and #$0001
+    bne @x
+    inc w_style
 @x:
+    A8
+    rts
+
+; A16: v -> v - v/8, clamped to +-VMAX
+damp:
+    .a16
+    sta tmp2
+    jsr asr3
+    eor #$FFFF
+    inc a
+    clc
+    adc tmp2
+    bmi @neg
+    cmp #VMAX
+    bcc @ok
+    lda #VMAX
+    rts
+@neg:
+    cmp #($10000 - VMAX)
+    bcs @ok
+    lda #($10000 - VMAX)
+@ok:
     rts
 
 ; A16 helpers
@@ -569,26 +864,7 @@ asr3:
     .a16
     cmp #$8000
     ror a
-    cmp #$8000
-    ror a
-    cmp #$8000
-    ror a
-    rts
-asr7:
-    .a16
-    cmp #$8000
-    ror a
-asr6:
-    cmp #$8000
-    ror a
-asr5:
-    cmp #$8000
-    ror a
-asr4:
-    cmp #$8000
-    ror a
-    cmp #$8000
-    ror a
+asr2:
     cmp #$8000
     ror a
     cmp #$8000
@@ -597,6 +873,7 @@ asr4:
 
 ; signed 8.8 -> signed integer (A16)
 int_part:
+    .a16
     xba
     and #$00FF
     cmp #$0080
@@ -609,6 +886,8 @@ int_part:
 
 ; A16 = |A| ^ 2, capped at $7FFF
 square:
+    .a16
+    cmp #$0000
     bpl @p
     eor #$FFFF
     inc a
@@ -642,9 +921,8 @@ popup_clear:
     jsl txt_fill
     rts
 
-; lost it: grab the nearest thing
+; lost it: grab the nearest thing (and act it out)
 grab:
-    ; which way? dominant axis
     A16
     lda w_bx
     bpl @ax
@@ -662,7 +940,7 @@ grab:
     bcs @lateral
     lda w_bx+1
     bmi @back
-    lda #1                      ; forward: the backpack
+    lda #1                      ; forward: face-first into the backpack
     ldy #2
     bra @set
 @back:
@@ -671,36 +949,45 @@ grab:
     bra @set
 @lateral:
     lda w_by+1
-    bmi @window
-    lda #3                      ; toward us: a stranger's lap
-    ldy #2
-    bra @set
-@window:
-    lda #2                      ; the far wall: hand on the window
+    bmi @lap
+    lda #3                      ; toward us: hands on the floor
     ldy #1
+    bra @set
+@lap:
+    lda #2                      ; up, toward the seats: a stranger's lap
+    ldy #2
 @set:
     sta w_gkind
+    stz w_clean
     A16
     tya
     clc
     adc w_germs
     sta w_germs
-    ; best streak (frames)
-    lda w_streak
-    cmp w_best
-    bcc @nb
-    sta w_best
-@nb:
-    stz w_streak
+    cmp #20
+    bcc @alive
+    A8
+    lda #1                      ; PATIENT ZERO: decided, no pausing out of it
+    sta w_over
+    stz pause_ok
+    A16
+@alive:
     stz w_bx
     stz w_by
     stz w_vx
     stz w_vy
-    lda #45
+    lda #GRAB_T
     sta w_grab
+    lda w_gkind
+    and #$00FF
+    asl a
+    tax
+    lda f:gag_dx,x
+    sta w_gx
+    lda f:gag_dy,x
+    sta w_gy
     A8
     SFX SFX_GROAN
-    ; message
     lda w_gkind
     A16
     and #$00FF
@@ -720,14 +1007,108 @@ grab:
     stz txt_bg
     ldx #70
     stx w_popup
-    jsr spawn_germs
     rts
+
+; where each gag takes the rider (offset from home, px)
+gag_dx: .word $10000 - 22, 34, $10000 - 40, 4
+gag_dy: .word 0, 0, $10000 - 60, 2
 
 grab_msgs: .addr gm0, gm1, gm2, gm3
 gm0: .byte " GRABBED THE STICKY POLE! ", 0
 gm1: .byte " FACE-FIRST INTO A BACKPACK! ", 0
-gm2: .byte " HAND ON THE WINDOW. EW! ", 0
-gm3: .byte " SAT ON A STRANGER! SORRY! ", 0
+gm2: .byte " SAT ON A STRANGER! SORRY! ", 0
+gm3: .byte " HANDS ON THE FLOOR. EW! ", 0
+
+; the rider's gag: lunge to the target, hold (germs!), walk back
+gag_move:
+    A16
+    lda w_grab
+    beq @home
+    cmp #(GRAB_T - 14)
+    bcs @lunge
+    cmp #24
+    bcs @hold
+@home:
+    ; walk back to the spot, 3 px a frame
+    lda #$0000
+    sta tmp1
+    sta tmp2
+    lda #3
+    bra @step
+@lunge:
+    lda w_gx
+    sta tmp1
+    lda w_gy
+    sta tmp2
+    lda #5
+    bra @step
+@hold:
+    cmp #(GRAB_T - 15)
+    bne @x
+    A8
+    jsr spawn_germs
+    A16
+@x:
+    A8
+    rts
+@step:
+    .a16
+    sta tmp3
+    ; x toward tmp1
+    lda w_rx
+    sec
+    sbc tmp1
+    beq @dy
+    bmi @xl
+    cmp tmp3
+    bcc @xs
+    lda w_rx
+    sec
+    sbc tmp3
+    sta w_rx
+    bra @dy
+@xl:
+    eor #$FFFF
+    inc a
+    cmp tmp3
+    bcc @xs
+    lda w_rx
+    clc
+    adc tmp3
+    sta w_rx
+    bra @dy
+@xs:
+    lda tmp1
+    sta w_rx
+@dy:
+    lda w_ry
+    sec
+    sbc tmp2
+    beq @done
+    bmi @yl
+    cmp tmp3
+    bcc @ys
+    lda w_ry
+    sec
+    sbc tmp3
+    sta w_ry
+    bra @done
+@yl:
+    eor #$FFFF
+    inc a
+    cmp tmp3
+    bcc @ys
+    lda w_ry
+    clc
+    adc tmp3
+    sta w_ry
+    bra @done
+@ys:
+    lda tmp2
+    sta w_ry
+@done:
+    A8
+    rts
 
 ; a puff of germs around the hand
 spawn_germs:
@@ -739,6 +1120,8 @@ spawn_germs:
     ldx w_cur
     clc
     adc #(RIDER_X - 12)
+    clc
+    adc w_rx
     sta G_X,x
     stz G_X+1,x
     lda #16
@@ -746,6 +1129,8 @@ spawn_germs:
     ldx w_cur
     clc
     adc #(RIDER_Y - 40)
+    clc
+    adc w_ry
     sta G_Y,x
     stz G_Y+1,x
     lda #40
@@ -776,8 +1161,10 @@ germs_update:
     bne @g
     rts
 
-; station name in a box over the windows
+; station A (0 Bloor-Yonge .. 6 Union) in a box over the windows, on the
+; platform's white name band
 station_sign:
+    sta w_cur
     lda #TXT_WIN
     sta txt_bg
     ldx #(SIGN_ROW*32 + 8)
@@ -787,12 +1174,12 @@ station_sign:
     A8
     lda #$20
     jsl txt_box
-    lda w_seg
+    lda w_cur
     A16
     and #$00FF
     asl a
     tax
-    lda f:station_names,x
+    lda f:sign_names,x
     sta ptr0
     A8
     lda #^station_names
@@ -814,8 +1201,11 @@ sign_clear:
     jsl txt_fill
     rts
 
+sign_names:
+    .addr sn_bloor
 station_names:
-    .addr sn_well, sn_coll, sn_dund, sn_queen, sn_king, sn_union
+    .addr sn_well, sn_coll, sn_dund, sn_queen, sn_king, sn_union, sn_union
+sn_bloor: .byte "BLOOR-YONGE", 0
 sn_well:  .byte "WELLESLEY", 0
 sn_coll:  .byte "COLLEGE", 0
 sn_dund:  .byte "DUNDAS", 0
@@ -826,17 +1216,15 @@ sn_union: .byte "UNION", 0
 ; ------------------------------------------------------------------
 sb_draw:
     jsl oam_clear
-    ; window view scrolls with the train
+    jsr scroll_bg2
+    ; the car body sways with the push: back/forward on go/brake, a tilt on curves
     A16
-    lda w_scroll
-    clc
-    adc w_speed
-    sta w_scroll
-    xba
-    and #$00FF
-    sta bg2x
-    stz bg2y
-    stz bg1x
+    lda w_fx
+    jsr asr2
+    sta bg1x
+    lda w_fy
+    jsr asr2
+    sta tmp1
     ; rattle when fast
     lda w_speed
     cmp #$0300
@@ -844,29 +1232,150 @@ sb_draw:
     lda frame
     and #$0006
     beq @still
-    lda #$0001
-    bra @b
+    inc tmp1
 @still:
-    lda #$0000
-@b:
-    sta bg1y
     A8
     lda w_shake
     beq @ns
     stz w_shake
     A16
-    lda #$0002
-    sta bg1y
+    inc tmp1
+    inc tmp1
     A8
 @ns:
+    A16
+    lda tmp1
+    sta bg1y
+    A8
     jsr draw_germs
     jsr draw_ring
     jsr draw_rider
     jsr draw_people
     rts
 
+; BG2: scroll with the train; stream the column coming in at the right edge
+scroll_bg2:
+    A16
+    lda w_frac
+    and #$00FF
+    clc
+    adc w_speed
+    pha
+    and #$00FF
+    sta w_frac
+    pla
+    xba
+    and #$00FF
+    clc
+    adc w_sx
+    and #$01FF
+    sta w_sx
+    sta bg2x
+    stz bg2y
+    clc
+    adc #264
+    lsr a
+    lsr a
+    lsr a
+    and #$003F
+    sta tmp4
+    A8
+@more:
+    A16
+    lda w_col
+    cmp tmp4
+    A8
+    beq @x
+    A16
+    inc a
+    and #$003F
+    sta w_col
+    A8
+    jsr put_col
+    bra @more
+@x:
+    rts
+
+; queue BG2 column w_col (rows 0-27) from the tunnel or the platform map
+put_col:
+    A16
+    lda w_buf
+    eor #$0040
+    sta w_buf
+    tay                         ; destination offset in COLBUF
+    lda #28
+    sta tmp2
+    lda w_col
+    and #$001F
+    asl a
+    tax                         ; source byte offset (row 0)
+    A8
+    lda w_src
+    bne @pl
+    A16
+    lda w_col
+    and #$0020
+    beq @tl
+    txa
+    clc
+    adc #2048                   ; the right-hand 32x32 screen
+    tax
+@tl:
+    lda f:subway_tunnel,x
+    sta COLBUF,y
+    txa
+    clc
+    adc #64
+    tax
+    iny
+    iny
+    dec tmp2
+    bne @tl
+    bra @q
+@pl:
+    A16
+@pll:
+    lda f:subway_platform,x
+    sta COLBUF,y
+    txa
+    clc
+    adc #64
+    tax
+    iny
+    iny
+    dec tmp2
+    bne @pll
+@q:
+    .a16
+    lda w_buf
+    clc
+    adc #.loword(COLBUF)
+    sta ptr0
+    lda #56
+    sta tmp0
+    lda w_col
+    and #$0020
+    beq @h0
+    lda #$0400
+@h0:
+    sta tmp1
+    lda w_col
+    and #$001F
+    clc
+    adc tmp1
+    clc
+    adc #VRAM_BG2MAP
+    tax
+    A8
+    lda #^COLBUF
+    sta ptr0+2
+    lda #$81                    ; VRAM +32 words per write: a column
+    jsl dma_queue
+    rts
+
 draw_ring:
-    ; dot first so it sits on top of the ring
+    ; arrow first (in front), then the dot, then the disc
+    jsr draw_arrow
     A16
     lda w_bx
     jsr int_part
@@ -878,30 +1387,37 @@ draw_ring:
     clc
     adc #RING_Y
     sta spr_y
-    ; red when near the edge
-    lda w_bx
-    jsr int_part
-    jsr square
-    sta tmp1
-    lda w_by
-    jsr int_part
-    jsr square
-    clc
-    adc tmp1
-    cmp #100
     A8
+    lda #$3A
+    sta tmp5
+    stz tmp5+1
+    lda w_grab
+    ora w_grab+1
+    beq @live
+    LDPTR1 ms_dot_off
+    ldx #MS_DOT_OFF_BASE
+    bra @d
+@live:
+    A16
+    lda w_r2
+    cmp #DANGER2
     bcs @bad
+    cmp #SWEET2
+    A8
+    bcs @ok
+    LDPTR1 ms_dot_sweet
+    ldx #MS_DOT_SWEET_BASE
+    bra @d
+@ok:
     LDPTR1 ms_dot_ok
     ldx #MS_DOT_OK_BASE
     bra @d
 @bad:
+    A8
     LDPTR1 ms_dot_bad
     ldx #MS_DOT_BAD_BASE
 @d:
     stx tmp6
-    lda #$3A
-    sta tmp5
-    stz tmp5+1
     jsl oam_meta
     ldx #RING_X
     stx spr_x
@@ -910,25 +1426,120 @@ draw_ring:
     LDPTR1 ms_ring
     ldx #MS_RING_BASE
     stx tmp6
+    lda #$3A
+    sta tmp5
+    stz tmp5+1
     jsl oam_meta
     rts
 
+; the lean arrow: blinks through the warning (faster as it nears), solid
+; while the push is on. Points the way to press.
+draw_arrow:
+    lda w_ls
+    cmp #LS_ACT
+    beq @show
+    cmp #LS_WARN
+    bne @x
+    lda w_lt
+    cmp #12
+    bcc @show
+    and #$04
+    beq @x
+@show:
+    lda w_kind
+    asl a
+    asl a
+    TAXB
+    A16
+    lda f:arrow_tab,x
+    clc
+    adc #RING_X
+    sta spr_x
+    lda f:arrow_tab+2,x
+    clc
+    adc #RING_Y
+    sta spr_y
+    A8
+    lda #$3A
+    sta tmp5
+    lda w_kind
+    TAXB
+    lda f:arrow_flip,x
+    sta tmp5+1
+    cpx #K_DEP
+    beq @r
+    cpx #K_BRK
+    beq @r
+    LDPTR1 ms_arrow_u
+    ldx #MS_ARROW_U_BASE
+    bra @d
+@r:
+    LDPTR1 ms_arrow_r
+    ldx #MS_ARROW_R_BASE
+@d:
+    stx tmp6
+    jsl oam_meta
+@x:
+    rts
+
+; per kind: x, y offsets; flips (bit 6 h, bit 7 v)
+arrow_tab:  .word ARROW_D, 0,  0, $10000 - ARROW_D,  0, ARROW_D,  $10000 - ARROW_D, 0
+arrow_flip: .byte 0, 0, $80, $40
+
 draw_rider:
-    ldx #RIDER_X
-    stx spr_x
-    ldx #RIDER_Y
-    stx spr_y
+    A16
+    lda #RIDER_X
+    clc
+    adc w_rx
+    sta spr_x
+    lda #RIDER_Y
+    clc
+    adc w_ry
+    sta spr_y
+    ; standing passengers and the rider lurch with the push (the car
+    ; body moves the other way: see sb_draw)
+    lda w_fx
+    jsr asr3
+    clc
+    adc spr_x
+    sta spr_x
+    A8
     lda #$30
     sta tmp5
     stz tmp5+1
-    ldx w_grab
+    lda w_grab
     beq @free
+    cmp #24
+    bcc @walk
     lda w_gkind
-    asl a
-    TAXB
-    lda f:grab_frame,x
+    clc
+    adc #6                      ; pole, face, sit, floor
+    bra @f
+@walk:
+    lda frame
+    lsr a
+    lsr a
+    lsr a
+    and #$01
+    clc
+    adc #10
     bra @f
 @free:
+    ; walking back still?
+    A16
+    lda w_rx
+    ora w_ry
+    A8
+    beq @lean
+    lda frame
+    lsr a
+    lsr a
+    lsr a
+    and #$01
+    clc
+    adc #10
+    bra @f
+@lean:
     ; lean frames from the balance offset
     A16
     lda w_by
@@ -937,21 +1548,21 @@ draw_rider:
     eor #$FFFF
     inc a
 @ay:
-    cmp #9
+    cmp #12
     A8
-    bcc @lean
+    bcc @lx
     lda #5                      ; arms flailing
     bra @f
-@lean:
+@lx:
     A16
     lda w_bx
     jsr int_part
     A8
     cmp #$80
     bcs @neg
-    cmp #7
+    cmp #10
     bcs @f2
-    cmp #3
+    cmp #4
     bcs @f1
     lda #0
     bra @f
@@ -962,9 +1573,9 @@ draw_rider:
     lda #4
     bra @f
 @neg:
-    cmp #($100 - 6)
+    cmp #($100 - 9)
     bcc @b2
-    cmp #($100 - 2)
+    cmp #($100 - 3)
     bcc @b1
     lda #0
     bra @f
@@ -989,24 +1600,53 @@ draw_rider:
     jsl oam_meta
     rts
 
-grab_frame: .byte 6, 0, 7, 0, 5, 0, 8, 0
-rider_lo:   .addr ms_up, ms_lb1, ms_lb2, ms_lf1, ms_lf2, ms_wobble, ms_grab_b, ms_grab_f, ms_splat
+rider_lo:   .addr ms_up, ms_lb1, ms_lb2, ms_lf1, ms_lf2, ms_wobble, ms_pole, ms_face, ms_sit, ms_floor
+            .addr ms_walk0, ms_walk1
 rider_base: .word MS_UP_BASE, MS_LB1_BASE, MS_LB2_BASE, MS_LF1_BASE, MS_LF2_BASE
-            .word MS_WOBBLE_BASE, MS_GRAB_B_BASE, MS_GRAB_F_BASE, MS_SPLAT_BASE
+            .word MS_WOBBLE_BASE, MS_POLE_BASE, MS_FACE_BASE, MS_SIT_BASE, MS_FLOOR_BASE
+            .word MS_WALK0_BASE, MS_WALK1_BASE
 
-; seated and standing passengers
+; seated and standing passengers (standing ones lurch with the push, seated
+; ones nod along to the rattle)
+NUM_PP = 6
 draw_people:
     ldx #$0000
 @p:
     stx w_cur
+    A16
     lda f:pp_x,x
     sta spr_x
-    stz spr_x+1
     lda f:pp_y,x
     sta spr_y
-    stz spr_y+1
+    lda f:pp_kind,x
+    cmp #2
+    bcc @seated
+    ; standing: lurch
+    lda w_fx
+    jsr asr3
+    clc
+    adc spr_x
+    sta spr_x
+    lda w_fy
+    jsr asr3
+    clc
+    adc spr_y
+    sta spr_y
+    bra @pos
+@seated:
+    lda w_speed
+    beq @pos
+    lda frame
+    clc
+    adc w_cur
+    and #$0010
+    beq @pos
+    inc spr_y
+@pos:
+    A8
+    ldx w_cur
     lda f:pp_pal,x
-    cpx #6                      ; the one by the door changes at each stop
+    cpx #((NUM_PP - 1) * 2)     ; the one by the door changes at each stop
     bne @np
     lda w_pal
 @np:
@@ -1015,6 +1655,28 @@ draw_people:
     sta tmp5
     stz tmp5+1
     lda f:pp_kind,x
+    cpx #((NUM_PP - 1) * 2)
+    bne @k
+    ; the boarder walks in from the doors
+    A16
+    lda w_walk
+    cmp #233
+    bcc @stand
+    dec w_walk
+    sta spr_x
+    A8
+    lda frame
+    lsr a
+    lsr a
+    lsr a
+    and #$01
+    clc
+    adc #4
+    bra @k
+@stand:
+    A8
+    lda #2
+@k:
     asl a
     TAXB
     lda f:pk_lo,x
@@ -1026,20 +1688,25 @@ draw_people:
     lda f:pk_base,x
     sta tmp6
     stz tmp6+1
+    lda f:pk_base+1,x
+    sta tmp6+1
     jsl oam_meta
     ldx w_cur
     inx
     inx
-    cpx #10
-    bne @p
+    cpx #(NUM_PP*2)
+    beq @x
+    jmp @p
+@x:
     rts
 
-pp_x:    .word 36, 80, 216, 176, 64
-pp_y:    .word 151, 151, 151, 196, 196
-pp_pal:  .word 1, 3, 2, 4, 2
-pp_kind: .word 0, 1, 0, 3, 2
-pk_lo:   .addr ms_sit_phone, ms_sit_sleep, ms_strap, ms_backpack
+pp_x:    .word 40, 84, 212, 64, 178, 232
+pp_y:    .word 151, 151, 151, 210, 210, 210
+pp_pal:  .word 1, 3, 2, 4, 2, 3
+pp_kind: .word 0, 1, 0, 2, 3, 2
+pk_lo:   .addr ms_sit_phone, ms_sit_sleep, ms_strap, ms_backpack, ms_walk_a, ms_walk_b
 pk_base: .word MS_SIT_PHONE_BASE, MS_SIT_SLEEP_BASE, MS_STRAP_BASE, MS_BACKPACK_BASE
+         .word MS_WALK_A_BASE, MS_WALK_B_BASE
 
 draw_germs:
     ldx #$0000
@@ -1078,15 +1745,23 @@ draw_germs:
     rts
 
 ; ------------------------------------------------------------------
+; HUD: two rows at 16 px pitch on the dark band.
+;   row 1: GERMS nn              NEXT: STATION
+;   row 3: status (the cue)      STYLE nnnn
 sb_hud_full:
     PRINT 1, 1, TP_WHITE, str_germs
-    PRINT 14, 1, TP_GREY, str_line
+    PRINT 15, 1, TP_WHITE, str_next
+    PRINT 20, 3, TP_WHITE, str_style
+    ldx #$FF
+    stx w_stat_old
     lda #$FF
-    sta w_stat_old
+    sta w_hseg
     jsr sb_hud_now
+    jsr hud_station
     rts
 
 sb_hud:
+    jsr hud_status
     lda frame
     and #$03
     beq sb_hud_now
@@ -1094,33 +1769,44 @@ sb_hud:
 sb_hud_now:
     ldx w_germs
     stx tmp1
+    lda #($20 | (TP_GREEN << 2))
+    cpx #15
+    bcc @g
+    lda #($20 | (TP_RED << 2))
+@g:
     ldx #(1*32 + 7)
     ldy #2
-    lda #($20 | (TP_GREEN << 2))
     jsl txt_num
-    ; next station
+    ldx w_style
+    stx tmp1
+    ldx #(3*32 + 26)
+    ldy #4
+    lda #($20 | (TP_YELLOW << 2))
+    jsl txt_num
+    ; next station changes on arrival
     lda w_seg
-    cmp #NUM_SEG
-    bcs @st
+    cmp w_hseg
+    beq @x
+    jsr hud_station
+@x:
+    rts
+
+hud_station:
+    lda w_seg
+    sta w_hseg
+    ldx #(1*32 + 21)
     A16
-    and #$00FF
-    asl a
-    tax
-    lda f:station_names,x
-    sta ptr0
-    A8
-    lda #^station_names
-    sta ptr0+2
-    PRINT 14, 2, TP_GREY, str_next
-    ldx #(2*32 + 20)
-    A16
-    lda #$010B
+    lda #$010A
     sta tmp1
     A8
     stz tmp2
     lda #$20
     jsl txt_fill
     lda w_seg
+    cmp #NUM_SEG
+    bcc @n
+    lda #(NUM_SEG - 1)
+@n:
     A16
     and #$00FF
     asl a
@@ -1130,18 +1816,19 @@ sb_hud_now:
     A8
     lda #^station_names
     sta ptr0+2
-    ldx #(2*32 + 20)
+    ldx #(1*32 + 21)
     lda #($20 | (TP_YELLOW << 2))
     jsl txt_print
-@st:
-    ; status line
+    rts
+
+hud_status:
     lda w_status
     cmp w_stat_old
     beq @x
     sta w_stat_old
-    ldx #(2*32 + 1)
+    ldx #(3*32 + 1)
     A16
-    lda #$010C
+    lda #$010E
     sta tmp1
     A8
     stz tmp2
@@ -1160,88 +1847,98 @@ sb_hud_now:
     lda w_status
     TAXB
     lda f:status_tp,x
-    ldx #(2*32 + 1)
+    ldx #(3*32 + 1)
     jsl txt_print
 @x:
     rts
 
 str_germs: .byte "GERMS", 0
-str_line:  .byte "BLOOR ", TXT_ARROW_R + 32, " UNION", 0
 str_next:  .byte "NEXT:", 0
-status_msgs: .addr ss0, ss1, ss2, ss3, ss4, ss5, ss6
-status_tp:   .byte ($20 | (TP_WHITE << 2)), ($20 | (TP_ORANGE << 2)), ($20 | (TP_GREY << 2))
-             .byte ($20 | (TP_CYAN << 2)), ($20 | (TP_CYAN << 2)), ($20 | (TP_RED << 2))
-             .byte ($20 | (TP_YELLOW << 2))
+str_style: .byte "STYLE", 0
+status_msgs: .addr ss0, ss1, ss2, ss3, ss4, ss5, ss6, ss7, ss8
+status_tp:   .byte ($20 | (TP_WHITE << 2)), ($20 | (TP_ORANGE << 2)), ($20 | (TP_ORANGE << 2))
+             .byte ($20 | (TP_WHITE << 2)), ($20 | (TP_CYAN << 2)), ($20 | (TP_CYAN << 2))
+             .byte ($20 | (TP_RED << 2)), ($20 | (TP_YELLOW << 2)), ($20 | (TP_YELLOW << 2))
 ss0: .byte " ", 0
-ss1: .byte "GO! GO! GO!", 0
-ss2: .byte "CRUISING", 0
-ss3: .byte "CURVE LEFT", 0
-ss4: .byte "CURVE RIGHT", 0
-ss5: .byte "BRAKING!", 0
-ss6: .byte "DOORS OPEN", 0
+ss1: .byte "STAND CLEAR!", 0
+ss2: .byte "GO! GO! GO!", 0
+ss3: .byte "CRUISING", 0
+ss4: .byte "CURVE LEFT!", 0
+ss5: .byte "CURVE RIGHT!", 0
+ss6: .byte "BRAKING!", 0
+ss7: .byte "DOORS OPEN", 0
+ss8: .byte "ALL OUT!", 0
 
 ; ------------------------------------------------------------------
-; score: 2000 - 100 per germ (floor 0) + 5 per second of best streak (max 300)
+; score. Finished at Union: RIDE 1000 + STYLE - 40 per germ.
+; PATIENT ZERO or gave up: 40 per station reached on a leg you worked.
 sb_score:
     A16
-    lda w_streak
-    cmp w_best
-    bcc @k
-    sta w_best
-@k:
-    lda w_best
-    sta tmp0
-    A8
-    lda #60
-    jsl div16
-    A16
-    lda tmp0
-    cmp #60
-    bcc @c
-    lda #60
-@c:
-    sta ev_stat+4               ; best streak, seconds
-    asl a
-    asl a
-    clc
-    adc ev_stat+4               ; *5
-    sta tmp4
     lda w_germs
     sta ev_stat
     lda w_seg
+    and #$00FF
     sta ev_stat+2               ; stations reached
-    ; 2000 - 100*germs
+    lda w_best
+    and #$00FF
+    sta ev_stat+4               ; best STANDING SURF chain
+    lda w_style
+    sta ev_stat+6               ; style points
     lda w_germs
     cmp #20
-    bcc @g
-    lda #20
-@g:
+    bcs @fail
+    lda w_seg
+    and #$00FF
+    cmp #NUM_SEG
+    bcc @fail
+    ; finished
+    lda #BASE_RIDE
+    sta ev_break
+    lda w_style
+    sta ev_break+2
+    lda w_germs
     asl a
     asl a
-    sta tmp1                    ; 4g
-    asl a
+    asl a                       ; 8g
+    sta tmp1
     asl a
     asl a                       ; 32g
-    sta tmp2
-    asl a                       ; 64g
     clc
-    adc tmp2
+    adc tmp1
+    sta ev_break+4              ; 40g
+    lda ev_break
     clc
-    adc tmp1                    ; 100g
-    eor #$FFFF
+    adc ev_break+2
     sec
-    adc #2000
-    clc
-    adc tmp4
+    sbc ev_break+4
     sta ev_score
     A8
     stz ev_fail
-    lda w_germs
-    cmp #20
-    bcc @x
+    rts
+@fail:
+    .a16
+    lda w_earn
+    and #$00FF
+    asl a
+    asl a
+    asl a                       ; 8s
+    sta tmp1
+    asl a
+    asl a                       ; 32s
+    clc
+    adc tmp1                    ; 40s
+    sta ev_break
+    sta ev_score
+    stz ev_break+2
+    stz ev_break+4
+    A8
+    lda #$03
+    ldx w_germs
+    cpx #20
+    bcc @q
     lda #$01
+@q:
     sta ev_fail
-@x:
     rts
 
 .include "subway_meta.inc"
