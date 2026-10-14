@@ -24,9 +24,13 @@
 ; beat's two centre frames), twice in DOUBLE TIME. Anything sloppy, a bump,
 ; a double step or an "EXCUSE ME!" breaks it, so weaving through lanes beats
 ; asking, and leaving a lane with someone right in front of you is a CLOSE
-; SHAVE (5 x level). PRESTO TAP (Y on a bar's downbeat, PERFECT) adds
+; SHAVE (25). PRESTO TAP (Y on a bar's downbeat, PERFECT) adds
 ; 5 x level and pushes the combo; a Y anywhere else is CARD DECLINED.
 ; A bump knocks you to half pace and spills coffee (40), all but the first.
+; The cup holds four spills; then it's DECAF: no DOUBLE TIME and 3/4 of the
+; groove for the rest of the walk, and every bump spills somebody else's
+; latte (still 40). Undocumented: CLOSE SHAVEs inside 2 s of each other are
+; a SLALOM (X2, X3, X4 the shave).
 .p816
 .smart -
 .include "globals.inc"
@@ -54,7 +58,9 @@ SPD_PERF   = $0130
 SPD_DT     = $0030          ; DOUBLE TIME: the longer stride on top
 GROOVE_MAX = 8              ; streak cap; each step of streak adds 7/256 px/frame
 DECAF_MAX  = 6              ; out of coffee: the groove tops out at 3/4
+SPILL_SIPS = 4              ; a spill: one cell of the cup's four
 BUMP_T     = 16             ; frames a bump knocks you off your stride
+BUMP_DT    = 24             ; ... and stops you dead in DOUBLE TIME
 DOORS_T    = 10*60          ; "doors closing" with this many frames left
 
 ST_WALK    = 0
@@ -177,8 +183,15 @@ w_deadon = ev_ram + 620         ; this step was DEAD ON (the beat's centre frame
 w_shaves = ev_ram + 621         ; CLOSE SHAVEs (byte)
 w_bumps  = ev_ram + 622         ; bumps, spilt or not (byte)
 w_same   = ev_ram + 623         ; this step was the same foot again
-w_msg    = ev_ram + 624         ; a popup with points in it (24 bytes; low
-                                ; WRAM, so bank $82 reads it through the mirror)
+w_msg    = ev_ram + 624         ; a popup with points in it (32 bytes: 30
+                                ; characters at most; low WRAM, so bank $82
+                                ; reads it through the mirror)
+w_slalom = ev_ram + 656         ; CLOSE SHAVEs in a row (SLALOM), 0..4
+w_slt    = ev_ram + 657         ; frames the chain stays open
+w_dodges = ev_ram + 658         ; early dodges (a red ! far ahead)
+w_slaloms= ev_ram + 659         ; SLALOMs (X2 or better)
+w_sidet  = ev_ram + 660         ; after walking into a cart or a board: frames
+                                ; until you step round it into the middle lane
 
 T_SUIT    = 1
 T_TOURIST = 2
@@ -280,11 +293,11 @@ bay_init:
     jsr ev_clear
     lda #1
     sta w_lane
-    ldx #172
+    ldx #168
     stx w_y
     ldx #TIME_LIMIT
     stx w_time
-    ldx #16
+    ldx #(4*SPILL_SIPS)
     stx w_coffee
     ldx #$5A17
     stx EV_SEED
@@ -662,12 +675,14 @@ TIP_SPILL = $08
 TIP_PRESTO= $10
 TIP_FOOT  = $20
 TIP_LAST  = $40
-str_tlane: .byte "RED ! AHEAD? UP/DOWN LANE", 0
+TIP_SHAVE = $80
+str_tlane: .byte "RED ! AHEAD? ", TXT_ARROW_U + $20, "/", TXT_ARROW_D + $20, " CHANGE LANE", 0
+str_tshave:.byte "DODGE LATER: CLOSE SHAVE +25", 0
 str_tbeat: .byte "TIP: STEP AS BIG DOTS LAND", 0
 str_tdt:   .byte "SMALL DOTS TOO: DOUBLE TIME", 0
 str_tspill:.byte "NEXT BUMP SPILLS COFFEE: -40", 0
 str_tlast: .byte "LAST SIP! 1 MORE SPILL: DECAF", 0
-str_tpresto:.byte "Y ON A GOLD DOT: PRESTO!", 0
+str_tpresto:.byte "Y ON GOLD DOTS: COMBO BOOST", 0
 str_tfoot: .byte "OTHER FOOT! ", TXT_ARROW_L + $20, " ", TXT_ARROW_R + $20, " ", TXT_ARROW_L + $20, " ", TXT_ARROW_R + $20, 0
 str_dt:    .byte "DOUBLE TIME!", 0
 
@@ -1021,8 +1036,10 @@ set_target:
     rts
 
 ; DOUBLE TIME is a good step on the "and" right after a good step on the
-; beat; a sloppy step anywhere drops back to single time.
+; beat; a sloppy step anywhere drops back to single time. DECAF: never.
 double_time:
+    lda w_decaf
+    bne @single
     lda w_sbest
     cmp #G_GOOD
     bcc @single
@@ -1183,7 +1200,7 @@ input_presto:
     A16
     inc w_presto
     A8
-    SFX SFX_COIN
+    SFX SFX_GO                  ; the reader's beep
     lda #12
     sta w_flash
     lda w_level
@@ -1215,8 +1232,8 @@ input_presto:
 @x:
     rts
 
-str_presto:   .byte "PRESTO! *BEEP*", 0
-str_declined: .byte "PRESTO: CARD DECLINED!", 0
+str_presto:   .byte "PRESTO *BEEP*! COMBO UP", 0
+str_declined: .byte "CARD DECLINED! GOLD DOTS ONLY", 0
 
 spd_base: .word 0, SPD_OFF, SPD_GOOD, SPD_PERF
 
@@ -1239,21 +1256,36 @@ trip:
     lda #TP_YELLOW
     ldy #50
     jsr popup
-    lda #2
+    lda #0                      ; (an empty cup has nothing to spill)
     jmp spill
 
 str_whoa: .byte "WHOA! STEP ON THE BEAT!", 0
 
-; A = coffee lost
+; One spill (40 on the card): a cell of the cup's four. A = 1 for a bump:
+; once the cup is dry, a bump spills the other person's latte instead (still
+; a spill, still 40), so a walk that never dodges keeps paying for it.
 spill:
     sta tmp0
-    stz tmp0+1
     A16
     lda w_coffee
-    beq @dry
+    bne @mine
+    A8
+    lda tmp0
+    beq @x
+    A16
+    inc w_spills
+    lda #30
+    sta w_splash
+    A8
+    ldx #.loword(str_theirs)
+    lda #TP_RED
+    ldy #60
+    jmp popup
+@mine:
+    .a16
     inc w_spills
     sec
-    sbc tmp0
+    sbc #SPILL_SIPS
     bcs @c
     lda #$0000
 @c:
@@ -1261,7 +1293,7 @@ spill:
     lda #30
     sta w_splash
     lda w_coffee
-    cmp #2
+    cmp #SPILL_SIPS
     bne @nl
     A8
     lda #TIP_LAST               ; one spill left in the cup
@@ -1270,27 +1302,29 @@ spill:
     A16
 @nl:
     lda w_coffee
-    bne @dry
     A8
+    bne @x
+    ; DECAF: no DOUBLE TIME and 3/4 of the groove from here to Union
     lda #$01
     sta w_decaf
     stz w_groove
-    lda w_streak                ; groove drops to 3/4
+    stz w_dt
+    lda w_streak
     cmp #DECAF_MAX
     bcc @half
     lda #DECAF_MAX
     sta w_streak
 @half:
+    SFX SFX_GROAN
     ldx #.loword(str_decaf)
     lda #TP_RED
     ldy #90
-    jsr popup
-    rts
-@dry:
-    A8
+    jmp popup
+@x:
     rts
 
-str_decaf: .byte "OUT OF COFFEE! 3/4 GROOVE", 0
+str_decaf:  .byte "DECAF! SLOWER, NO DOUBLE TIME", 0
+str_theirs: .byte "SORRY! SPILLED THEIR LATTE", 0
 
 approach_speed:
     A16
@@ -1334,7 +1368,7 @@ move_player:
     clc
     adc w_dist
     sta w_dist
-    ; ease into the lane, 4 px a frame
+    ; ease into the lane, 5 px a frame (lanes are 20 apart)
     lda w_lane
     and #$00FF
     tax
@@ -1345,19 +1379,30 @@ move_player:
     bcc @lup
     lda w_y
     clc
-    adc #4
+    adc #5
     sta w_y
     bra @ly
 @lup:
     lda w_y
     sec
-    sbc #4
+    sbc #5
     sta w_y
 @ly:
     A8
     rts
 
 tick_timers:
+    lda w_slt                   ; a SLALOM chain closing
+    beq @sl
+    dec w_slt
+@sl:
+    lda w_sidet                 ; stepping round a cart or a board
+    beq @sd
+    dec w_sidet
+    bne @sd
+    lda #1
+    sta w_lane
+@sd:
     lda w_tipt                  ; a coaching tip waiting its turn
     beq @t0
     dec w_tipt
@@ -1443,7 +1488,7 @@ check_clock:
     sta w_state
     rts
 
-lane_y: .byte 156, 172, 188
+lane_y: .byte 148, 168, 188         ; feet: 20 px apart, on the floor's lane lines
 str_made:   .byte "MADE THE 5:42!", 0
 str_missed: .byte "MISSED THE TRAIN!", 0
 str_doors:  .byte "STAND CLEAR OF THE DOORS!", 0
@@ -1476,29 +1521,39 @@ input_lane:
     jsr close_shave             ; (from the lane you're leaving)
     pla
     sta w_lane
+    stz w_sidet                 ; (you stepped round it yourself)
     SFX SFX_BLIP
 @no:
     rts
 
 ; Leaving a lane with someone right in front of you (or a jogger right on
-; your heels): CLOSE SHAVE, 5 x combo level, once a person.
-SHAVE_PX = 24
+; your heels): CLOSE SHAVE, SHAVE_PTS, once a person. The window
+; is the last SHAVE_PX before you'd have walked into them (a cart is wider).
+; Undocumented: another one inside SLALOM_T frames is a SLALOM, the shave
+; times the chain (X2, X3, X4); a bump ends the chain.
+; A dodge from further off (the red ! still well ahead) is just a dodge: the
+; second of those gets the coach's "DODGE LATER" tip.
+SHAVE_PX = 16
+SHAVE_PTS= 25               ; (str_tshave says +25)
+SLALOM_T = 120
 close_shave:
     lda w_state
     cmp #ST_WALK
-    bne @x
+    beq @go
+    rts
+@go:
     ldy #$0000
 @e:
     lda E_TYPE,y
-    beq @n
+    jeq @n
     cmp #T_PIGEON
-    beq @n
+    jeq @n
     lda E_LANE,y
     cmp w_lane
-    bne @n
+    jne @n
     lda E_FLAGS,y
     and #$1C                    ; bumped us, stepped aside, shaved already
-    bne @n
+    jne @n
     A16
     lda E_WX,y
     sec
@@ -1508,35 +1563,95 @@ close_shave:
     lda E_TYPE,y
     cmp #T_JOGGER
     beq @jog
+    ldx #(12 + SHAVE_PX)
+    cmp #T_CART
+    bne @w
+    ldx #(22 + SHAVE_PX)
+@w:
+    stx tmp3
     A16
     lda tmp4
-    bmi @n16
-    cmp #(SHAVE_PX + 1)
-    bcs @n16
-    bra @got
+    jmi @n16
+    cmp tmp3
+    bcc @got
+    cpy w_warn                  ; the one the red ! is over, still well
+    jne @n16                    ; ahead: a safe dodge
+    A8
+    lda w_tips
+    bit #TIP_SHAVE
+    jne @n
+    inc w_dodges
+    lda w_dodges
+    cmp #2
+    jcc @n
+    lda #TIP_SHAVE
+    ldx #.loword(str_tshave)
+    phy
+    jsr tip
+    ply
+    jmp @n
 @jog:
     A16
     lda tmp4
-    bpl @n16
-    cmp #($10000 - SHAVE_PX)
-    bcc @n16
+    jpl @n16
+    cmp #($10000 - 12 - SHAVE_PX)
+    jcc @n16
 @got:
     A8
     lda E_FLAGS,y
     ora #$10
     sta E_FLAGS,y
     inc w_shaves
-    lda w_level
-    asl a
-    asl a
+    lda #SHAVE_PTS
+    sta tmp2
+    lda w_slt                   ; SLALOM: inside the window of the last one
+    beq @first
+    lda w_slalom
+    cmp #4
+    bcs @chain
+    inc w_slalom
+    bra @chain
+@first:
+    lda #1
+    sta w_slalom
+@chain:
+    lda #SLALOM_T
+    sta w_slt
+    lda w_slalom
+    sta tmp3
+    lda tmp2
+    sta tmp4
+@mul:
+    dec tmp3
+    beq @pts
     clc
-    adc w_level                 ; 5 x level
+    adc tmp4                    ; (100 at most)
+    bra @mul
+@pts:
     sta tmp2
     jsr style_add
     SFX SFX_COIN
+    lda w_slalom
+    cmp #2
+    bcs @slalom
     ldx #.loword(str_shave)
     lda #TP_CYAN
     ldy #40
+    jmp popup_pts
+@slalom:
+    inc w_slaloms
+    asl a
+    TAXB
+    lda slalom_msg-4,x
+    pha
+    lda slalom_msg-3,x
+    xba
+    pla
+    A16
+    tax
+    A8
+    lda #TP_GREEN
+    ldy #50
     jmp popup_pts
 @n16:
     A8
@@ -1544,13 +1659,16 @@ close_shave:
     iny
     iny
     cpy #(NUM_ENT*2)
-    bne @e
-@x:
+    jne @e
     rts
 
+slalom_msg: .addr str_sl2, str_sl3, str_sl4
+str_sl2: .byte "SLALOM X2!", 0
+str_sl3: .byte "SLALOM X3!", 0
+str_sl4: .byte "BAY ST SLALOM X4!", 0
 str_shave: .byte "CLOSE SHAVE!", 0
 
-; popup "<X> +<tmp2>" (tmp2 = 0..99), A = text palette, Y = frames on show
+; popup "<X> +<tmp2>" (tmp2 = 0..255), A = text palette, Y = frames on show
 popup_pts:
     pha
     phy
@@ -1571,23 +1689,26 @@ popup_pts:
     lda #'+'
     sta w_msg,y
     iny
+    stz tmp3                    ; no digit yet (no leading zeros)
     lda tmp2
+    ldx #$0000
+@h:
+    cmp #100
+    bcc @h1
+    sbc #100
+    inx
+    bra @h
+@h1:
+    jsr @digit
     ldx #$0000
 @t:
     cmp #10
-    bcc @o
+    bcc @t1
     sbc #10
     inx
     bra @t
-@o:
-    pha
-    txa
-    beq @one
-    ora #'0'
-    sta w_msg,y
-    iny
-@one:
-    pla
+@t1:
+    jsr @digit
     ora #'0'
     sta w_msg,y
     iny
@@ -1597,6 +1718,20 @@ popup_pts:
     pla
     ldx #.loword(w_msg)
     jmp popup
+; X = a digit (A, the rest, is kept): print it unless it's a leading zero
+@digit:
+    pha
+    txa
+    ora tmp3
+    beq @skip
+    txa
+    ora #'0'
+    sta w_msg,y
+    iny
+    sta tmp3
+@skip:
+    pla
+    rts
 
 ; lane_free: A = lane, tmp4 = world x, tmp5 = entity to ignore.
 ; Carry set if someone (not a pigeon) stands within 14 px there.
@@ -1793,12 +1928,15 @@ step_aside:
     rts
 
 ; bump: A = type of who we hit (the jogger hits us from behind). It knocks
-; you to half pace for a moment and costs three notches of groove (like a
-; skipped beat) and the combo. Every bump but the first spills coffee (40).
+; you to half pace while you apologise (this is Toronto) and costs three
+; notches of groove (like a skipped beat), the combo and a SLALOM. Every
+; bump but the first spills coffee (40), even once the cup is dry.
 bump_player:
     pha
     lda #ST_STUMBLE
     sta w_state
+    lda w_dt                    ; rushing in DOUBLE TIME: a harder bump, a
+    sta tmp7                    ; dead stop for longer
     stz w_dt
     ldx #BUMP_T
     stx w_timer
@@ -1812,8 +1950,17 @@ bump_player:
     stz w_groove
     jsr combo_break
     inc w_bumps
+    stz w_slalom                ; a bump ends a SLALOM
+    stz w_slt
     A16
-    lsr w_speed
+    lsr w_speed                 ; knocked to half pace while you say sorry
+    lda tmp7
+    and #$00FF
+    beq @half
+    stz w_speed                 ; (DOUBLE TIME: stopped dead)
+    lda #BUMP_DT
+    sta w_timer
+@half:
     lda w_speed
     sta w_target
     lda w_dist
@@ -1827,10 +1974,10 @@ bump_player:
     SFX SFX_SPLASH
     pla
     cmp #T_CART                 ; a cart or a sandwich board doesn't give:
-    bcc @soft                   ; you bounce off it into the middle lane
-    pha
-    lda #1
-    sta w_lane
+    bcc @soft                   ; you stand there a moment (in its lane, so
+    pha                         ; the bump reads), then step round it into
+    lda #12                     ; the middle lane
+    sta w_sidet
     pla
 @soft:
     asl a
@@ -1853,7 +2000,7 @@ bump_player:
     ldx #.loword(str_tspill)
     jmp tip
 @sp:
-    lda #2
+    lda #1
     jsr spill
     lda #TIP_LANE               ; the second: how not to
     ldx #.loword(str_tlane)
@@ -2269,6 +2416,23 @@ ents_update:
     inx
     cpx #(NUM_ENT*2)
     jne @ent
+    ; the first red ! of the walk: say what it means, now (not after a bump)
+    lda w_tips
+    bit #TIP_LANE
+    bne @x
+    ldx w_warn
+    bmi @x
+    lda w_state
+    cmp #ST_FINISH
+    bcs @x
+    lda w_tips
+    ora #TIP_LANE
+    sta w_tips
+    ldx #.loword(str_tlane)
+    lda #TP_CYAN
+    ldy #100
+    jmp popup
+@x:
     rts
 
 ; Who's in your way: the nearest person or thing ahead in your lane (inside
@@ -2648,8 +2812,6 @@ draw_floor:
     jeq @n
     cmp #T_PIGEON
     beq @n
-    cmp #T_CART
-    beq @n                      ; (on wheels)
     stx w_cur
     A16
     lda E_WX,x
@@ -2692,6 +2854,9 @@ draw_floor:
     jsr put_ring
     bra @nx
 @shadow:
+    lda E_TYPE,x
+    cmp #T_CART
+    beq @nx                     ; (on wheels: only the red ring)
     lda E_LY,x
     sec
     sbc #5
@@ -3067,21 +3232,25 @@ draw_beat:
     lda #0
     jsr put_one
 @noh:
-    ; grade word
+    ; grade word: over the walker's head, above the marker
     lda w_gradet
     beq @nog
+    lda w_grade
+    asl a
+    TAXB
     A16
-    lda #4                      ; left of the target
+    lda w_px
+    sec
+    sbc grade_hw,x
     sta spr_x
-    lda #(BEAT_Y - 4)
+    lda w_y
+    sec
+    sbc #53
     sta spr_y
     A8
     lda #$3A
     sta tmp5
     stz tmp5+1
-    lda w_grade
-    asl a
-    TAXB
     lda grade_lo,x
     sta ptr1
     lda grade_lo+1,x
@@ -3189,6 +3358,7 @@ draw_beat:
     rts
 
 grade_lo:   .addr 0, 0, ms_wgood, ms_wperfect, ms_wearly, ms_wlate, ms_wmiss, ms_wdeadon
+grade_hw:   .word 0, 0, 12, 21, 15, 12, 12, 21     ; half the word's width (6 px a letter)
 grade_base: .word 0, 0, MS_WGOOD_BASE, MS_WPERFECT_BASE, MS_WEARLY_BASE, MS_WLATE_BASE, MS_WMISS_BASE, MS_WDEADON_BASE
 
 ; the red '!' over whoever is in your way (see warn_check)
@@ -3860,10 +4030,11 @@ str_grvl:   .byte "GROOVE", 0
 ; The card: WALK + STYLE - SPILLS = SCORE, never below 0.
 ;  WALK   made it: 1000 + 40 a second to spare (TIME LEFT on the card);
 ;         missed it (or gave up): how far you got, distance / 5 (719 max)
-;  STYLE  the combo level for every PERFECT step, twice that DEAD ON and
-;         twice again in DOUBLE TIME; 10 x level a PRESTO TAP; 5 x level a
-;         CLOSE SHAVE
-;  SPILLS 40 a spill (2 sips of 16; the cup runs dry after 8)
+;  STYLE  the combo level for every PERFECT step, half again DEAD ON and
+;         twice in DOUBLE TIME; 5 x level a PRESTO TAP; 25 a CLOSE SHAVE
+;         (x2..x4 in a SLALOM)
+;  SPILLS 40 a spill: every bump but the first, uncapped (the cup holds
+;         four, then you spill theirs)
 ; The penalty row is always the true cost; a sum below 0 scores 0.
 FIN_BASE  = 1000
 SEC_PTS   = 40              ; (bay_score multiplies by hand)

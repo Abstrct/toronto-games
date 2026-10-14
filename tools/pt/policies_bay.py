@@ -62,9 +62,10 @@ class _Eyes:
                 return None
             self.base = self.g.sym.addr.get('ev_ram', 0x1018) if hasattr(self.g.sym, 'addr') \
                 else self.g.sym['ev_ram']
-        ram = self.g.core.peek(self.base, 512)
+        ram = self.g.core.peek(self.base, 620)
         w = lambda o: ram[o] | ram[o + 1] << 8
-        me = dict(dist=w(0), lane=ram[6], state=ram[14], cd=w(26), speed=w(4) / 256.0)
+        me = dict(dist=w(0), lane=ram[6], state=ram[14], cd=w(26), speed=w(4) / 256.0,
+                  tips=ram[602], decaf=ram[512])
         ents = []
         for i in range(NUM_ENT):
             typ = ram[E_TYPE + 2 * i]
@@ -417,6 +418,12 @@ class bay_ear(bay_hand):
         self.err = 0.0          # running mean |frames off| of my steps
         self.presto = (S < 12) if self.presto_on is None else self.presto_on
         self.shaving = (S < 9) if self.shave is None else self.shave
+        # card readers learn the CLOSE SHAVE from the coach ("DODGE LATER:
+        # CLOSE SHAVE!", w_tips bit 7) and try it from then on, anticipating
+        # the gap closing as they anticipate a dot (with an error ~ their hand)
+        self.learns_shave = self.shave is None and 9 <= S <= 18
+        self.shave_seen = None
+        self.shave_err = {}
         if not self.excuse:
             self.prefer_lanes = True
 
@@ -527,6 +534,11 @@ class bay_ear(bay_hand):
         walkers = ahead and all(e['type'] < T_JOGGER for e in ahead) and not jog
         can_excuse = (self.excuse and walkers and t - self.excuse_at > 45
                       and min(e['rel'] for e in ahead) < (36 if self.S < 9 else 60))
+        if self.learns_shave and not self.shaving and me['tips'] & 0x80:
+            if self.shave_seen is None:
+                self.shave_seen = t
+            elif t - self.shave_seen > 64 + 40:        # the tip shows, they read it
+                self.shaving = True
         if room(best) > here + 8 and room(best) >= 28 and (self.prefer_lanes or not can_excuse
                                                           or room(best) > 90):
             if self.shaving and not jog and abs(best - me['lane']) == 1:
@@ -534,7 +546,18 @@ class bay_ear(bay_hand):
                 # ahead (CLOSE SHAVE), a little sooner the faster we close
                 near = min(ahead, key=lambda e: e['rel'])
                 close = max(0.2, me['speed'] - near['v'])
-                if near['type'] < T_JOGGER and near['rel'] - close * 4 > 21:
+                aim = 21
+                if self.S < 9:
+                    lead = 4
+                else:
+                    aim = 26            # a careful cut: the far edge of the window
+                    # a person's guess of "when it'll be close", made L frames
+                    # before it lands: per person, an error of ~L/3 frames
+                    key = (near['type'], near['wx'] // 32, near['lane'])
+                    if key not in self.shave_err:
+                        self.shave_err[key] = rng.gauss(0, 1 + self.S / 3.0)
+                    lead = 4 + self.L + self.shave_err[key]
+                if near['type'] < T_JOGGER and near['rel'] - close * lead > aim:
                     return 0
             m = X if best < me['lane'] else B
             if abs(best - me['lane']) == 2:
