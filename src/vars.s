@@ -65,6 +65,7 @@ event_idx:  .res 1
 ev_score:   .res 2
 ev_fail:    .res 1
 ev_stat:    .res 8              ; up to 4 words of per-event stats for the result card
+ev_break:   .res 6              ; result card arithmetic: base, bonus, penalty words (base + bonus - penalty = ev_score)
 ev_giveup:  .res 1              ; set by the pause menu: the running event ends now (ev_fail = 3)
 records:    .res 16 * NUM_EVENTS * 5 ; top 5 per event, rank-major: score(2) name(9) pad(5)
 ev_ram:     .res EV_RAM_SIZE    ; scratch shared by whichever screen is running
