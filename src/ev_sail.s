@@ -1915,7 +1915,7 @@ floats:
     rts
 
 str_honk:  .byte "HONK! HONK! GOOSED!", 0
-str_sorry: .byte "SORRY! SORRY!", 0
+str_sorry: .byte "EASY! IT'S A RENTAL!", 0
 
 ; flecks drift downwind (twice as fast in a gust, when they become dark
 ; cat's-paw ripples); they live in world space and wrap around the view

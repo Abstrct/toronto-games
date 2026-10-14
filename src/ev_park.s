@@ -100,6 +100,7 @@ k_scd    = ev_ram + 578      ; frames before the gap search runs again (it's dea
 k_hand   = ev_ram + 580      ; dodges timed by hand (B with him in range), shaves included
 k_hurt   = ev_ram + 582      ; hearts lost (3 = out); k_tackle counts every tackle
 k_streak = ev_ram + 584      ; dogs beaten since the last tackle / heart back
+k_coach  = ev_ram + 586      ; 1 once the first dog's "press B" coaching has shown
 k_cbuf   = ev_ram + 640      ; 64 bytes: one BG2 canopy row, unpacked for DMA
 EV_SEED  = ev_ram + 510
 
@@ -1021,6 +1022,7 @@ walk_input:
 .a8
 
 str_oops: .byte " OOPS! NO DOG THERE ", 0
+str_coach_b: .byte " DOG! PRESS B TO GET SET! ", 0
 
 ; B with a dog on its way ("!" or charging, not yet in range): get set, and
 ; the step goes off by itself as he lunges (a plain DODGE, never a shave)
@@ -1680,13 +1682,13 @@ think_wander:
     ; (a dog busy sniffing ignores balls: you can't pre-empt every dog)
     lda k_state
     cmp #ST_WALK
-    bne @amble
+    jne @amble
     ldy k_inv                   ; nobody starts on you while you get clear
-    bne @amble
+    jne @amble
     ldy k_calm                  ; ... or just after the last one
-    bne @amble
+    jne @amble
     lda k_live                  ; one dog at a time
-    bne @amble
+    jne @amble
     lda D_CD,x
     bne @amble
     ; only a dog you can see: never from off-screen or behind the HUD
@@ -1724,6 +1726,17 @@ think_wander:
     stz D_VY,x
     A8
     SFX SFX_BARK
+    lda k_coach                 ; the first dog teaches the move
+    bne @shout
+    inc k_coach
+    LDPTR0 str_coach_b
+    lda #TP_YELLOW
+    jsr popup
+    ldx #150
+    stx k_popup
+    ldx k_cur
+    rts
+@shout:
     lda k_popup
     bne @x
     jsr owner_shout
