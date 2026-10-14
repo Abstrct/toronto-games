@@ -827,9 +827,12 @@ def run_bot(event, policy_name, seed, max_frames=60 * 240, film=None, latency=0,
                 hold = m
             elif m != want and hrng.random() >= miss:
                 want = m
-                pending.append((t + max(0, latency + hrng.randint(-jitter, jitter)), m))
+                # a hand can be late, but it never reorders its own decisions
+                due = t + max(0, latency + hrng.randint(-jitter, jitter))
+                if pending:
+                    due = max(due, pending[-1][0])
+                pending.append((due, m))
         if pending:
-            pending.sort()
             while pending and pending[0][0] <= t:
                 hold = pending.pop(0)[1]
         v = g.step(1, hold)
