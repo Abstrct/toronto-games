@@ -107,6 +107,9 @@ SFX_SIP     = 14
 SFX_CHEER   = 15
 SFX_TICK    = 16
 SFX_GROAN   = 17     ; crowd groan: no medals, a Leafs-style collapse
+SFX_CHIME   = 18     ; TTC door chime, E6 C6 G5
+SFX_FERRY   = 19     ; Island ferry horn
+SFX_FIREWORK = 20    ; soft podium firework boom
 
 ; songs
 SONG_TITLE     = 0     ; KC Incidental
@@ -121,3 +124,7 @@ SONG_PODIUM    = 8     ; KC Incidental (Podium Reprise)
 SONG_PARKING   = 9     ; Green P Shuffle
 SONG_SUBWAY    = 10    ; Please Stand Clear
 NUM_SONGS      = 11
+SONG_JINGLE_WIN    = 11   ; result jingles (one-shot, sfx_result)
+SONG_JINGLE_FAIL   = 12
+SONG_JINGLE_RECORD = 13
+.global sfx_result
