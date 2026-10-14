@@ -486,9 +486,23 @@ def build_sprites():
             d.point((x0 + i, y0 + 7 - i), fill=edge)
             d.point((x0 + 14 - i, y0 + 7 - i), fill=edge)
         d.point((x0 + 7, y0), fill=edge)
-    chevron(32, 83, 13, 11)
-    chevron(48, 80, 10, 11)
-    chevron(48, 86, 10, 11)
+    # ...each with a chalk strip on towards the hurdle: take off anywhere on
+    # it for ON THE CHALK (20 px past the chevron, src/ev_cops.s CHALK_LATE);
+    # right on the chevron is DEAD ON
+    def strip(x0, y0, fill, edge):
+        for x in range(x0, x0 + 13):
+            if (x - x0) % 4 == 3:
+                continue            # dashed, like chalk on concrete
+            d.point((x, y0), fill=edge)
+            d.point((x, y0 + 1), fill=fill)
+            d.point((x, y0 + 2), fill=fill)
+        d.point((x0 + 12, y0 - 1), fill=edge)   # the strip's end: a tick
+        d.point((x0 + 12, y0 + 3), fill=edge)
+    chevron(65, 83, 13, 11)
+    strip(80, 89, 13, 11)
+    chevron(97, 80, 10, 11)
+    chevron(97, 86, 10, 11)
+    strip(112, 92, 10, 11)
     names = [('run0', 0), ('run1', 16), ('run2', 32), ('run3', 48), ('jump', 64), ('sip', 80), ('stumble', 96)]
     for n, x in names:
         sh.obj(n, x, 0, 16, 32, 8, 31)
@@ -505,8 +519,8 @@ def build_sprites():
     sh.obj('splash', 112, 64, 16, 16, 8, 8)
     sh.obj('warn_lo', 0, 80, 16, 16, 8, 15)
     sh.obj('warn_hi', 16, 80, 16, 16, 8, 15)
-    sh.obj('mark_lo', 32, 80, 16, 16, 8, 8)
-    sh.obj('mark_hi', 48, 80, 16, 16, 8, 8)
+    sh.obj('mark_lo', 64, 80, 32, 16, 8, 8)
+    sh.obj('mark_hi', 96, 80, 32, 16, 8, 8)
     out('cops_spr.bin', sh.tiles())
     run = build_runner()
     base2 = (sh.img.size[1] // 8) * 16          # the runner sheet's first tile
