@@ -15,6 +15,7 @@ DRAFT_LEN  = 66                 ; ...for this long
 DRAFT_DX   = 12
 DRAFT_PER  = 4                  ; DRAFT moves one streetcar is good for
 DRAFT_SPD  = $0200              ; slower than this isn't drafting, it's queueing
+CLOSE_D    = 40                 ; CLOSE CALL: in its path this close, then out
 
 ; ---- course RNG (fixed seed => same course for every player) ----
 brand:
@@ -1115,7 +1116,9 @@ ent_collide:
     SFX SFX_COIN
     rts
 @miss:
-    ; near miss: the thing just slid past our shoulder
+    ; CLOSE CALL: something was about to hit us (we were in its path, inside
+    ; CLOSE_D px of it and closing) and we slipped out of the way: scored as
+    ; it goes by
     lda near_tab,y
     beq @nx
     lda b_speed+1               ; standing still isn't a close call
@@ -1125,13 +1128,32 @@ ent_collide:
     bne @nx
     lda E_REL+1,x
     eor tmp0+1
-    bpl @nx
+    bpl @inpath
+    lda E_FLAGS,x               ; going by now: were we in its way?
+    and #$20
+    beq @nx
     lda tmp1
-    sec
-    sbc hw_tab,y
-    bcc @nx
-    cmp #4
+    cmp hw_tab,y
+    bcs @close_call
+@nx:
+    rts
+@inpath:
+    lda tmp1
+    cmp hw_tab,y
     bcs @nx
+    lda tmp1+1
+    sec
+    sbc hh_tab,y
+    bcc @nx
+    cmp #CLOSE_D
+    bcs @nx
+    jsr closing
+    bcc @nx
+    lda E_FLAGS,x
+    ora #$20
+    sta E_FLAGS,x
+    rts
+@close_call:
     lda E_FLAGS,x
     ora #$01
     sta E_FLAGS,x
@@ -1147,9 +1169,35 @@ ent_collide:
     sta tmp0
     A8
     ldx b_cur
-@nx:
     rts
 
+
+; carry set if vehicle X is closing on us: ahead and slower than us
+; (oncoming and parked always are), or behind and faster. tmp0 = rel.
+; Keeps X, Y.
+closing:
+    A16
+    lda tmp0
+    bmi @behind
+    lda E_VY,x
+    bmi @yes
+    cmp b_speed
+    bcc @yes
+    bra @no
+@behind:
+    lda E_VY,x
+    bmi @no
+    cmp b_speed
+    beq @no
+    bcs @yes
+@no:
+    A8
+    clc
+    rts
+@yes:
+    A8
+    sec
+    rts
 
 ; door box: centre (car x - 19, rel + 6), half size 7 x 3
 door_hit:

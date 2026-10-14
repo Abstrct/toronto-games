@@ -8,7 +8,8 @@ rails, cross the tracks at full lock (a TRACK HOP), dodge doors/potholes/
 people, grab tokens, and (bike_pro, bike_greedy) tuck in behind the 501 to
 draft it.
 
-bike_human is the yardstick for "a decent human finishes": ~15-frame looks,
+bike_stylist is the curve bot (see its comment); bike_courier is its careful
+base. bike_human is the yardstick for "a decent human finishes": ~15-frame looks,
 only sees what is on screen, misses the odd hazard, and steers by holding the
 pad until it is about there (so it overshoots) instead of counter-steering.
 
@@ -305,7 +306,8 @@ class bike_greedy(_Planner):
 
 
 # ---------------------------------------------------------------------------
-# bike_courier: the curve bot. It plays like a person with a pad, so a late
+# bike_courier: a careful rider (the curve bot until sprint 4, now the base
+# of bike_stylist). It plays like a person with a pad, so a late
 # hand costs what it would cost a person, not more:
 #  * it only reacts to what is on screen (plus the 501's warning sign behind);
 #  * it plans each lane change as one motor program (hold the pad N frames,
@@ -539,12 +541,249 @@ class bike_ace(bike_courier):
         return c
 
 
-CURVE = {'bike': 'bike_courier'}
+# ---------------------------------------------------------------------------
+# bike_stylist: the curve bot. bike_courier's eyes and hands, plus what a
+# player picks up after a few runs:
+#  * it knows how quick its own hand is: it times its first pedal stroke (how
+#    long from deciding to press A until the bike moves) and from then on
+#    plans for that hand (+- a quarter) instead of for any hand from 0 to 20;
+#  * it hops every rail it crosses (TRACK HOP), and rides over a pothole in
+#    its line with a hop instead of swerving round it (POTHOLE HOP) when the
+#    hop is free;
+#  * it lets traffic come at it and slips out of the way late (CLOSE CALL),
+#    but only when the dodge is safe for its own hand: a quick hand waits for
+#    the oncoming cars, a slow one only plays chicken with a car it is
+#    catching up on, or the 501;
+#  * every move is worth more to it while a chain is going (it sees the x2);
+#  * how much it plays for style at all is its nerve, which falls with its
+#    measured hand: all-in at 0 frames, half at 6, none from 12 (a 250 ms
+#    player rides like bike_courier and hops only the potholes in its line).
+CLOSE_D = 40                   # src/ev_bike_ent.inc
+CLOSE_T = (1, 2, 3, 4, 5, 6)   # parked cars, cars and the 501 (near_tab)
+B_HOPD, B_CHAIN, B_CHAINT = 402, 406, 408
 
-POLICIES = {c.__name__: c for c in [bike_courier, bike_ace, bike_pro, bike_human, bike_novice, bike_safe, bike_greedy,
+
+class bike_stylist(bike_courier):
+    close_bonus = 90
+    hop_bonus = 45
+    hole_bonus = 60
+    wobble_cost = 40
+    greed = 60
+    waits = tuple(range(0, 25, 3))
+
+    def __init__(self):
+        bike_courier.__init__(self)
+        self.lag = None
+        self.delays = (0, 10, 20)
+
+    def read(self):
+        me, ents = bike_courier.read(self)
+        r = self.g.core.peek(self.ev + B_HOP, 12)
+        w = lambda o: r[o - B_HOP] | r[o - B_HOP + 1] << 8
+        me['hop_ready'] = ((me['dist'] - w(B_HOPD)) & 0xFFFF) >= 240
+        me['chain'] = w(B_CHAIN) if w(B_CHAINT) else 0
+        me['hop'] = w(B_HOP)
+        self.last_read = (me, ents)
+        return me, ents
+
+    def calibrate(self, t, me):
+        if self.lag is None and me['speed'] > 0:
+            self.lag = max(0, t - 1)
+            j = self.lag // 4 + (1 if self.lag else 0)
+            # safe whether the hand lands right away or late (a slow hand
+            # doesn't trust itself to be on time)
+            self.delays = tuple(sorted({0, self.lag // 2, self.lag, self.lag + j}))
+            # nerve: how much risk it takes for style. A quick hand plays
+            # for the chain; a slow one knows better and just rides
+            self.nerve = max(0.0, min(1.0, 1 - self.lag / 12))
+            self.close_bonus *= self.nerve
+            self.hop_bonus *= self.nerve
+
+    def fwd(self, me):
+        out, my, v = [], 0.0, me['speed']
+        for _ in range(self.H + 30):
+            out.append(my)
+            v = min(3.0, v + 0.04)
+            my += v
+        return out
+
+    def hole_hoppable(self, me, e):
+        sp = me['speed']
+        if sp < 1.5:
+            return False
+        lag = self.lag if self.lag is not None else 20
+        k = (e['rel'] - 32) / sp - lag          # the last frame we could press B
+        return k >= me['hopcd'] + 1
+
+    def hazards(self, me, ents):
+        keep = [e for e in ents if not (e['t'] == T_HOLE and abs(e['x'] - me['x']) < 14
+                                        and self.hole_hoppable(me, e))]
+        return bike_courier.hazards(self, me, keep)
+
+    def closers(self, me, ents):
+        sp = me['speed']
+        out = []
+        for e in ents:
+            if e['t'] not in CLOSE_T or not self.visible(e):
+                continue
+            if (e['rel'] > 0 and e['vy'] < sp) or (e['rel'] < 0 and e['vy'] > sp):
+                out.append(e)
+        return out
+
+    def cost_w(self, me, ents, haz, x_now, x0, t_settle, L, w, fw, closers):
+        """bike_courier.cost for a move that starts w frames from now"""
+        c = abs(L - x0) * 0.3 + (0 if L == HOME else 6) + w * 0.2
+        worst = 0
+        for D in (self.delays if abs(L - x0) >= 1 else (0,)):
+            f = self.traj(x_now, x0, t_settle, L, D + w)
+            for rows in haz:
+                for (k, a, b) in rows:
+                    if a <= f(k) <= b:
+                        worst = max(worst, 2000 - k * 8)
+                        break
+        c += worst
+        for e in ents:
+            if e['t'] == T_TOKEN and 20 < e['rel'] < 168 and abs(e['x'] - L) < 8:
+                c -= self.greed
+        if c >= 1000:
+            return c
+        # rails crossed on the ground: a RAIL WOBBLE each (speed, the chain,
+        # and the timing of everything else in the plan)
+        if abs(L - x0) >= 1:
+            can_hop = me['hopcd'] <= w + (self.lag or 0) and me['speed'] >= 1.4
+            first = None
+            for r in sorted(RAILS, key=lambda r: abs(r - x0)):
+                if min(x0, L) < r < max(x0, L):
+                    k = next(i for i in range(200) if PROG[i] >= abs(r - x0))
+                    if first is None:
+                        first = k
+                        if can_hop and 3 <= k <= 16:
+                            continue
+                    elif can_hop and 3 <= first <= 16 and k <= 19:
+                        continue
+                    c += self.wobble_cost
+        if t_settle > 0 or abs(x_now - x0) > 2:
+            return c
+        mult = 1 + 0.25 * min(me['chain'], 4)
+        if abs(L - x0) >= 1 and me['hop_ready'] and me['speed'] >= 1.4:
+            for r in RAILS:
+                if min(x0, L) < r < max(x0, L):
+                    k = next(i for i in range(200) if PROG[i] >= abs(r - x0))
+                    if 3 <= k <= 16:
+                        c -= self.hop_bonus * mult
+                    break
+        for e in ents:
+            if e['t'] == T_HOLE and 40 < e['rel'] < 168 and abs(e['x'] - L) < HW[T_HOLE] and self.hole_hoppable(me, e):
+                c -= self.hole_bonus * mult
+                break
+        if closers and abs(L - x0) >= 1:
+            D = self.delays[len(self.delays) // 2]
+            f = self.traj(x_now, x0, t_settle, L, D + w)
+            for e in closers:
+                hw, hh = HW[e['t']], HH[e['t']]
+                inpath = False
+                prev = e['rel']
+                for k in range(1, self.H):
+                    rel = e['rel'] + e['vy'] * k - fw[k]
+                    if (rel > 0) != (prev > 0):
+                        if inpath and abs(f(k) - e['x']) >= hw + 1:
+                            c -= self.close_bonus * mult
+                        break
+                    prev = rel
+                    if abs(f(k) - e['x']) < hw - 1 and 0 <= abs(rel) - hh < CLOSE_D - 4:
+                        inpath = True
+        return c
+
+    def act(self, t, tel, rng):
+        me, ents = self.read()
+        self.calibrate(t, me)
+        m = self.decide(t, me, ents)
+        # a pothole in our line: hop it
+        if (me['state'] == 0 and me['hopcd'] == 0 and me['speed'] >= 1.4 and not m & B
+                and t - self.last_change >= 2):
+            lag = self.lag or 0
+            for e in ents:
+                if e['t'] != T_HOLE or not self.visible(e):
+                    continue
+                land = e['rel'] - me['speed'] * lag
+                if abs(e['x'] - me['x'] - me['vx'] * lag) < HW[T_HOLE] + 3 and 30 < land <= 58:
+                    m |= B
+                    if t < self.cmd_end:
+                        self.cmd_mask |= B
+                    return self.out(t, m)
+        return m
+
+    def decide(self, t, me, ents):
+        """bike_courier.act, choosing (line, wait) instead of a line"""
+        if t - self.last_change < MINCHG:
+            return self.out(t, self.cur)
+        if me['state'] != 0:
+            self.reset()
+            return self.out(t, A)
+        if me['speed'] < 0.3 and t >= self.brake_until + 30 and t >= self.cmd_end:
+            self.stall = getattr(self, 'stall', 0) + 1
+            if self.stall > 20:
+                self.stall = 0
+                return self.out(t, 0)
+        else:
+            self.stall = 0
+        if t < self.cmd_end:
+            return self.out(t, self.cmd_mask)
+        base = DOWN if t < self.brake_until else A
+        if t < self.next_look:
+            return self.out(t, base)
+        self.next_look = t + self.look
+        x = me['x']
+        if t < self.busy_until and self.exp_x is not None:
+            x0, t_settle = self.exp_x, self.busy_until - t
+        else:
+            x0, t_settle = x, 0
+            self.exp_x = x
+        haz = self.hazards(me, ents)
+        fw = self.fwd(me)
+        closers = self.closers(me, ents) if t_settle == 0 else []
+        costs = {}
+        for L in LANES:
+            for w in (self.waits if closers and self.close_bonus and abs(L - x0) >= 1 else (0,)):
+                costs[(L, w)] = self.cost_w(me, ents, haz, x, x0, t_settle, L, w, fw, closers)
+        best = min(costs, key=costs.get)
+        near = min(LANES, key=lambda L: abs(L - x0))
+        if abs(near - x0) <= SETTLE and costs[(near, 0)] <= costs[best] + 4:
+            best = (near, 0)
+        if costs[best] >= 1000 and me['speed'] > 1.0:
+            self.brake_until = t + 12
+            base = DOWN
+        elif t >= self.brake_until:
+            base = A
+        L, w = best
+        if w:
+            return self.out(t, base)        # not yet: let it come
+        d = L - x0
+        if abs(d) <= SETTLE - 1:
+            return self.out(t, base)
+        n = min(range(MINCHG, 199), key=lambda k: abs(DISP[k] - abs(d)))
+        m = (RIGHT if d > 0 else LEFT) | base
+        if self.hops and me['speed'] >= 1.4 and me['hopcd'] == 0 and t >= self.busy_until:
+            for r in RAILS:
+                if min(x0, L) < r < max(x0, L):
+                    dr = abs(r - x0)
+                    k = next(i for i in range(200) if PROG[i] >= dr)
+                    if 3 <= k <= 16:
+                        m |= B
+                    break
+        self.cmd_mask = m
+        self.cmd_end = t + n
+        self.exp_x = L
+        self.busy_until = t + n + 26
+        return self.out(t, m)
+
+
+CURVE = {'bike': 'bike_stylist'}
+
+POLICIES = {c.__name__: c for c in [bike_stylist, bike_courier, bike_ace, bike_pro, bike_human, bike_novice, bike_safe, bike_greedy,
                                     bike_camp_left, bike_camp_strack, bike_camp_centre,
                                     bike_camp_ntrack, bike_camp_gap]}
 DEFAULTS = {'bike': ['idle', 'hold_a', 'mash_a', 'random_input',
                      'bike_camp_left', 'bike_camp_strack', 'bike_camp_centre',
                      'bike_camp_ntrack', 'bike_camp_gap',
-                     'bike_human', 'bike_safe', 'bike_pro', 'bike_greedy', 'bike_courier']}
+                     'bike_human', 'bike_safe', 'bike_pro', 'bike_greedy', 'bike_courier', 'bike_stylist']}
