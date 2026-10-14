@@ -14,6 +14,8 @@
 p_txt:      .res 7*64           ; text rows under the PAUSED box
 p_zp:       .res 25
 d_trick:    .res 1              ; attract demo: frames WATCH THAT MOVE! stays up
+d_age:      .res 1              ; ...frames since trick_seen (to 255)
+d_row:      .res 32             ; ...the trick callout's row as it was (tiles only)
 
 .segment "BSS"
 p_bg:       .res 1
@@ -433,9 +435,15 @@ demo_pads:
 
 ; trick_seen (jsl, any bank, keeps A X Y and the flags' width): an event's
 ; named trick callout just fired. In the attract demo the banner reads
-; WATCH THAT MOVE! for a while (never the trick's name: the demo shows the
-; move, the player works out how); in a real game it does nothing.
-DEMO_TRICK_FR = 120
+; WATCH THAT MOVE! for as long as that callout is up (never the trick's
+; name: the demo shows the move, the player works out how); in a real game
+; it does nothing. The callout's row is trick_rows: TRICK_SNAP frames after
+; it fires the row is noted, and the banner goes as soon as it changes (the
+; callout cleared or replaced: the next documented callout never sits under
+; it), TRICK_MIN frames at least, DEMO_TRICK_FR at most.
+DEMO_TRICK_FR = 75
+TRICK_SNAP = 4
+TRICK_MIN = 30
 trick_seen:
     php
     sep #$20
@@ -445,10 +453,75 @@ trick_seen:
     beq @x
     lda #DEMO_TRICK_FR
     sta f:d_trick
+    lda #$00
+    sta f:d_age
 @x:
     pla
     plp
     rtl
+
+; once a frame while the banner is up: note the callout's row, then end the
+; banner (d_trick 1: the next step puts DEMO - PRESS START back) when it
+; changes. A8.
+.a8
+.i16
+trick_track:
+    lda f:d_age
+    inc a
+    beq @x                      ; (stops counting at 255)
+    sta f:d_age
+    cmp #TRICK_SNAP
+    bcc @x
+    phx
+    phy
+    pha
+    lda event_idx
+    A16
+    and #$00FF
+    tax
+    A8
+    lda f:trick_rows,x
+    A16
+    and #$00FF
+    xba
+    lsr a
+    lsr a                       ; row * 64: its first cell
+    tay
+    A8
+    ldx #$0000
+    pla
+    cmp #TRICK_SNAP
+    bne @cmp
+@snap:
+    lda txt_map,y
+    sta f:d_row,x               ; (long: d_row is in bank $7E)
+    iny
+    iny
+    inx
+    cpx #32
+    bne @snap
+    bra @done
+@cmp:
+    cmp #TRICK_MIN
+    bcc @done
+@c:
+    lda txt_map,y
+    cmp f:d_row,x
+    bne @gone
+    iny
+    iny
+    inx
+    cpx #32
+    bne @c
+    bra @done
+@gone:
+    lda #$01
+    sta f:d_trick
+@done:
+    ply
+    plx
+@x:
+    rts
 
 ; " DEMO - PRESS START " on a solid strip (window tiles, so traffic passes
 ; under it) on a text row the running event leaves alone, rewritten every 16
@@ -458,6 +531,8 @@ trick_seen:
 demo_banner:
     lda f:d_trick
     beq @plain
+    jsr trick_track
+    lda f:d_trick
     dec a
     sta f:d_trick
     beq @now                    ; back to DEMO - PRESS START now
@@ -519,6 +594,11 @@ str_trick: .byte "  WATCH THAT MOVE!  ", 0
 ; per event: the banner row (BIKE BAY PARK COPS SAIL PARKING SUBWAY)
 demo_rows: .byte 4, 4, 2, 4, 26, 25, 26
 .assert * - demo_rows = NUM_EVENTS, error, "demo_rows: one banner row per event"
+; per event: the text row its trick callout is printed on (trick_track).
+; An event that moves its callout should move this too; a wrong row only
+; keeps the banner up its full DEMO_TRICK_FR.
+trick_rows: .byte 9, 9, 4, 9, 5, 3, 5
+.assert * - trick_rows = NUM_EVENTS, error, "trick_rows: one callout row per event"
 
 ; ------------------------------------------------------------------
 ; pause_game: freeze the event until START is pressed again. The music stops

@@ -27,13 +27,15 @@ c_y:          .res 1            ; score_card: row being drawn
 c_nst:        .res 1            ; score_card: stat lines shown (card_plan)
 c_note:       .res 1            ; score_card: reason lines shown (0-2, c_noteptr)
 c_noteptr:    .res 2
-c_short:      .res 1            ; score_card: 1 = no room for WE THE NORTH!
+c_keep:       .res 1            ; card_plan: the stat pick (0 / 1) kept when only one fits
+c_sub:        .res 1            ; card_plan: style sub-rows shown under + STYLE (style_rows)
 c_nobump:     .res 1            ; score_card: SO LONG, NAME! 0 own row, 1 none, 2 on the board line
 c_noover:     .res 1            ; score_card: 1 = no room for +214 OVER NAME
 c_fsplit:     .res 1            ; break_ok: forfeit rows (0, 1, or 2 = itemised)
 c_fa:         .res 2            ; break_ok: an itemised forfeit's counted part (TOKENS X50)
 c_fb:         .res 2            ; ...and the rest (STYLE)
 c_fitem:      .res 1            ; break_ok: 1 = the forfeit is itemised (c_fa, c_fb)
+c_fall:       .res 1            ; card_plan: 1 = an itemised forfeit squeezed into one row (card_fsall)
 c_rr1:        .res 1            ; score_card: rows that flash for a new record (0 = none)
 c_rr2:        .res 1
 c_n:          .res 1            ; card_plan rows / card_nav option count
@@ -410,11 +412,13 @@ str_solo:        .byte "SOLO", 0
 ; a 0 included:
 ;     WIPED OUT!                  (red: why the run ended; a finish is
 ;                                  green, card_finish: DELIVERED!)
-;     PLAYER 1
+;     PLAYER 1   WE THE NORTH!    (the cheer only for a new record)
 ;     METRES             812      (the event's picked stats, card_stat_pick,
 ;     WIPEOUTS             3       card_stat_pick_fail for a failed run)
 ;     RIDE               220      (ev_break: base, always shown)
-;   + TOKENS+STYLE        60      (bonus / penalty rows only when not 0)
+;   + STYLE              970      (bonus / penalty rows only when not 0)
+;       TIGHT ROUNDING  470       (grey style sub-rows, 8 px apart: ev_style,
+;       LINE HONOURS    500        card_style_labels; ITEMISED STYLE below)
 ;   - TACKLES            450      (the true cost, never clamped)
 ;   = SCORE                0
 ;     FORFEIT TOKENS X50 100      (grey: card_forfeit, a failed run; itemised
@@ -424,12 +428,18 @@ str_solo:        .byte "SOLO", 0
 ;     #3 ON THE TORONTO BOARD!    (and who fell off it, or a new record)
 ; When ev_break doesn't add up to ev_score (break_ok) the sum rows are left
 ; out and SCORE stands alone under the stats. A full card gives way in
-; card_plan's order (WE THE NORTH! first).
+; card_plan's order (the second stat first; the sum rows never).
 CARD_TOP  = 7                   ; first content row
 CARD_ROWS = 7                   ; content rows 7, 9 .. 19: row 21 stays blank above PRESS A
+CARD_HALF = CARD_ROWS * 2 + 1   ; the budget in half rows: an odd run of style sub-rows
+                                ; may end the card on row 20 (21 and 22 stay blank)
 COL_L = 4                       ; stat labels and the + - = signs
 COL_S = 6                       ; sum labels
 COL_V = 23                      ; numbers, 5 wide (ends in column 27)
+STY_L = 7                       ; style sub-rows: labels (14 wide, to column 20)
+STY_V = 21                      ; ...and points, 5 wide (ends in column 25)
+STYLE_N = 5                     ; ev_style words (vars.s)
+NORTH_COL = 15                  ; WE THE NORTH! on the name row (names end by column 11)
 REL_NEXT = 45                   ; quiet frames before a card hands over to the next player
 
 score_card:
@@ -495,12 +505,22 @@ score_card:
     ldx #(5*32 + COL_L)
     jsl print_player_name
     jsr card_plan               ; -> c_y: the block sits in the middle
-    ; the event's picked stats, c_nst of them (a label of 0 = unused)
+    ; the event's picked stats, c_nst of them (a label of 0 = unused): both,
+    ; or the one card_stat_keep names, or none
     stz tmp7
 @stat:
     lda tmp7
-    cmp c_nst
+    cmp #$02
     jcs @stats_done
+    lda c_nst
+    cmp #$02
+    beq @shown
+    cmp #$01
+    jne @nostat
+    lda c_keep
+    cmp tmp7
+    jne @nostat
+@shown:
     lda event_idx
     asl a
     clc
@@ -527,21 +547,6 @@ score_card:
     beq @nostat
     sta ptr0
     A8
-    jsr sail_style_stat         ; Regatta's style stat names its biggest source
-    bcc @lab
-    A16
-    lda ev_stat+6               ; source in the top 4 bits
-    xba
-    and #$00FF
-    lsr a
-    lsr a
-    lsr a
-    and #$001E
-    tax
-    lda f:sail_style_lab,x
-    sta ptr0
-    A8
-@lab:
     lda #^card_stat_labels
     sta ptr0+2
     lda #COL_L
@@ -555,12 +560,6 @@ score_card:
     lda ev_stat,y
     sta tmp1
     A8
-    jsr sail_style_stat
-    bcc @sv
-    lda tmp1+1                  ; the points are the low 12 bits
-    and #$0F
-    sta tmp1+1
-@sv:
     lda #COL_V
     jsr cy_cell
     ldy #5
@@ -641,6 +640,13 @@ score_card:
     lda #($20 | (TP_PINK << 2))
     jsl txt_print_centre
     jsr next_row
+    ; WE THE NORTH! on the name row, right of the name: never squeezed out
+    lda #5
+    sta c_rr2
+    ldx #(5*32 + NORTH_COL)
+    LDPTR0 str_we_north
+    lda #($20 | (TP_YELLOW << 2))
+    jsl txt_print
     ; "+214 OVER SUITGUY": the old #1 is now #2
     lda c_noover
     jne @sfx
@@ -668,15 +674,6 @@ score_card:
     jsr row_cell
     LDPTR0 c_buf
     lda #($20 | (TP_CYAN << 2))
-    jsl txt_print_centre
-    jsr next_row
-    lda c_short
-    jne @sfx
-    lda c_y
-    sta c_rr2
-    jsr row_cell
-    LDPTR0 str_we_north
-    lda #($20 | (TP_YELLOW << 2))
     jsl txt_print_centre
     jmp @sfx
 @board:
@@ -837,17 +834,27 @@ card_sting:
     rtl
 
 ; card_plan: how many rows the sum, the note and the board lines take, so
-; c_nst (stats shown: 2, or 1 when space is short), c_note / c_noteptr, and
-; what gives way when the card is full: c_short (WE THE NORTH!), c_nobump
-; (SO LONG, NAME!), c_noover (+214 OVER NAME). CARD_ROWS keeps a blank row
-; above PRESS A, so the prompt never reads as one more line of the card.
-; Giving way, in order: WE THE NORTH!, a reason's second line, the second
-; stat (the sum rows still say it: SPILLS 40 EACH), SO LONG (it joins the
-; board line instead: c_nobump 2, #5! SO LONG, NAME!, so a bumped name is
-; always said), the +214 OVER line, the reason.
+; c_nst (stats shown: 2, 1 or 0, c_keep says which one stays), c_sub (style
+; sub-rows), c_note / c_noteptr, and what gives way when the card is full:
+; c_nobump (SO LONG, NAME!), c_noover (+214 OVER NAME). The budget is in
+; half rows: a line takes 2 (16 px), a style sub-row 1 (they sit 8 px apart
+; under + STYLE, like a receipt), CARD_HALF in all, which keeps a blank
+; row above PRESS A, so the prompt never reads as one more line of the card.
+; Giving way, in order:
+;   the second stat (card_stat_keep: the one the sum rows can't say stays),
+;   SO LONG (it joins the board line instead: c_nobump 2, #5! SO LONG, NAME!,
+;     so a bumped name is always said),
+;   the last stat, when the sum shows (the sum rows say what counted),
+;   an itemised forfeit becomes one row (FORFEIT BONUS),
+;   the style sub-rows (all or none: shown, they always add up to + STYLE;
+;     the +214 OVER line goes first if that alone makes them fit),
+;   a reason's second line, the +214 OVER line, the reason.
+; The sum rows never give way. WE THE NORTH! has its own place on the name
+; row, so a new record always cheers.
 card_plan:
     lda #$01                    ; the SCORE row
     sta c_n
+    stz c_sub
     lda c_brk
     beq @note
     inc c_n                     ; the base
@@ -868,8 +875,10 @@ card_plan:
     inc c_n
 @fl:
     lda c_floor
-    beq @note
+    beq @sr
     inc c_n                     ; NEVER BELOW 0
+@sr:
+    jsr style_rows              ; -> c_sub
 @note:
     stz c_note
     lda ev_fail
@@ -942,9 +951,8 @@ card_plan:
     inc c_note
     inc c_n
 @board:
-    ; the board lines: all three optional ones start out absent
+    ; the board lines: the optional ones start out absent
     lda #$01
-    sta c_short
     sta c_nobump
     sta c_noover
     lda c_rank
@@ -952,9 +960,7 @@ card_plan:
     inc c_n                     ; #N ON THE BOARD / NEW TORONTO RECORD!
     lda c_rank
     bne @bump
-    inc c_n                     ; +214 OVER NAME, WE THE NORTH!
-    inc c_n
-    stz c_short
+    inc c_n                     ; +214 OVER NAME
     stz c_noover
     bra @fit
 @bump:
@@ -963,68 +969,169 @@ card_plan:
     inc c_n                     ; SO LONG, NAME!
     stz c_nobump
 @fit:
+    ; the stat kept when only one fits
+    lda event_idx
+    asl a
+    TAXB
+    lda ev_fail
+    beq @kf
+    inx
+@kf:
+    lda f:card_stat_keep,x
+    sta c_keep
     lda #$02
     sta c_nst
 @try:
     lda c_n
     clc
     adc c_nst
-    cmp #(CARD_ROWS + 1)
-    bcc @centre
+    asl a                       ; half rows
+    clc
+    adc c_sub
+    sta c_ct
+    cmp #(CARD_HALF + 1)
+    jcc @centre
     ; too many: the next thing in line gives way
-    lda c_short
-    bne @g1
-    inc c_short                 ; WE THE NORTH!
-    bra @less
-@g1:
-    lda c_note
-    cmp #$02
-    bcc @g2
-    dec c_note                  ; the reason's second line
-    bra @less
-@g2:
     lda c_nst
     cmp #$02
-    bcc @g3
+    bcc @g2
     dec c_nst                   ; the second stat
     bra @try
-@g3:
+@g2:
     lda c_nobump
-    bne @g4
+    bne @g3
     lda #$02                    ; SO LONG, NAME! joins the board line
     sta c_nobump
     bra @less
+@g3:
+    lda c_nst
+    beq @g1
+    lda c_brk
+    beq @g1
+    dec c_nst                   ; the last stat: the sum rows say it
+    bra @try
+@g1:
+    lda c_fsplit
+    cmp #$02
+    bcc @g4
+    lda c_forf
+    beq @g4
+    dec c_fsplit                ; the forfeit in one row (FORFEIT BONUS)
+    stz c_fitem
+    lda #$01
+    sta c_fall
+    bra @less
 @g4:
+    lda c_sub
+    beq @g5
+    lda c_noover                ; the +214 OVER line, if that makes them fit
+    bne @g4s
+    lda c_ct
+    cmp #(CARD_HALF + 3)
+    bcs @g4s
+    inc c_noover
+    bra @less
+@g4s:
+    stz c_sub                   ; the style sub-rows, all of them
+    jmp @try
+@g5:
+    lda c_note
+    cmp #$02
+    bcc @g6
+    dec c_note                  ; the reason's second line
+    bra @less
+@g6:
     lda c_noover
-    bne @g5
+    bne @g7
     inc c_noover                ; +214 OVER NAME
     bra @less
-@g5:
+@g7:
     lda c_note
     beq @centre                 ; (nothing left to give)
     dec c_note                  ; the reason
 @less:
     dec c_n
-    bra @try
+    jmp @try
 @centre:
-    ; first row: CARD_TOP + half the spare rows (whole 16 px steps), an odd
-    ; one above the block: a gap under the name reads better than one
-    ; more over PRESS A, which always has its own
+    ; first row: CARD_TOP + about half the spare half rows, in whole 16 px
+    ; steps, an odd one above the block: a gap under the name reads better
+    ; than one more over PRESS A, which always has its own
     lda c_n
     clc
     adc c_nst
+    asl a
+    clc
+    adc c_sub
     sta c_n
-    lda #CARD_ROWS
+    lda #CARD_HALF
     sec
     sbc c_n
     bpl @sp
     lda #$00
 @sp:
-    inc a
-    and #$FE
+    clc
+    adc #$02
+    lsr a
+    lsr a
+    asl a
     clc
     adc #CARD_TOP
     sta c_y
+    rts
+
+; style_rows: c_sub = the style sources (ev_style, card_style_labels) the
+; card itemises under + STYLE, or 0. All or nothing: only when the + row
+; shows (a bonus that isn't forfeit), every non-zero source has a label,
+; and the sources add up to the bonus exactly, so the rows always sum.
+style_rows:
+    stz c_sub
+    lda c_forf
+    bne @x
+    A16
+    lda ev_break+2
+    beq @x16
+    sta c_val
+    A8
+    lda event_idx
+    asl a
+    asl a
+    clc
+    adc event_idx               ; 5 labels per event
+    asl a
+    A16
+    and #$00FF
+    tax
+    ldy #$0000
+@l:
+    lda ev_style,y
+    beq @n
+    sta tmp1
+    lda f:card_style_labels,x
+    beq @no                     ; a source with no name: no rows at all
+    lda c_val
+    sec
+    sbc tmp1
+    bcc @no                     ; more than the bonus
+    sta c_val
+    A8
+    inc c_sub
+    A16
+@n:
+    inx
+    inx
+    iny
+    iny
+    cpy #(STYLE_N * 2)
+    bne @l
+    lda c_val
+    beq @x16                    ; they add up
+@no:
+    A8
+    stz c_sub
+    rts
+@x16:
+    A8
+@x:
     rts
 
 ; the reason line at ptr0 + Y up to a line break or the end, centred on
@@ -1105,31 +1212,9 @@ card_stat_pick:
     .byte 0, 2                  ; bay: TIME LEFT, SPILLS
     .byte 1, 2                  ; park: DOGS DODGED, TACKLES
     .byte 0, 2                  ; cops: SIP 'N' HOPS, HURDLES
-    .byte 0, 3                  ; sail: TIME LEFT, the biggest style source (sail_style_stat)
+    .byte 0, 2                  ; sail: TIME LEFT, BUMPS
     .byte 0, 2                  ; parking: SPOTS PARKED, TICKETS
     .byte 1, 0                  ; subway: STATIONS, GERMS
-; carry set = this stat line is Regatta's style stat (ev_stat 3 on a finish):
-; ev_stat+6 carries its biggest style source in the top 4 bits
-; (ev_sail.s: 0 none, 1 tight rounding, 2 clean tacks, 3 ferry surf, 4 line
-; honours) and the points in the low 12, so a follower who earned none still
-; sees that style exists. A8.
-sail_style_stat:
-    lda event_idx
-    cmp #4
-    bne @no
-    lda c_si
-    cmp #3
-    bne @no
-    sec
-    rts
-@no:
-    clc
-    rts
-sail_style_lab: .addr sl_style, sl_tight, sl_ctack, sl_fsurf, sl_lhon, sl_style, sl_style, sl_style
-sl_tight: .byte "TIGHT ROUNDING", 0
-sl_ctack: .byte "CLEAN TACKS", 0
-sl_fsurf: .byte "FERRY SURF", 0
-sl_lhon:  .byte "LINE HONOURS", 0
 ; the same for a failed run (ev_fail 1-4): only stats that still count
 card_stat_pick_fail:
     .byte 0, 2                  ; bike: METRES, WIPEOUTS (tokens and style are forfeit)
@@ -1139,6 +1224,57 @@ card_stat_pick_fail:
     .byte 1, 2                  ; sail: MARKS ROUNDED, BUMPS
     .byte 0, 2                  ; parking: SPOTS PARKED, TICKETS
     .byte 1, 0                  ; subway: STATIONS, GERMS
+
+; the stat that stays when the card has room for only one: 0 = the first
+; pick, 1 = the second, for a finish then a failed run. Keep the one the sum
+; rows can't say (Bay's SPILLS: TIME LEFT is in WALK 1000+40/S).
+card_stat_keep:
+    .byte 0, 0                  ; bike
+    .byte 1, 1                  ; bay: SPILLS
+    .byte 0, 0                  ; park
+    .byte 0, 0                  ; cops
+    .byte 0, 0                  ; sail: TIME LEFT; MARKS ROUNDED
+    .byte 0, 0                  ; parking
+    .byte 0, 0                  ; subway
+card_stat_keep_end:
+.assert card_stat_keep_end - card_stat_keep = NUM_EVENTS * 2, error, "card_stat_keep: two bytes per event"
+
+; ITEMISED STYLE. An event may say where its + STYLE came from, as up to
+; STYLE_N sources: ev_style (vars.s) is STYLE_N words of points, slot n
+; named by the event's n-th card_style_labels entry. The card prints every
+; non-zero one as an indented grey sub-row under the + row:
+;   + STYLE                970
+;       TIGHT ROUNDING  470
+;       CLEAN TACKS     200
+;       LINE HONOURS    300
+; The event's side of it, every run, in its scoring routine (before
+; score_card): write all STYLE_N words, 0 for a source not earned (game.s
+; also clears them before each turn), so that on a finish they add up to
+; ev_break+2 exactly. The rows show only when they do (and the + row shows:
+; a bonus that isn't forfeit), so a card can never list parts that don't
+; sum; a failed run may leave them all 0. All rows or none: on a full card
+; they give way after the stats and before anything that says why the run
+; ended (card_plan). Labels: 14 characters at most, 0 = an unused slot.
+card_style_labels:
+    .addr 0, 0, 0, 0, 0                                     ; bike
+    .addr sty_combo, sty_double, sty_near, sty_presto, sty_other ; bay
+    .addr 0, 0, 0, 0, 0                                     ; park
+    .addr 0, 0, 0, 0, 0                                     ; cops
+    .addr sty_tight, sty_ctack, sty_fsurf, sty_lhon, sty_ostyle  ; sail
+    .addr 0, 0, 0, 0, 0                                     ; parking
+    .addr 0, 0, 0, 0, 0                                     ; subway
+card_style_labels_end:
+.assert card_style_labels_end - card_style_labels = NUM_EVENTS * STYLE_N * 2, error, "card_style_labels: STYLE_N .addr per event, nothing else"
+sty_combo:  .byte "COMBO", 0
+sty_double: .byte "DOUBLE TIME", 0
+sty_near:   .byte "NEAR MISSES", 0
+sty_presto: .byte "PRESTO", 0
+sty_other:  .byte "OTHER", 0
+sty_tight:  .byte "TIGHT ROUNDING", 0
+sty_ctack:  .byte "CLEAN TACKS", 0
+sty_fsurf:  .byte "FERRY SURF", 0
+sty_lhon:   .byte "LINE HONOURS", 0
+sty_ostyle: .byte "OTHER STYLE", 0
 
 ; 1 = a failed run forfeits the bonus: the event leaves it in ev_break+2,
 ; keeps it out of ev_score, and the card shows it as a grey FORFEIT row
@@ -1156,6 +1292,7 @@ card_fslabel_end:
 .assert card_fslabel_end - card_fslabel = NUM_EVENTS * 4, error, "card_fslabel: two .addr per event, nothing else"
 fl_tokens: .byte "TOKENS X50", 0
 fl_style:  .byte "STYLE", 0
+fl_bonus:  .byte "BONUS", 0     ; one row for an itemised forfeit on a full card
 
 ; carry set = the card can show ev_break's sum. One rule for every event:
 ; - base + bonus - penalty = ev_score (0 + 0 - 0 = 0 counts: a score of
@@ -1168,6 +1305,7 @@ break_ok:
     stz c_floor
     stz c_forf
     stz c_fitem
+    stz c_fall
     lda #$01
     sta c_fsplit
     A16
@@ -1275,6 +1413,12 @@ forfeit_line:
     beq @x
     lda c_fitem
     bne @item
+    lda c_fall
+    beq @one
+    LDPTR0 fl_bonus             ; squeezed: FORFEIT BONUS (the label may be too long)
+    A16
+    bra @amt
+@one:
     lda event_idx
     asl a
     clc
@@ -1286,6 +1430,7 @@ forfeit_line:
     tax
     lda f:card_break_labels,x
     sta ptr0
+@amt:
     lda ev_break+2
     sta tmp1
     A8
@@ -1457,11 +1602,78 @@ break_lines:
     ldy #5
     jsl txt_num
     jsr next_row
+    lda tmp7
+    cmp #$01
+    bne @next
+    lda c_sub
+    beq @next
+    jsr style_print             ; the bonus's sources, under it
 @next:
     inc tmp7
     lda tmp7
     cmp #3
     jne @l
+    rts
+
+; style_print: c_sub sub-rows under the + STYLE row just drawn (c_y is the
+; row after it): each non-zero ev_style word, label (card_style_labels)
+; indented in grey, points in grey two columns in from the sum's, so they
+; read as the parts of + STYLE, not more addends. They sit 8 px apart right
+; under it; the next line keeps its 8 px gap.
+style_print:
+    dec c_y                     ; straight under + STYLE
+    lda event_idx
+    asl a
+    asl a
+    clc
+    adc event_idx
+    asl a
+    A16
+    and #$00FF
+    sta c_li
+    A8
+    stz c_ck                    ; slot
+@l:
+    lda c_ck
+    asl a
+    TAYB
+    A16
+    lda ev_style,y
+    beq @n
+    sta tmp1
+    lda c_li
+    tax
+    lda f:card_style_labels,x
+    sta ptr0
+    lda tmp1
+    pha
+    A8
+    lda #^card_style_labels
+    sta ptr0+2
+    lda #STY_L
+    jsr cy_cell
+    lda #($20 | (TP_GREY << 2))
+    jsl txt_print
+    A16
+    pla
+    sta tmp1
+    A8
+    lda #STY_V
+    jsr cy_cell
+    ldy #5
+    lda #($20 | (TP_GREY << 2))
+    jsl txt_num
+    inc c_y
+@n:
+    A16
+    inc c_li
+    inc c_li
+    A8
+    inc c_ck
+    lda c_ck
+    cmp #STYLE_N
+    bne @l
+    inc c_y                     ; the 8 px gap before the next line
     rts
 
 brk_col:   .byte ($20 | (TP_WHITE << 2)), ($20 | (TP_GREEN << 2)), ($20 | (TP_RED << 2))
@@ -2666,7 +2878,8 @@ split_reason:
     inx
     bra @p
 
-; ptr0 = the line for c_split: "SAME PTS: GOLDS BREAK TIES" (28 at most)
+; ptr0 = the line for c_split: "SAME PTS: GOLDS, NOT SCORE" (28 at most): what
+; split them, and that the SCORE column never does
 split_ptr:
     LDPTR0 str_split_g
     lda f:c_split
@@ -2704,8 +2917,8 @@ split_line:
     clc
     rtl
 
-str_split_g: .byte "SAME PTS: GOLDS BREAK TIES", 0
-str_split_s: .byte "SAME PTS: SILVERS BREAK TIES", 0
+str_split_g: .byte "SAME PTS: GOLDS, NOT SCORE", 0
+str_split_s: .byte "SAME PTS: SILVERS, NOT SCORE", 0
 
 ; why_line (jsl): A = 1 to explain a clear win too ("13 PTS TO 8"), 0 for
 ; ties only ("TIED ON 13 PTS: MORE GOLD", "TIED ON 13 PTS AND MEDALS")
@@ -3597,6 +3810,8 @@ card_wait:
     lda c_hint                  ; still mashing: tell them what we're waiting for
     bne @mash
     inc c_hint
+    lda demo_on                 ; (not in the attract demo: nobody's there;
+    bne @lock                   ; the timing stays the same, so it replays true)
     jsr card_hint
     bra @lock
 @mash:
@@ -3744,7 +3959,7 @@ card_hook:
     jmp ticker_draw
 
 ; new record: the banner (row c_rr1) flashes pink / yellow, WE THE NORTH
-; (row c_rr2, if there was room) red / white
+; (row c_rr2, the name row: only its own cells) red / white
 rec_flash:
     lda frame
     and #$07
@@ -3765,18 +3980,24 @@ rec_flash:
 @s:
     lda c_rr2
     beq @b
+    ldx #NORTH_COL
+    ldy #13                     ; WE THE NORTH!
     jsr @row
 @b:
     lda tmp6+1
     sta tmp6
     lda c_rr1
     beq @x
+    ldx #3
+    ldy #26
     jsr @row
     lda #$01
     sta txt_dirty
 @x:
     rts
+; row A, X cells from column X, in attr tmp6
 @row:
+    stx tmp5
     A16
     and #$00FF
     asl a
@@ -3785,12 +4006,11 @@ rec_flash:
     asl a
     asl a
     clc
-    adc #3
+    adc tmp5
     asl a
     tax
     A8
     lda tmp6
-    ldy #26
 @l:
     sta txt_map+1,x
     inx
