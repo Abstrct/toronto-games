@@ -269,6 +269,30 @@ class leash_human(_Peeker):
         return self.done(m)
 
 
+class leash_nervous(leash_human):
+    """leash_human with jumpy thumbs: a dog that's merely on screen and close
+    (not barking yet) gets a nervous B one time in four, and an "!" now and
+    then gets a second B. A nervous honest player must still finish."""
+
+    def __init__(self):
+        super().__init__()
+        self.jumped = set()
+
+    def act(self, t, tel, rng):
+        m = super().act(t, tel, rng)
+        me, dogs = self.hist[-1]
+        for d in dogs:
+            if d['st'] != 0 or d['i'] in self.jumped:
+                continue
+            if abs(d['x'] - me['x']) + abs(d['y'] - me['y']) < 110:
+                self.jumped.add(d['i'])
+                if rng.random() < 0.25:
+                    m = self.press(m, B)
+        if me['live'] and rng.random() < 0.01:
+            m = self.press(m, B)
+        return self.done(m)
+
+
 K_CAM = 34
 K_TACKLE, K_DODGED, K_HAND, K_SHAVES, K_HURT = 28, 30, 580, 554, 582
 
@@ -293,6 +317,7 @@ class park_hand(_Peeker):
     it dodged sits within easy reach."""
 
     T0 = 12                  # first guess: press about a quarter second out
+    safe = False             # park_safe: gets set on every "!" (the safe line)
     SHAVE_AIM, SAFE_AIM = 15, 29
 
     def __init__(self):
@@ -369,7 +394,7 @@ class park_hand(_Peeker):
             # closing speed, by eye, over the last few frames (never under a walk)
             v = max(2.6, (hist[0] - hist[-1]) / max(1, len(hist) - 1))
             behind = d['y'] - cam > 192           # coming from off the bottom: no read on it
-            if self.dogs_seen == 1 or hurt >= 2 or behind:
+            if self.dogs_seen == 1 or hurt >= 2 or behind or self.safe:
                 if not me['armed']:
                     self.hold_b = 8               # get set on the "!"
                 self.seen[d['i']] = 'done'
@@ -406,9 +431,36 @@ class park_hand(_Peeker):
         return self.done(m)
 
 
-POLICIES = {c.__name__: c for c in [park_ace, park_fetcher, park_sloppy, park_timing, leash_human, park_hand,
-                                     up_mash_b, up_mash_ab]}
-DEFAULTS = {'park': ['idle', 'hold_up', 'up_mash_b', 'up_mash_ab', 'random_input',
-                     'park_timing', 'park_sloppy', 'leash_human', 'park_fetcher', 'park_hand', 'park_ace']}
+class _blind(Policy):
+    """No skill: hold UP and tap B on a metronome, never looking at a dog
+    (round 5: once a second crossed with 0 tackles for a solo bronze)."""
+    trivial = True
+    period = 60
+
+    def act(self, t, tel, rng):
+        return UP | (B if t % self.period < 4 else 0)
+
+
+def _blind_at(n):
+    return type('up_blind_b%d' % n, (_blind,), {"period": n})
+
+
+BLIND = [_blind_at(n) for n in (30, 35, 40, 45, 50, 60, 75, 90)]
+
+
+class park_safe(park_hand):
+    """park_hand on the safe line: gets set on every "!", never times a step by hand."""
+    safe = True
+
+
+class park_nice(park_hand):
+    """park_hand that only ever aims for NICE TIMING (B a stride out), never the shave."""
+    SHAVE_AIM = 29
+
+
+POLICIES = {c.__name__: c for c in [park_ace, park_fetcher, park_sloppy, park_timing, leash_human, leash_nervous, park_hand, park_safe, park_nice,
+                                     up_mash_b, up_mash_ab] + BLIND}
+DEFAULTS = {'park': ['idle', 'hold_up', 'up_mash_b', 'up_mash_ab', 'up_blind_b40', 'up_blind_b60', 'random_input',
+                     'park_timing', 'park_sloppy', 'leash_human', 'leash_nervous', 'park_fetcher', 'park_hand', 'park_ace']}
 CURVE = {'park': 'park_hand'}
 
