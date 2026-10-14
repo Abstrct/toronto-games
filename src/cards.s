@@ -7,7 +7,7 @@
 
 .import rank_place, g_choice, par_calc, par_g, par_s, par_b, practice_back
 .export c_order, c_place, c_champs, c_buf, card_wait, champ_names, why_line
-.export records_board, pick_one, card_sting, podium_line
+.export records_board, pick_one, card_sting, podium_line, split_line
 
 CARD_LOCK = 40                  ; frames every card ignores input for
 INTRO_LOCK = 105                ; UP NOW card in a multiplayer game (after the fade-in):
@@ -28,7 +28,7 @@ c_nst:        .res 1            ; score_card: stat lines shown (card_plan)
 c_note:       .res 1            ; score_card: reason lines shown (0-2, c_noteptr)
 c_noteptr:    .res 2
 c_short:      .res 1            ; score_card: 1 = no room for WE THE NORTH!
-c_nobump:     .res 1            ; score_card: 1 = no room for SO LONG, NAME!
+c_nobump:     .res 1            ; score_card: SO LONG, NAME! 0 own row, 1 none, 2 on the board line
 c_noover:     .res 1            ; score_card: 1 = no room for +214 OVER NAME
 c_fsplit:     .res 1            ; break_ok: forfeit rows (0, 1, or 2 = itemised)
 c_fa:         .res 2            ; break_ok: an itemised forfeit's counted part (TOKENS X50)
@@ -40,6 +40,8 @@ c_n:          .res 1            ; card_plan rows / card_nav option count
 c_cell:       .res 2
 c_val:        .res 2
 c_li:         .res 2
+c_fl = c_cell                   ; final_lines: rows free, why / split wanted, lines wanted
+                                ; (4 bytes: c_cell and c_val, free by then)
 c_fdef:       .res 1            ; final_table: where the cursor starts
 c_order:      .res MAX_PLAYERS  ; final_sort: players by medal points, golds, total
 c_place:      .res MAX_PLAYERS  ; final_sort: 0-based place, shared by equal keys
@@ -87,8 +89,10 @@ c_ck:         .res 1
 
 .segment "HIBSS"                ; bank $7E: long addressing only
 ; text buffer: doubled line breaks, champions' names, the medal ticker
-c_buf:        .res 160
+C_BUF_LEN = 224
+c_buf:        .res C_BUF_LEN
 c_bumped:     .res 9            ; score_card: the name that fell off the board
+c_split:      .res 1            ; final_sort: a points tie split by medals (split_reason)
 
 .segment "SCREENS"
 .a8
@@ -396,7 +400,8 @@ str_solo:        .byte "SOLO", 0
 ; score_card: overlay with the result of the turn (ev_score, ev_fail, ev_stat,
 ; ev_break). ev_fail: 0 finished, 1 the event's own wipe-out line, 2 out of
 ; time, 3 gave up (pause menu), 4 the event's second fail line (ev_fails2).
-; The event decides ev_fail itself, give-ups included: a CALL IT A DAY that
+; The event decides ev_fail itself, give-ups included (one header for all
+; seven, GAVE UP!, the reason line under the sum says what it cost): a CALL IT A DAY that
 ; lands after the run was already over (won or lost) changes nothing.
 ; A score that makes the event's top 5 goes on the Toronto board; a new #1
 ; gets the full moment.
@@ -477,6 +482,8 @@ score_card:
     PRINTC 3, TP_ORANGE, str_out_of_time
     bra @name
 @finished:
+    jsr part_header             ; a finish short of the full set?
+    bcs @name
     LDPTR1 card_finish          ; the event's own finish line
     ldx #(3*32)
     lda #($20 | (TP_GREEN << 2))
@@ -653,12 +660,16 @@ score_card:
     jmp @sfx
 @board:
     ; "#3 ON THE TORONTO BOARD!" and whoever fell off it
+    ; (a card with no row to spare says both on one: #3! SO LONG, NAME!)
     jsr buf_reset
     lda #'#'
     jsr buf_ch
     lda c_rank
     inc a
     jsr buf_byte
+    lda c_nobump
+    cmp #$02
+    beq @merged
     LDPTR0 str_on_board
     jsr buf_str
     jsr buf_term
@@ -671,17 +682,22 @@ score_card:
     lda c_nobump
     bne @sfx
     jsr buf_reset
-    LDPTR0 str_so_long
-    jsr buf_str
-    LDPTR0 c_bumped
-    jsr buf_str
+    jsr so_long
+    lda #($20 | (TP_GREY << 2))
+    bra @bump
+@merged:
     lda #'!'
     jsr buf_ch
-    jsr buf_term
+    lda #' '
+    jsr buf_ch
+    jsr so_long
+    lda #($20 | (TP_GREEN << 2))
+@bump:
+    pha
     lda c_y
     jsr row_cell
     LDPTR0 c_buf
-    lda #($20 | (TP_GREY << 2))
+    pla
     jsl txt_print_centre
 @sfx:
     stz txt_bg
@@ -708,6 +724,70 @@ score_card:
     jsl card_wait
     jsl fade_out
     rtl
+
+; "SO LONG, NAME!" onto c_buf (terminated): the name that fell off the board
+so_long:
+    LDPTR0 str_so_long
+    jsr buf_str
+    LDPTR0 c_bumped
+    jsr buf_str
+    lda #'!'
+    jsr buf_ch
+    jmp buf_term
+
+; part_header: a finish (ev_fail 0) whose card_part_stat is below
+; card_part_need (Parking: 1 spot of 3) gets card_part as its header, any
+; '#' in it the stat's value -> carry set once printed (row 3, green)
+part_header:
+    lda event_idx
+    TAXB
+    lda f:card_part_stat,x
+    bmi @no
+    asl a
+    TAYB
+    A16
+    lda ev_stat,y
+    sta c_val
+    A8
+    lda c_val+1
+    bne @no
+    lda c_val
+    cmp f:card_part_need,x
+    bcs @no
+    LDPTR1 card_part
+    lda event_idx
+    jsr table_ptr
+    jsr buf_reset
+    ldy #$0000
+@c:
+    lda [ptr0],y
+    beq @end
+    cmp #'#'
+    bne @ch
+    phy
+    A16
+    lda c_val
+    sta tmp1
+    A8
+    jsr buf_num
+    ply
+    bra @nx
+@ch:
+    jsr buf_ch
+@nx:
+    iny
+    bra @c
+@end:
+    jsr buf_term
+    ldx #(3*32)
+    LDPTR0 c_buf
+    lda #($20 | (TP_GREEN << 2))
+    jsl txt_print_centre
+    sec
+    rts
+@no:
+    clc
+    rts
 
 ; card_sting (jsl): the result card's sound, played once, as the card
 ; appears (score_card is its only caller): the result jingle (audio.s
@@ -740,8 +820,10 @@ card_sting:
 ; what gives way when the card is full: c_short (WE THE NORTH!), c_nobump
 ; (SO LONG, NAME!), c_noover (+214 OVER NAME). CARD_ROWS keeps a blank row
 ; above PRESS A, so the prompt never reads as one more line of the card.
-; Giving way, in order: WE THE NORTH!, a reason's second line, SO LONG,
-; the second stat, the +214 OVER line, the reason.
+; Giving way, in order: WE THE NORTH!, a reason's second line, the second
+; stat (the sum rows still say it: SPILLS 40 EACH), SO LONG (it joins the
+; board line instead: c_nobump 2, #5! SO LONG, NAME!, so a bumped name is
+; always said), the +214 OVER line, the reason.
 card_plan:
     lda #$01                    ; the SCORE row
     sta c_n
@@ -880,16 +962,17 @@ card_plan:
     dec c_note                  ; the reason's second line
     bra @less
 @g2:
-    lda c_nobump
-    bne @g3
-    inc c_nobump                ; SO LONG, NAME!
-    bra @less
-@g3:
     lda c_nst
     cmp #$02
-    bcc @g4
+    bcc @g3
     dec c_nst                   ; the second stat
     bra @try
+@g3:
+    lda c_nobump
+    bne @g4
+    lda #$02                    ; SO LONG, NAME! joins the board line
+    sta c_nobump
+    bra @less
 @g4:
     lda c_noover
     bne @g5
@@ -1345,7 +1428,7 @@ brk_opcol: .byte ($20 | (TP_GREEN << 2)), ($20 | (TP_RED << 2))
 str_floor:       .byte "SCORES NEVER GO BELOW 0", 0
 str_forfeit:     .byte "FORFEIT", 0
 str_out_of_time: .byte "OUT OF TIME!", 0
-str_gave_up:     .byte "CALLED IT A DAY", 0
+str_gave_up:     .byte "GAVE UP!", 0
 str_score:       .byte "SCORE", 0
 str_new_record:  .byte "NEW TORONTO RECORD!", 0
 str_over:        .byte " OVER ", 0
@@ -1993,6 +2076,14 @@ medal_table:
     LDPTR0 str_tk_pts
     jsr buf_str
 @nextup:
+    ; level on points but placed apart lower down: say what split them
+    jsr split_own
+    beq @nosplit
+    jsr split_ptr
+    jsr buf_str
+    LDPTR0 str_tk_sep
+    jsr buf_str
+@nosplit:
     LDPTR0 str_tk_next
     jsr buf_str
     LDPTR1 ev_names
@@ -2034,6 +2125,24 @@ medal_table:
 @zline:
     jsr buf_str
 @tkdone:
+    ; under the table, when the box leaves a row clear of the ticker
+    lda f:c_split
+    beq @nosl
+    lda c_bot
+    inc a
+    inc a
+    cmp #21
+    bcc @slrow
+    lda #20
+@slrow:
+    cmp c_bot
+    beq @nosl
+    bcc @nosl
+    jsr row_cell
+    jsr split_ptr
+    lda #($20 | (TP_CYAN << 2))
+    jsl txt_print_centre
+@nosl:
     ldx #(22*32 + 1)
     A16
     lda #$031E                  ; 30 x 3
@@ -2401,6 +2510,7 @@ final_sort:
     bra @ch
 @x:
     jsr tie_reason
+    jsr split_reason
     rtl
 
 ; X, Y = player offsets -> flags of "X's key vs Y's key" (C = X >= Y, Z = equal)
@@ -2467,6 +2577,92 @@ tie_reason:
     sta c_tie
 @x:
     rts
+
+; c_split: what split the first two players level on points but not on
+; place, from the top of the table down: 0 none, 1 golds, 2 silvers (points
+; are 5 / 3 / 1, so level points and golds always differ on silvers too)
+split_reason:
+    lda #$00
+    sta f:c_split
+    ldx #$0001
+@p:
+    txa
+    cmp num_players
+    bcs @x
+    lda c_place,x
+    cmp c_place-1,x
+    beq @n                      ; a shared place: nothing split them
+    stx tmp4
+    lda c_order,x
+    jsl player_offset
+    stx tmp3
+    ldx tmp4
+    lda c_order-1,x
+    jsl player_offset
+    txy
+    ldx tmp3
+    A16
+    lda players+PL_POINTS,x
+    cmp players+PL_POINTS,y
+    A8
+    bne @n0
+    lda players+PL_GOLD,x
+    cmp players+PL_GOLD,y
+    bne @g
+    lda #$02
+    bra @set
+@g:
+    lda #$01
+@set:
+    sta f:c_split
+@x:
+    rts
+@n0:
+    ldx tmp4
+@n:
+    inx
+    bra @p
+
+; ptr0 = the line for c_split: "SAME PTS: GOLDS BREAK TIES" (28 at most)
+split_ptr:
+    LDPTR0 str_split_g
+    lda f:c_split
+    cmp #$02
+    bne @x
+    LDPTR0 str_split_s
+@x:
+    rts
+
+; 1 = a lower points tie split by medals needs its own line: c_split, and
+; first place isn't already explained by one (c_tie 1 / 2 / 3 say MORE GOLD)
+split_own:
+    lda f:c_split
+    beq @x
+    lda c_tie
+    beq @y
+    cmp #$04
+    beq @y
+    lda #$00
+    rts
+@y:
+    lda #$01
+@x:
+    rts
+
+; split_line (jsl, the ceremony): carry set and ptr0 = the split_ptr line
+; when split_own wants one, else carry clear
+split_line:
+    jsr split_own
+    beq @no
+    jsr split_ptr
+    sec
+    rtl
+@no:
+    clc
+    rtl
+
+str_split_g: .byte "SAME PTS: GOLDS BREAK TIES", 0
+str_split_s: .byte "SAME PTS: SILVERS BREAK TIES", 0
 
 ; why_line (jsl): A = 1 to explain a clear win too ("13 PTS TO 8"), 0 for
 ; ties only ("TIED ON 13 PTS: MORE GOLD", "TIED ON 13 PTS AND MEDALS")
@@ -2616,6 +2812,39 @@ final_table:
 ; under the final table's box: the champion, then how first place was
 ; decided when points alone didn't
 final_lines:
+    ; rows under the box, 16 px apart, down to row 23 (clear of the
+    ; choices): (23 - c_bot) / 2 of them, 1 for a full field of eight
+    lda #23
+    sec
+    sbc c_bot
+    lsr a
+    sta c_fl
+    ; the lines that want one: the champion, why first place is first
+    ; (why_line), a points tie lower down split by medals (split_own)
+    lda #$00
+    jsl why_line
+    lda #$00
+    rol a
+    sta c_fl+1
+    jsr split_own
+    sta c_fl+2
+    clc
+    adc c_fl+1
+    inc a
+    sta c_fl+3                  ; lines wanted
+    lda c_bot
+    clc
+    adc #2
+    sta c_mk                    ; the next free row
+    ; short of rows, the champion gives way first (their names are yellow
+    ; in the table, and the ceremony has just said it), then the why
+    lda c_fl+3
+    cmp c_fl
+    beq @champ
+    bcc @champ
+    dec c_fl+3
+    bra @why
+@champ:
     jsr buf_reset
     lda c_champs
     bne @won
@@ -2635,32 +2864,37 @@ final_lines:
     jsr buf_name
 @line:
     jsr buf_term
-    lda c_bot
-    clc
-    adc #2
+    lda c_mk
     jsr row_cell
     LDPTR0 c_buf
     lda #($20 | (TP_PINK << 2))
     jsl txt_print_centre
+    inc c_mk
+    inc c_mk
+@why:
+    lda c_fl+1
+    beq @split
+    lda c_fl+3
+    cmp c_fl
+    beq @w
+    bcc @w
+    dec c_fl+3
+    bra @split
+@w:
     lda #$00
-    jsl why_line
-    bcc @x
-    ; 16 px under the champion line; a full field of eight has no room, so
-    ; it takes the champion line's place (the champions are yellow above)
-    ldy #4
-    lda num_players
-    cmp #MAX_PLAYERS
-    bcc @w4
-    lda c_bot
-    clc
-    adc #2
-    jsr blank_row
-    ldy #2
-@w4:
-    tya
-    clc
-    adc c_bot
+    jsl why_line                ; ptr0 = the line again
+    lda c_mk
     jsr row_cell
+    lda #($20 | (TP_CYAN << 2))
+    jsl txt_print_centre
+    inc c_mk
+    inc c_mk
+@split:
+    lda c_fl+2
+    beq @x
+    lda c_mk
+    jsr row_cell
+    jsr split_ptr
     lda #($20 | (TP_CYAN << 2))
     jsl txt_print_centre
 @x:
@@ -3010,7 +3244,7 @@ buf_reset:
 buf_ch:
     phx
     ldx c_len
-    cpx #159
+    cpx #(C_BUF_LEN - 1)
     bcs @full
     sta f:c_buf,x
     inx
@@ -3795,6 +4029,12 @@ fh3: .byte "SPADINA! YOU LOST HIM!", 0
 fh4: .byte "THE RCYC BAR IS OPEN!", 0
 fh5: .byte "PARKED ON BRUNSWICK!", 0
 fh6: .byte "UNION! EVERYBODY OFF!", 0
+; a finish short of the full set (ev_fail 0, ev_stat card_part_stat below
+; card_part_need; $FF = never) gets card_part instead, '#' = the stat
+card_part_stat: .byte $FF, $FF, $FF, $FF, $FF, 0, $FF   ; parking: SPOTS PARKED
+card_part_need: .byte 0, 0, 0, 0, 0, 3, 0
+card_part:      .addr 0, 0, 0, 0, 0, fp5, 0
+fp5: .byte "PARKED # OF 3 ON BRUNSWICK", 0
 eb0: .byte "GET THE PACKAGE TO SPADINA", $0A, "IN TIME. PREFERABLY ALIVE.", 0
 eb1: .byte "MAKE THE 5:42 GO TRAIN.", $0A, "RED ! AHEAD? CHANGE LANES.", 0
 eb2: .byte "QUEEN GATE TO DUNDAS GATE.", $0A, "DODGE DOGS, THEN PAT THEM!", 0
@@ -3854,37 +4094,36 @@ bl_germs:  .byte "GERMS", 0
 ; card_fail_note: the line under a failed run's sum, saying why it scored
 ; what it did (26 characters at most, centred; a $0A splits it into two lines,
 ; the second one dropped when the card is full). Per event, ev_fail 1 (its
-; own fail), 2 (out of time), 3 (called it a day), 4 (its second fail);
+; own fail), 2 (out of time), 3 (gave up: under the GAVE UP! header, so
+; never GAVE UP again), 4 (its second fail);
 ; 0 = none. Nothing earned (base and bonus 0) in a card_still event shows
 ; card_still_ln instead.
 card_fail_note:
     .addr fn_bike,   fn_bike_n, fn_bike_q, fn_bike_s    ; bike
-    .addr fn_bay,    fn_bay,    fn_bay_q,  fn_bay       ; bay
-    .addr fn_park,   fn_park_t, fn_park_q, fn_park_n    ; park
+    .addr fn_bay,    fn_bay,    fn_bay,    fn_bay       ; bay
+    .addr fn_park,   fn_park_t, fn_park_t, fn_park_n    ; park
     .addr fn_cops,   fn_cops,   fn_cops_q, fn_cops      ; cops
     .addr fn_sail,   fn_sail_t, fn_sail_t, fn_sail_h    ; sail
     .addr fn_pk,     fn_pk,     fn_pk_q,   fn_pk_i      ; parking
     .addr fn_sub,    fn_sub,    fn_sub_q,  fn_sub       ; subway
 fn_bike:   .byte "THIRD WIPEOUT. NOT PAID!", 0
 fn_bike_n: .byte "OUT OF TIME. NOT PAID!", $0A, "SAY THE 501 SHORT-TURNED", 0
-fn_bike_q: .byte "GAVE UP. NOT PAID!", 0
+fn_bike_q: .byte "NO DELIVERY: METRES ONLY", 0
 fn_bike_s: .byte "STOPPED 8 S. NOT PAID!", 0
 fn_bay:    .byte "THE 5:42 LEFT WITHOUT YOU", $0A, "WALK PAID BY DISTANCE", 0
-fn_bay_q:  .byte "GAVE UP: THE 5:42 LEFT", $0A, "WALK PAID BY DISTANCE", 0
 fn_park:   .byte "3 HEARTS GONE. NO DOGS!", 0
 fn_park_t: .byte "NO DUNDAS, NO DOGS!", 0
-fn_park_q: .byte "GAVE UP. NO DOGS!", 0
 fn_park_n: .byte "NO STEP NORTH IN 10 S", 0
 fn_cops:   .byte "COP CAUGHT YOU: FINED 1/4", 0
-fn_cops_q: .byte "GAVE UP: THE COP FINES 1/4", 0
+fn_cops_q: .byte "THE COP FINES QUITTERS 1/4", 0
 fn_sail:   .byte "15 S GETTING NO CLOSER", $0A, "250 A MARK + PART OF NEXT", 0
 fn_sail_t: .byte "250 A MARK + PART OF NEXT", 0
 fn_sail_h: .byte "NOBODY TOUCHED THE HELM", 0
 fn_pk:     .byte "HALF IN OR TOWED, ALL 3", 0
 fn_pk_i:   .byte "10 S WITHOUT DRIVING", 0
-fn_pk_q:   .byte "QUIT: FINISHED SPOTS COUNT", 0
+fn_pk_q:   .byte "FINISHED SPOTS STILL COUNT", 0
 fn_sub:    .byte "20 GERMS: STYLE IS VOID", $0A, "ONLY LEGS YOU LEANED PAY", 0
-fn_sub_q:  .byte "GAVE UP: STYLE IS VOID", $0A, "ONLY LEGS YOU LEANED PAY", 0
+fn_sub_q:  .byte "NO UNION: STYLE IS VOID", $0A, "ONLY LEGS YOU LEANED PAY", 0
 
 ; a failed run that earned nothing (base and bonus 0) says the event's card_still_ln instead of its
 ; reason line, for the ev_fail codes in card_still (bit n = ev_fail n: $1E all

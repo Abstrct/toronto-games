@@ -203,7 +203,8 @@ str_sub:   .byte "THE OLYMPICS WE CAN AFFORD", 0
 str_hint:  .byte "A SELECT    ", TXT_ARROW_U+32, TXT_ARROW_D+32, " MOVE", 0
 
 ; ------------------------------------------------------------------
-; pick_events: GM_SOME toggles any events (all start ticked), GM_PRACTICE
+; pick_events: GM_SOME toggles any events (none start ticked, so one event
+; is A then START; SELECT ticks all, or none once all are on), GM_PRACTICE
 ; picks one. B goes back ONE step, to the competitors with the roster kept;
 ; carry is set only if the player then leaves the roster for the main menu.
 TXT_TICK_OFF = 89               ; font.py: empty / crossed tick boxes
@@ -211,17 +212,9 @@ TXT_TICK_ON  = 90
 PK_ROW0 = 6                     ; first event row (16 px pitch, seven rows)
 
 pick_events:
-    lda #$01
-    sta tmp0
-    lda game_mode
-    cmp #GM_PRACTICE
-    bne @fill
-    stz tmp0                    ; practice: nothing ticked until you pick
-@fill:
-    ldx #$0000
+    ldx #$0000                  ; nothing ticked until you pick
 @f1:
-    lda tmp0
-    sta event_on,x
+    stz event_on,x
     inx
     cpx #NUM_EVENTS
     bne @f1
@@ -269,11 +262,37 @@ pick_show:
     bit #PAD_B
     jne @back
     bit #PAD_START
-    bne @start
+    jne @start
     bit #PAD_A
     bne @toggle
+    bit #PAD_SELECT
+    bne @all
     A8
     bra @loop
+@all:
+    ; SELECT: every event on, or (all on already) every event off
+    A8
+    lda game_mode
+    cmp #GM_PRACTICE
+    beq @loop
+    ldx #$0000
+    lda #$01
+@a1:
+    and event_on,x
+    inx
+    cpx #NUM_EVENTS
+    bne @a1
+    eor #$01                    ; 1 = turn them all on
+    ldx #$0000
+@a2:
+    sta event_on,x
+    inx
+    cpx #NUM_EVENTS
+    bne @a2
+    cmp #$00
+    beq @off_sfx
+    SFX SFX_SELECT
+    bra @toggled
 @toggle:
     A8
     lda game_mode
@@ -461,17 +480,28 @@ draw_events:
     cpx #NUM_EVENTS
     bne @cnt
     lda tmp7
+    pha
     A16
     and #$00FF
     sta tmp1
     A8
-    ldx #(20*32 + 8)
+    ldx #(20*32 + 4)
     ldy #1
     lda #($20 | (TP_CYAN << 2))
     jsl txt_num
     LDPTR0 str_pick_count
-    ldx #(20*32 + 9)
+    ldx #(20*32 + 5)
     lda #($20 | (TP_CYAN << 2))
+    jsl txt_print
+    ; what SELECT does next: ALL, or NONE when every event is on
+    LDPTR0 str_pick_all
+    pla
+    cmp #NUM_EVENTS
+    bne @sel
+    LDPTR0 str_pick_nonea
+@sel:
+    ldx #(20*32 + 16)
+    lda #($20 | (TP_GREY << 2))
     jsl txt_print
 @x:
     stz txt_bg
@@ -483,6 +513,8 @@ str_pick_hint: .byte "A ON/OFF  START GO  B BACK", 0
 str_pick_hint1: .byte "A OR START PLAY  B BACK", 0
 str_pick_none: .byte "TICK AT LEAST ONE EVENT!", 0
 str_pick_wipe: .byte "                        ", 0
-str_pick_count: .byte " OF 7 EVENTS ON", 0
+str_pick_count: .byte " OF 7 ON", 0
+str_pick_all:   .byte "SELECT: ALL ", 0
+str_pick_nonea: .byte "SELECT: NONE", 0
 str_on:        .byte "ON ", 0
 str_off:       .byte "OFF", 0
