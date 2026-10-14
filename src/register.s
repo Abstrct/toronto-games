@@ -8,6 +8,7 @@
 .global reg_fade_out_q          ; menu.s: the main menu's way into sign-up
 
 R_QMAX = 12                     ; presses kept for the name grid
+R_ALOCK = 30                    ; frames A must be up before a full roster's START! takes it
 
 .segment "BSS"
 r_cx:       .res 1      ; grid cursor
@@ -22,6 +23,7 @@ r_keep:     .res 1      ; name_entry: keep the name (back from the sponsors)
 r_rm:       .res 1      ; remove confirm: 0 NO, 1 YES
 r_qn:       .res 1      ; presses queued on the way into the name grid
 r_q:        .res R_QMAX
+r_alock:    .res 1      ; roster: frames before A on START! counts (a full roster)
 
 .segment "SCREENS"
 .a8
@@ -177,10 +179,22 @@ draw_roster_list:
     rts
 
 roster_live:
-    ; the cursor stays where it was: a full roster greys ADD out but never
-    ; moves the cursor onto START! (an "add" press would start the games)
+    ; the cursor stays where it was, except that a full roster parks it on
+    ; START! rather than the dead ROSTER FULL; then A only counts once it
+    ; has been let go for R_ALOCK frames, so the A that picked the eighth
+    ; sponsor (or a mash after it) can't start the games
+    stz r_alock
     lda r_rsel
     sta m_sel
+    bne @drawn
+    lda num_players
+    cmp #MAX_PLAYERS
+    bcc @drawn
+    lda #2
+    sta m_sel
+    lda #R_ALOCK
+    sta r_alock
+@drawn:
     jsr draw_roster_menu
     PRINTC 26, TP_GREY, str_roster_hint
     ; fade in from inside the loop: the pad is live from the first visible
@@ -191,6 +205,19 @@ roster_live:
     jsl wait_frame
     jsr fade_step
     jsl menu_backdrop_tick
+    lda r_alock
+    beq @live
+    A16
+    lda pad
+    and #PAD_A
+    A8
+    beq @quiet
+    lda #R_ALOCK                ; A still down: the let-go starts again
+    sta r_alock
+    bra @live
+@quiet:
+    dec r_alock
+@live:
     A16
     lda pad_new
     bit #(PAD_LEFT | PAD_UP)
@@ -211,6 +238,11 @@ roster_live:
     lda m_sel
     jeq @loop
     dec a
+    bne @moved
+    lda num_players             ; (never back onto ROSTER FULL)
+    cmp #MAX_PLAYERS
+    jcs @loop
+    lda #$00
     bra @moved
 @next:
     A8
@@ -230,6 +262,8 @@ roster_live:
     bra @pick8
 @pick:
     A8
+    lda r_alock                 ; a full roster's START!: not until A is let go
+    jne @loop
 @pick8:
     lda m_sel
     bne @ok
@@ -596,7 +630,7 @@ ri2: .byte "START!", 0
 str_competitors: .byte "COMPETITORS", 0
 str_roster_hint: .byte "A SELECT  START GO  B MENU", 0
 str_roster_full: .byte "ROSTER FULL: 8 PLAYERS MAX", 0
-str_sam_short:   .byte "SAM THE REC. MAN", 0
+str_sam_short:   .byte "SAM THE REC MAN", 0   ; a cell clear of the frame
 str_leave:       .byte "LEAVE AND LOSE", 0
 str_leave_pl:    .byte " PLAYERS?", 0
 str_leave_1:     .byte " PLAYER?", 0

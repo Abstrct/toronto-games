@@ -5,18 +5,22 @@
 .include "globals.inc"
 .include "screens.inc"
 
-.import rank_place, g_choice, par_calc, par_g, par_s, par_b
+.import rank_place, g_choice, par_calc, par_g, par_s, par_b, practice_back
 .export c_order, c_place, c_champs, c_buf, card_wait, champ_names, why_line
 .export records_board, pick_one
 
 CARD_LOCK = 40                  ; frames every card ignores input for
-INTRO_LOCK = 90                 ; UP NOW card in a multiplayer game (after the fade-in)
+INTRO_LOCK = 105                ; UP NOW card in a multiplayer game (after the fade-in):
+                                ; ~2 s from the card showing to PRESS A, time to hand the pad over
+STAND_LOCK = 90                 ; a field's standings and the medal table: everyone gets a look
 
 REC_ROW = 16 * NUM_EVENTS        ; records: rank-major, 5 rows of (5 events x 16 bytes)
 
 .segment "BSS"
 c_rank:       .res 1            ; score_card: place on the Toronto board, $FF = none
 c_brk:        .res 1            ; score_card: 1 = ev_break adds up, show the sum
+c_floor:      .res 1            ; break_ok: 1 = the sum is below 0 and the score is 0 (NEVER BELOW 0)
+c_forf:       .res 1            ; break_ok: 1 = a failed run forfeits the bonus (grey FORFEIT row)
 c_si:         .res 1            ; score_card: ev_stat index of the line being drawn
 c_margin:     .res 2            ; score_card: lead over the old record
 c_y:          .res 1            ; score_card: row being drawn
@@ -51,6 +55,13 @@ c_lock:       .res 1            ; frames of lockout left
 c_relc:       .res 1            ; quiet frames still needed before arming
 c_relq:       .res 1            ; quiet frames a card needs (card_setup: REL_FRAMES)
 c_hint:       .res 1            ; LET GO OF THE BUTTONS is showing (frames, to 255)
+c_esc:        .res 1            ; 1 = a tapper may get through once LET GO has been up a while
+c_chain:      .res 1            ; the last card was tapped through: the next one needs a real let-go
+c_viaesc:     .res 1            ; this card_wait armed through the tapper's way out
+c_seen:       .res 1            ; a button went down during this card_wait
+c_bok:        .res 1            ; 1 = B leaves (card_wait -> $FF): Practice, the intro card
+c_pre:        .res 3            ; grey line on the prompt row while locked (address 0 = none)
+c_rattr:      .res 1            ; row_line: attr
 c_def:        .res 1            ; c_opts: the choice the cursor starts on
 c_prompt:     .res 2            ; single prompt string (this bank)
 c_sel:        .res 1
@@ -222,7 +233,18 @@ event_card:
 @nopar:
     stz txt_bg
     jsl fade_in
+    ; Practice, the first player's card: B goes back to the event list
     LDPTR0 str_ready
+    stz c_bok
+    lda game_mode
+    cmp #GM_PRACTICE
+    bne @prompt
+    lda cur_player
+    ora demo_on                 ; (a demo has no event list to go back to)
+    bne @prompt
+    inc c_bok
+    LDPTR0 str_ready_b
+@prompt:
     ldx #((CARD_LOCK - 16) << 8)   ; the fade-in counts towards the lockout
     lda num_players
     cmp #$02
@@ -240,8 +262,27 @@ event_card:
     bcc @w
     lda #REL_NEXT               ; and the last one's rhythm of taps must stop
     sta c_relq
+    stz c_esc                   ; however long they keep tapping
+    ; what the wait is for: "HAND THE PAD TO KEV"
+    jsr buf_reset
+    LDPTR0 str_pass
+    jsr buf_str
+    lda cur_player
+    jsr buf_name
+    jsr buf_term
+    A16
+    lda #.loword(c_buf)
+    sta c_pre
+    A8
+    lda #^c_buf
+    sta c_pre+2
 @w:
     jsl card_wait
+    stz c_bok
+    cmp #$FF
+    bne @go
+    jml practice_back           ; game.s: unwinds the event, back to the list
+@go:
     jsl txt_clear
     rtl
 
@@ -262,6 +303,11 @@ card_setup:
     stz c_bg
     lda #REL_FRAMES
     sta c_relq
+    lda #$01
+    sta c_esc
+    A16
+    stz c_pre
+    A8
     rts
 
 ; X = byte offset of records[event_idx]
@@ -336,6 +382,8 @@ str_up:          .byte "UP NOW", 0
 str_for:         .byte "FOR", 0
 str_record:      .byte "RECORD", 0
 str_ready:       .byte "PRESS A WHEN READY", 0
+str_ready_b:     .byte "A READY    B OTHER EVENT", 0
+str_pass:        .byte "HAND THE PAD TO ", 0
 str_solo:        .byte "SOLO", 0
 
 ; ------------------------------------------------------------------
@@ -348,18 +396,22 @@ str_solo:        .byte "SOLO", 0
 ; gets the full moment.
 ; Every text row sits 16 px apart (rows 3, 5, then CARD_TOP.. in steps of 2,
 ; PRESS A on 23), whatever the result, a 0 included:
-;     WIPED OUT!                  (red: why the run ended)
+;     WIPED OUT!                  (red: why the run ended; a finish is
+;                                  green, card_finish: DELIVERED!)
 ;     PLAYER 1
-;     TTC TOKENS           4      (the event's picked stats, card_stat_pick)
-;     WIPEOUTS             3
+;     METRES             812      (the event's picked stats, card_stat_pick,
+;     WIPEOUTS             3       card_stat_pick_fail for a failed run)
 ;     RIDE               220      (ev_break: base, always shown)
 ;   + TIPS                60      (bonus / penalty rows only when not 0)
-;   = SCORE              280
+;   - TACKLES            450      (the true cost, never clamped)
+;   = SCORE                0
+;     FORFEIT TIPS+STYLE 260      (grey: card_forfeit, a failed run)
+;   SCORES NEVER GO BELOW 0       (grey: the sum is under 0)
 ;   NO DELIVERY, NO 1000 FEE      (a failed run: card_fail_note)
 ;     #3 ON THE TORONTO BOARD!    (and who fell off it, or a new record)
-; When ev_break doesn't add up to ev_score the sum rows are left out and
-; SCORE stands alone under the stats. The board lines need the room first:
-; one stat instead of two, then WE THE NORTH! goes.
+; When ev_break doesn't add up to ev_score (break_ok) the sum rows are left
+; out and SCORE stands alone under the stats. The board lines need the room
+; first: one stat instead of two, then WE THE NORTH! goes.
 CARD_TOP  = 7                   ; first content row
 CARD_ROWS = 8                   ; content rows 7, 9 .. 21
 COL_L = 4                       ; stat labels and the + - = signs
@@ -417,7 +469,10 @@ score_card:
     PRINTC 3, TP_ORANGE, str_out_of_time
     bra @name
 @finished:
-    PRINTC 3, TP_GREEN, str_finished
+    LDPTR1 card_finish          ; the event's own finish line
+    ldx #(3*32)
+    lda #($20 | (TP_GREEN << 2))
+    jsr print_ev_entry_c
 @name:
     lda #($20 | (TP_YELLOW << 2))
     sta tmp6
@@ -436,7 +491,13 @@ score_card:
     clc
     adc tmp7
     TAXB
+    lda ev_fail
+    bne @spf
     lda f:card_stat_pick,x
+    bra @sp
+@spf:
+    lda f:card_stat_pick_fail,x ; a failed run shows what still counted
+@sp:
     sta c_si
     lda event_idx
     asl a
@@ -503,6 +564,18 @@ score_card:
     lda #($20 | (TP_YELLOW << 2))
     jsl txt_num
     jsr next_row
+    lda c_brk
+    beq @why
+    jsr forfeit_line            ; FORFEIT TIPS+STYLE 260 (grey, not in the sum)
+    lda c_floor
+    beq @why
+    lda c_y                     ; base + bonus - penalty < 0: the score stops at 0
+    jsr row_cell
+    LDPTR0 str_floor
+    lda #($20 | (TP_GREY << 2))
+    jsl txt_print_centre
+    jsr next_row
+@why:
     ; a failed run: why it scored what it did (one or two lines)
     lda c_note
     beq @rec
@@ -656,17 +729,22 @@ card_plan:
     A8
     beq @nb
     inc c_n
-@nb:
+@nb:                            ; (a forfeit bonus takes its row below the sum)
     A16
     lda ev_break+4
     A8
-    beq @note
+    beq @fl
     inc c_n
+@fl:
+    lda c_floor
+    beq @note
+    inc c_n                     ; NEVER BELOW 0
 @note:
     stz c_note
     lda ev_fail
     jeq @board
-    ; nothing earned by an event that pays for moving: say so
+    ; nothing earned by an event that pays for moving: say so, in the
+    ; event's own words, for the fail codes it names (card_still)
     lda c_brk
     beq @own
     A16
@@ -675,10 +753,21 @@ card_plan:
     bne @own
     lda event_idx
     TAXB
+    lda ev_fail
+    and #$07
+    TAYB
     lda f:card_still,x
-    beq @own
+@bit:
+    lsr a
+    dey
+    bpl @bit
+    bcc @own
+    lda event_idx
     A16
-    lda #.loword(str_still)
+    and #$00FF
+    asl a
+    tax
+    lda f:card_still_ln,x
     sta c_noteptr
     A8
     bra @lines
@@ -862,26 +951,110 @@ card_stat_pick:
     .byte 1, 2                  ; sail: MARKS ROUNDED, BUMPS
     .byte 0, 2                  ; parking: SPOTS PARKED, TICKETS
     .byte 1, 0                  ; subway: STATIONS, GERMS
+; the same for a failed run (ev_fail 1-4): only stats that still count
+card_stat_pick_fail:
+    .byte 0, 2                  ; bike: METRES, WIPEOUTS (tokens and style are forfeit)
+    .byte 0, 2                  ; bay: TIME LEFT, SPILLS
+    .byte 1, 2                  ; park: DOGS DODGED, TACKLES
+    .byte 0, 2                  ; cops: SIP 'N' HOPS, HURDLES
+    .byte 1, 2                  ; sail: MARKS ROUNDED, BUMPS
+    .byte 0, 2                  ; parking: SPOTS PARKED, TICKETS
+    .byte 1, 0                  ; subway: STATIONS, GERMS
 
-; carry set = ev_break adds up to ev_score (0 + 0 - 0 = 0 counts: a score of
-; nothing still shows its sum)
+; 1 = a failed run forfeits the bonus: the event leaves it in ev_break+2,
+; keeps it out of ev_score, and the card shows it as a grey FORFEIT row
+card_forfeit: .byte 1, 0, 0, 0, 0, 0, 0    ; bike bay park cops sail parking subway
+
+; carry set = the card can show ev_break's sum. One rule for every event:
+; - base + bonus - penalty = ev_score (0 + 0 - 0 = 0 counts: a score of
+;   nothing still shows its sum);
+; - or the sum is below 0 and ev_score is 0: c_floor = 1, the card shows the
+;   true penalty and adds NEVER BELOW 0;
+; - a failed run in a card_forfeit event leaves the bonus out of the sum:
+;   c_forf = 1, and the bonus shows under the score as a grey FORFEIT row.
 break_ok:
+    stz c_floor
+    stz c_forf
+    A16
+    lda ev_break+2
+    sta c_val
+    A8
+    beq @sum
+    lda ev_fail
+    beq @sum
+    lda event_idx
+    TAXB
+    lda f:card_forfeit,x
+    beq @sum
+    inc c_forf
+    A16
+    stz c_val
+    A8
+@sum:
     A16
     lda ev_break
     clc
-    adc ev_break+2
+    adc c_val
     bcs @no
     sec
     sbc ev_break+4
-    bcc @no
+    bcc @under
     cmp ev_score
     bne @no
     A8
     sec
     rts
+@under:
+    lda ev_score
+    bne @no
+    A8
+    inc c_floor
+    sec
+    rts
 @no:
     A8
     clc
+    rts
+
+; under the score: a failed run's forfeit bonus, grey and unsigned, so it
+; can't be read as part of the sum ("FORFEIT TIPS+STYLE    260")
+forfeit_line:
+    lda c_forf
+    beq @x
+    LDPTR0 str_forfeit
+    lda #COL_L
+    jsr cy_cell
+    lda #($20 | (TP_GREY << 2))
+    jsl txt_print
+    lda event_idx
+    asl a
+    clc
+    adc event_idx
+    inc a                       ; the bonus label
+    A16
+    and #$00FF
+    asl a
+    tax
+    lda f:card_break_labels,x
+    sta ptr0
+    A8
+    lda #^card_break_labels
+    sta ptr0+2
+    lda #(COL_L + 8)
+    jsr cy_cell
+    lda #($20 | (TP_GREY << 2))
+    jsl txt_print
+    A16
+    lda ev_break+2
+    sta tmp1
+    A8
+    lda #COL_V
+    jsr cy_cell
+    ldy #5
+    lda #($20 | (TP_GREY << 2))
+    jsl txt_num
+    jsr next_row
+@x:
     rts
 
 ; the sum rows from c_y: base (always), + bonus and - penalty (only when not
@@ -903,6 +1076,12 @@ break_lines:
     lda c_val
     A8
     jeq @next                   ; nothing added or taken: no row
+    lda tmp7
+    cmp #$01
+    bne @sign
+    lda c_forf
+    jne @next                   ; a forfeit bonus goes under the score instead
+@sign:
     lda tmp7
     dec a
     TAXB
@@ -984,7 +1163,8 @@ brk_col:   .byte ($20 | (TP_WHITE << 2)), ($20 | (TP_GREEN << 2)), ($20 | (TP_RE
 brk_op:    .byte '+' - 32 + TXT_WIN, '-' - 32 + TXT_WIN
 brk_opcol: .byte ($20 | (TP_GREEN << 2)), ($20 | (TP_RED << 2))
 
-str_finished:    .byte "FINISHED!", 0
+str_floor:       .byte "SCORES NEVER GO BELOW 0", 0
+str_forfeit:     .byte "FORFEIT", 0
 str_out_of_time: .byte "OUT OF TIME!", 0
 str_gave_up:     .byte "CALLED IT A DAY", 0
 str_score:       .byte "SCORE", 0
@@ -1276,28 +1456,39 @@ event_standings:
     jsl fade_in
     lda #SONG_STANDINGS
     jsl music_keep
-    lda game_mode
-    cmp #GM_PRACTICE
-    bne @plain
-    lda #25
-    ldx #((CARD_LOCK << 8) | 1)
-    jsr card_setup
-    lda #$01
-    sta c_opts                  ; RETRY / MENU
-    jsl card_wait
-    sta g_choice
-    bra @out
-@plain:
     LDPTR0 str_press_a
     lda #25
     ldx #((CARD_LOCK << 8) | 1)
     jsr card_setup
+    jsr field_wait              ; a field: everyone gets a look
+    lda game_mode
+    cmp #GM_PRACTICE
+    bne @plain
+    lda #$01
+    sta c_opts                  ; RETRY / OTHER EVENT / MENU
+    jsl card_wait
+    sta g_choice
+    bra @out
+@plain:
     jsl card_wait
 @out:
     jsl fade_out
     jsr medal_table
     jsl music_stop
     rtl
+
+; after card_setup: in a field of two or more, the standings and the medal
+; table stay up STAND_LOCK frames and want the long let-go of a hand-over
+field_wait:
+    lda num_players
+    cmp #$02
+    bcc @x
+    lda #STAND_LOCK
+    sta c_lock
+    lda #REL_NEXT
+    sta c_relq
+@x:
+    rts
 
 ; medal icon at row cell tmp5 + 4, colour by rank_medal (A = 0..2)
 standings_medal:
@@ -1678,6 +1869,7 @@ medal_table:
     lda #26
     ldx #((CARD_LOCK << 8) | 5)
     jsr card_setup
+    jsr field_wait
     jsl card_wait
     jsl fade_out
     rts
@@ -2185,10 +2377,10 @@ row_cell:
     rts
 
 ; final_table: the overall standings, then REMATCH / 1 EVENT / TITLE.
-; A = where the cursor starts (2 TITLE after the podium, 1 back from 1 EVENT)
-; -> A = 0 / 1 / 2. TITLE throws the roster away, so it asks first (cursor
-; on NO): a player still tapping A through the podium can neither start a
-; whole new set nor lose the crew by accident.
+; A = where the cursor starts (0 REMATCH after the podium, 1 back from
+; 1 EVENT) -> A = 0 / 1 / 2. TITLE throws the roster away, so it asks first
+; (cursor on NO); A wants a real let-go first, so a player still tapping A
+; through the podium neither starts a whole new set nor loses the crew.
 final_table:
     sta c_fdef
     jsr menu_setup
@@ -2211,6 +2403,11 @@ final_table:
     sta c_opts                  ; REMATCH / 1 EVENT / TITLE
     lda c_fdef
     sta c_def
+    ; the cursor starts on REMATCH: a tap carried through the podium must
+    ; stop (the long let-go, no tapping through) before A starts a new set
+    lda #REL_NEXT
+    sta c_relq
+    stz c_esc
     jsr card_fade_in            ; the cursor moves during the fade
     lda #SONG_STANDINGS
     jsl music_keep
@@ -2320,6 +2517,8 @@ title_confirm:
     stz c_def                   ; NO
     lda #16
     sta c_lock
+    lda #REL_FRAMES             ; a deliberate choice: the short let-go
+    sta c_relq
     jsl card_wait
     pha
     lda #23
@@ -2768,9 +2967,14 @@ str_amp:       .byte " & ", 0
 ; are still down when the timed lockout ends, the prompt row says so
 ; (LET GO OF THE BUTTONS) instead of the card looking hung; mashing never
 ; extends the timed part, only the short quiet spell, and once LET GO has
-; been up for four quiet spells' worth of frames the next fresh A counts.
+; been up for four quiet spells' worth of frames the next fresh A counts
+; (c_esc: not on a hand-over or the final table). That way out works once:
+; the card after one that was tapped through (c_chain) needs a real let-go,
+; so one long mash can't run through a card, the standings and the medal
+; table. c_pre (if not 0) shows in grey on the prompt row while locked.
 ; c_opts 1/2 offer three choices instead, 3 a NO / YES; the d-pad or SELECT
 ; moves the cursor (from c_def) at once, only A waits for the lockout.
+; c_bok: B, once armed, leaves with A = $FF.
 ; Runs the c_hook extras every frame. -> A = choice
 REL_FRAMES = 20
 QUIET_MASK = PAD_A | PAD_B | PAD_X | PAD_Y | PAD_START | PAD_SELECT | PAD_L | PAD_R
@@ -2779,10 +2983,23 @@ card_wait:
     sta c_sel
     stz c_tick
     stz c_hint
+    stz c_viaesc
+    stz c_seen
     lda c_relq
     sta c_relc
+    lda c_chain
+    beq @esc
+    stz c_esc                   ; the last card was tapped through
+@esc:
     lda c_opts
+    bne @menu
+    A16
+    lda c_pre
+    A8
     beq @lock
+    jsr card_pre
+    bra @lock
+@menu:
     jsr card_prompt             ; a menu shows at once
 @lock:
     jsl wait_frame
@@ -2795,6 +3012,7 @@ card_wait:
     beq @quiet
     lda c_relq                  ; something held: the quiet spell starts again
     sta c_relc
+    sta c_seen
     bra @locked
 @quiet:
     lda c_relc
@@ -2808,20 +3026,29 @@ card_wait:
 @free:
     lda c_relc
     beq @armed
+    lda c_seen                  ; nothing pressed on this card: the rest of the
+    beq @lock                   ; quiet spell is just more lockout
     lda c_hint                  ; still mashing: tell them what we're waiting for
     bne @mash
     inc c_hint
     jsr card_hint
     bra @lock
 @mash:
-    inc c_hint                  ; LET GO has been up for four quiet spells and
-    lda c_relq                  ; they're still tapping: that's a player trying
-    asl a                       ; to move on, not a carried-over mash, so the
+    lda c_hint                  ; (stops counting at 255)
+    inc a
+    beq @lock
+    sta c_hint
+    lda c_esc                   ; LET GO has been up for four quiet spells and
+    beq @lock                   ; they're still tapping: that's a player trying
+    lda c_relq                  ; to move on, not a carried-over mash, so the
     asl a                       ; next fresh A goes through
+    asl a
     cmp c_hint
     bcs @lock
-    bra @armed
+    inc c_viaesc
 @armed:
+    lda c_viaesc
+    sta c_chain                 ; the next card wants a real let-go
     stz c_hint
     jsr card_prompt
 @w:
@@ -2834,6 +3061,16 @@ card_wait:
     jsr card_nav
     A16
     lda pad_new
+    bit #PAD_B
+    beq @nob
+    A8
+    lda c_bok
+    beq @w
+    SFX SFX_BACK
+    lda #$FF
+    rtl
+@nob:
+    .a16
     and #(PAD_A | PAD_START)
     A8
     beq @w
@@ -2998,6 +3235,23 @@ rec_flash:
 
 ; the prompt row while buttons are still held after the lockout
 card_hint:
+    LDPTR0 str_let_go
+    lda #($20 | (TP_ORANGE << 2))
+    bra row_line
+
+; the prompt row during the lockout: c_pre in grey
+card_pre:
+    A16
+    lda c_pre
+    sta ptr0
+    A8
+    lda c_pre+2
+    sta ptr0+2
+    lda #($20 | (TP_GREY << 2))
+    ; fall through
+; the prompt row blanked, then the string at ptr0 centred on it in attr A
+row_line:
+    sta c_rattr
     lda txt_bg
     pha
     lda c_bg
@@ -3020,9 +3274,8 @@ card_hint:
     A8
     lda #$20
     jsl txt_fill
-    LDPTR0 str_let_go
     ldx tmp5
-    lda #($20 | (TP_ORANGE << 2))
+    lda c_rattr
     jsl txt_print_centre
     pla
     sta txt_bg
@@ -3057,12 +3310,6 @@ card_prompt:
     jsl txt_fill
     lda c_opts
     bne @choice
-    lda c_blink
-    beq @on
-    lda frame
-    and #$10
-    jeq @x
-@on:
     A16
     lda c_prompt
     sta ptr0
@@ -3072,7 +3319,15 @@ card_prompt:
     ldx tmp5
     lda c_blink
     beq @grey
+    ; it pulses green / white rather than blinking off: the line is always
+    ; there to read
+    lda frame
+    and #$10
+    beq @pw
     lda #($20 | (TP_GREEN << 2))
+    bra @pr
+@pw:
+    lda #($20 | (TP_WHITE << 2))
     bra @pr
 @grey:
     lda #($20 | (TP_GREY << 2))
@@ -3242,6 +3497,15 @@ ticker_draw:
 ev_blurbs:   .addr eb0, eb1, eb2, eb3, eb4, eb5, eb6
 ev_controls: .addr ec0, ec1, ec2, ec3, ec4, ec5, ec6
 ev_fails:    .addr ef0, ef1, ef2, ef3, ef4, ef5_1, ef6
+; the header of a finished run (green), 28 characters at most
+card_finish: .addr fh0, fh1, fh2, fh3, fh4, fh5, fh6
+fh0: .byte "DELIVERED!", 0
+fh1: .byte "MADE THE 5:42!", 0
+fh2: .byte "MADE THE DUNDAS GATE!", 0
+fh3: .byte "MADE SPADINA!", 0
+fh4: .byte "CROSSED THE LINE!", 0
+fh5: .byte "PARKED!", 0
+fh6: .byte "UNION! EVERYBODY OFF!", 0
 eb0: .byte "DELIVER THE PACKAGE TO", $0A, "SPADINA. PREFERABLY ALIVE.", 0
 eb1: .byte "MAKE THE 5:42 GO TRAIN.", $0A, "RED ! AHEAD? CHANGE LANES.", 0
 eb2: .byte "QUEEN GATE TO DUNDAS GATE.", $0A, "DODGE DOGS, THEN PAT THEM!", 0
@@ -3301,7 +3565,7 @@ bl_germs:  .byte "GERMS", 0
 ; what it did (26 characters at most, centred; a $0A splits it into two lines,
 ; the second one dropped when the card is full). Per event, ev_fail 1 (its
 ; own fail), 2 (out of time), 3 (called it a day), 4 (its second fail);
-; 0 = none. A base of 0 in a card_still event shows str_still instead.
+; 0 = none. A base of 0 in a card_still event shows card_still_ln instead.
 card_fail_note:
     .addr fn_bike,   fn_bike_n, fn_bike_n, fn_bike_s    ; bike
     .addr fn_bay,    fn_bay,    fn_bay_q,  fn_bay       ; bay
@@ -3325,13 +3589,20 @@ fn_sail_t: .byte "250 PER MARK ROUNDED", 0
 fn_pk:     .byte "HALF IN OR TOWED, ALL 3", 0
 fn_pk_i:   .byte "10 S WITHOUT DRIVING", 0
 fn_pk_q:   .byte "QUITTERS KEEP 450 AT MOST", 0
-fn_sub:    .byte "PATIENT ZERO! STYLE VOID", $0A, "RIDE: 40 A STOP YOU SURFED", 0
+fn_sub:    .byte "20 GERMS: STYLE VOID", $0A, "RIDE: 40 A STOP YOU SURFED", 0
 fn_sub_q:  .byte "GAVE UP: STYLE VOID", $0A, "RIDE: 40 A STOP YOU SURFED", 0
 
-; a failed run whose base is 0 says this instead, in the events where only
-; standing still earns a base of 0 (1 = yes)
-card_still: .byte 1, 1, 1, 0, 1, 0, 1    ; bike bay park cops sail parking subway
-str_still:  .byte "STANDING STILL PAYS 0", 0
+; a failed run whose base is 0 says the event's card_still_ln instead of its
+; reason line, for the ev_fail codes in card_still (bit n = ev_fail n: $1E all
+; four, $02 the event's own fail only, 0 never). For events where only not
+; playing earns a base of 0.
+card_still:    .byte $1E, $1E, $1E, 0, $02, 0, $1E   ; bike bay park cops sail parking subway
+card_still_ln: .addr sti0, sti1, sti2, 0, sti4, 0, sti6
+sti0: .byte "STANDING STILL PAYS 0", 0
+sti1: .byte "STANDING STILL PAYS 0", 0
+sti2: .byte "STANDING STILL PAYS 0", 0
+sti4: .byte "NO STEERING, NO POINTS", 0
+sti6: .byte "NO LEANING, NO POINTS", 0
 
 ; card_rate / card_rate_fail: an optional rate printed in grey after a sum
 ; label ("TIPS 50 A TOKEN"), per event base, bonus, penalty; 0 = none. The

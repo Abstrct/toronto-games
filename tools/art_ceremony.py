@@ -121,9 +121,11 @@ FIRE = [
 # jersey, 6 shade, 7 trim, 10 white, 12/13 yellow, 14/15 grey, 1 outline),
 # so each firework bursts in a champion's sponsor colours and eight athletes
 # can share the eight sprite palettes.
-# medal on the chest: dark ribbon from the shoulders, a dark-rimmed disc with a
-# highlight, so gold still reads on a yellow jersey and silver on a white one
-MEDAL_ROWS = ['1......1', '.1....1.', '..1111..', '.1fhff1.', '1fhffff1', '1ffffff1', '.1ffff1.', '..1111..']
+# medal (8x11, top at the shoulders): a white ribbon down the jersey to a disc
+# with a white ring and a dark rim, so gold still reads on a yellow jersey and
+# silver on a white one
+MEDAL_ROWS = ['.w....w.', '..w..w..', '..w..w..', '...ww...', '..1111..', '.1wwww1.',
+              '1wfhffw1', '1wfffsw1', '1wffssw1', '.1wwww1.', '..1111..']
 
 
 def burst(d, cx, cy, rays, r0, r1, cols, step=1.0, droop=0.0):
@@ -147,11 +149,11 @@ def build_sprites():
     d.point((35, 2), fill=12)
     d.point((35, 4), fill=13)
     d.point((35, 6), fill=13)
-    # medals 8x8 at (32,8) gold, (40,8) silver, (32,16) bronze; ribbon in jersey colours
-    for (mx, my, face, hi) in ((32, 8, 12, 10), (40, 8, 14, 10), (32, 16, 13, 12)):
+    # medals 8x16 at (32,8) gold, (40,8) silver, (48,16) bronze
+    for (mx, my, face, shade, hi) in ((32, 8, 12, 13, 10), (40, 8, 14, 15, 10), (48, 16, 13, 11, 12)):
         for yy, row in enumerate(MEDAL_ROWS):
             for xx, ch in enumerate(row):
-                c = {'5': 5, '7': 7, '1': 1, 'f': face, 'h': hi}.get(ch)
+                c = {'w': 10, '1': 1, 'f': face, 's': shade, 'h': hi}.get(ch)
                 if c is not None:
                     d.point((mx + xx, my + yy), fill=c)
     # small burst 16x16 at (48,0)
@@ -170,9 +172,9 @@ def build_sprites():
     sh.obj('victory', 0, 0, 16, 32, 8, 31)
     sh.obj('wave', 16, 0, 16, 32, 8, 31)
     sh.obj('rocket', 32, 0, 8, 8)
-    sh.obj('medal_g', 32, 8, 8, 8)
-    sh.obj('medal_s', 40, 8, 8, 8)
-    sh.obj('medal_b', 32, 16, 8, 8)
+    sh.obj('medal_g', 32, 8, 8, 16, 4, 0)
+    sh.obj('medal_s', 40, 8, 8, 16, 4, 0)
+    sh.obj('medal_b', 48, 16, 8, 16, 4, 0)
     sh.obj('fw1', 48, 0, 16, 16)
     sh.obj('fw2', 64, 0, 32, 32)
     sh.obj('fw3', 96, 0, 32, 32)

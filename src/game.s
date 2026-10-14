@@ -11,7 +11,7 @@
 
 .export rank_place, g_choice, par_calc, par_g, par_s, par_b
 .import records_board, pick_one, demo_start
-.export demo_abort
+.export demo_abort, practice_back
 
 .segment "BSS"
 rank_order: .res MAX_PLAYERS
@@ -21,6 +21,8 @@ g_choice:   .res 1               ; practice results: 0 retry, 1 other event, 2 m
 par_g:      .res 2               ; solo medal lines for event_idx (par_calc)
 par_s:      .res 2
 par_b:      .res 2
+g_sp:       .res 2               ; run_event: the stack to unwind to (practice_back)
+g_back:     .res 1               ; 1 = B on a Practice intro card: back to the event list
 
 .segment "SCREENS"
 .a8
@@ -72,6 +74,16 @@ game_main:
     lda event_on,x
     beq @next_ev
     jsr run_event
+    lda g_back
+    beq @next_ev
+    ; B on the intro card (Practice): the event list, on this event
+    stz pause_ok
+    stz ev_giveup
+    jsl music_stop
+    jsl fade_out
+    jsl hdma_off
+    lda event_idx
+    bra @oe
 @next_ev:
     inc event_idx
     lda event_idx
@@ -148,10 +160,14 @@ only_event:
     rts
 
 ; every player takes a turn at event_idx, then medals + standings
+; (g_back = 1: the first player backed out of a Practice intro card)
 run_event:
     stz cur_player
+    stz g_back
 @pl:
     jsr turn_reset
+    tsx
+    stx g_sp
     jsl call_event
     jsr store_score
     inc cur_player
@@ -303,6 +319,23 @@ demo_abort:
     bra demo_end
 
 demo_name: .byte "PLAYER 1", 0
+
+; practice_back (jml from cards.s event_card): B on the first player's intro
+; card in Practice. The event has only loaded its scene, so, as with a demo
+; abort, its state can simply be dropped: back into run_event with the stack
+; it had before call_event, and out to the event list.
+practice_back:
+    rep #$10
+    sep #$20
+    .a8
+    .i16
+    phk
+    plb
+    ldx g_sp
+    txs
+    lda #$01
+    sta g_back
+    rts                         ; from run_event, to game_main (which tidies up)
 
 ev_entry:
     .faraddr ev_bike

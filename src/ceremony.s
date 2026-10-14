@@ -46,7 +46,7 @@ pod_y:    .res MAX_PLAYERS*2
 ceremony:
     jsl final_sort
     jsr podium_scene
-    lda #$02                    ; the cursor on TITLE (which asks first)
+    lda #$00                    ; the cursor on REMATCH (TITLE asks first)
     jsl final_table
     rtl
 
@@ -745,8 +745,8 @@ draw_podium:
     lda spr_y
     pha
     sec
-    sbc #14                     ; hangs to the belt: reads on any jersey
-    sta spr_y
+    sbc #20                     ; from the shoulders: a white-ringed disc on
+    sta spr_y                   ; a white ribbon reads on any jersey
     A8
     lda tmp3
     asl a
