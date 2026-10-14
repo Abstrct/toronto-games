@@ -3503,7 +3503,7 @@ fh0: .byte "DELIVERED! SIGN HERE.", 0
 fh1: .byte "MADE THE 5:42!", 0
 fh2: .byte "MADE IT TO DUNDAS!", 0
 fh3: .byte "SPADINA! YOU LOST HIM!", 0
-fh4: .byte "CROSSED THE LINE!", 0
+fh4: .byte "THE RCYC BAR IS OPEN!", 0
 fh5: .byte "PARKED ON BRUNSWICK!", 0
 fh6: .byte "UNION! EVERYBODY OFF!", 0
 eb0: .byte "GET THE PACKAGE TO SPADINA", $0A, "IN TIME. PREFERABLY ALIVE.", 0
@@ -3517,7 +3517,7 @@ ec0: .byte "D-PAD STEER    A PEDAL", $0A, "B HOP RAILS AND POTHOLES", $0A, "TOKE
 ec1: .byte "ALTERNATE ", TXT_ARROW_L+32, " ", TXT_ARROW_R+32, " ON BIG DOTS", $0A, "SMALL DOTS = DOUBLE TIME", $0A, "UP/DOWN LANE  A EXCUSE ME", 0
 ec2: .byte "D-PAD WALK   A THROW BALL", $0A, "SAFE: B WHEN ! SHOWS: 50", $0A, "BOLD: B AS HE LUNGES: 150+", 0
 ec3: .byte "YELLOW CHALK: TAP A", $0A, "RED CHALK: HOLD A", $0A, "B: SIP WHILE COP CAN'T SEE", 0
-ec4: .byte "LEFT/RIGHT: TURN  A: HIKE", $0A, "WIND FROM TOP: ZIG-ZAG UP", $0A, "SURF THE FERRY'S WAKE!", 0
+ec4: .byte "LEFT/RIGHT: TURN  A: HIKE", $0A, "YELLOW ARROW: NEXT MARK", $0A, "GREEN DIAMONDS: ON COURSE", 0
 ec5: .byte "UP: REAR BUMPER TO LINE", $0A, "BACK IN: DOWN+RIGHT, THEN", $0A, "DOWN+LEFT. A: PARK IT!", 0
 ec6: .byte "HOLLOW ARROW: GET READY", $0A, "SOLID: D-PAD THAT WAY NOW", $0A, "GOLD DOT ALL LEG: SURF X3", 0
 ef0: .byte "WIPED OUT!", 0
@@ -3572,7 +3572,7 @@ card_fail_note:
     .addr fn_bay,    fn_bay,    fn_bay_q,  fn_bay       ; bay
     .addr fn_park,   fn_park_t, fn_park_q, fn_park      ; park
     .addr fn_cops,   fn_cops,   fn_cops_q, fn_cops      ; cops
-    .addr fn_sail,   fn_sail_t, fn_sail_t, fn_sail      ; sail
+    .addr fn_sail,   fn_sail_t, fn_sail_t, fn_sail_h    ; sail
     .addr fn_pk,     fn_pk,     fn_pk_q,   fn_pk_i      ; parking
     .addr fn_sub,    fn_sub,    fn_sub_q,  fn_sub       ; subway
 fn_bike:   .byte "THIRD WIPEOUT. NO TIPS!", 0
@@ -3586,8 +3586,9 @@ fn_park_t: .byte "75 FOR EVERY TENTH WALKED", 0
 fn_park_q: .byte "GAVE UP: 75 A TENTH WALKED", 0
 fn_cops:   .byte "COP CAUGHT YOU: FINED 1/4", 0
 fn_cops_q: .byte "GAVE UP: THE COP FINES 1/4", 0
-fn_sail:   .byte "NOBODY STEERED FOR 10 S", 0
-fn_sail_t: .byte "250 PER MARK ROUNDED", 0
+fn_sail:   .byte "10 S GETTING NO CLOSER", $0A, "250 A MARK + PART OF NEXT", 0
+fn_sail_t: .byte "250 A MARK + PART OF NEXT", 0
+fn_sail_h: .byte "NOBODY TOUCHED THE HELM", 0
 fn_pk:     .byte "HALF IN OR TOWED, ALL 3", 0
 fn_pk_i:   .byte "10 S WITHOUT DRIVING", 0
 fn_pk_q:   .byte "QUIT: FINISHED SPOTS COUNT", 0
@@ -3598,12 +3599,12 @@ fn_sub_q:  .byte "GAVE UP: STYLE IS VOID", $0A, "ONLY LEGS YOU LEANED PAY", 0
 ; reason line, for the ev_fail codes in card_still (bit n = ev_fail n: $1E all
 ; four, $02 the event's own fail only, 0 never). For events where only not
 ; playing earns a base of 0.
-card_still:    .byte $18, $0A, $1E, 0, $02, 0, $1E   ; bike bay park cops sail parking subway
+card_still:    .byte $18, $0A, $1E, 0, $10, 0, $1E   ; bike bay park cops sail parking subway
 card_still_ln: .addr sti0, sti1, sti2, 0, sti4, 0, sti6
 sti0: .byte "STANDING STILL PAYS 0", 0
 sti1: .byte "STANDING STILL PAYS 0", 0
 sti2: .byte "NOT ONE STEP, NO POINTS", 0
-sti4: .byte "NO STEERING, NO POINTS", 0
+sti4: .byte "HANDS OFF THE HELM PAYS 0", 0
 sti6: .byte "NO LEANING, NO POINTS", 0
 
 ; card_rate / card_rate_fail: an optional rate printed in grey after a sum
@@ -3615,7 +3616,7 @@ card_rate:
     .addr rt_bay_walk, 0, rt_40each ; bay
     .addr 0, 0, 0               ; park
     .addr 0, 0, 0               ; cops
-    .addr 0, 0, 0               ; sail
+    .addr rt_25sec, 0, 0        ; sail
     .addr 0, 0, 0               ; parking
     .addr 0, 0, rt_sub_pen      ; subway
 card_rate_fail:
@@ -3635,6 +3636,7 @@ rt_bydist:  .byte "BY DISTANCE", 0
 rt_40each:  .byte "40 EACH", 0
 rt_sub_leg: .byte "40 A LEG", 0
 rt_sub_pen: .byte "X40", 0
+rt_25sec:   .byte "+25 A SEC", 0
 
 ; stat labels: 4 per event (last is padding), 0 = unused
 card_stat_labels:
@@ -3668,7 +3670,7 @@ sl_tackle: .byte "TACKLES", 0
 sl_lucky:  .byte "LUCKY SIPS", 0
 sl_hurdles: .byte "HURDLES", 0
 sl_buoys:  .byte "MARKS ROUNDED", 0
-sl_bump:   .byte "BUMPS", 0
+sl_bump:   .byte "BUMPS (2 S EACH)", 0
 
 ; ------------------------------------------------------------------
 ; ------------------------------------------------------------------

@@ -931,10 +931,10 @@ default_records:
     REC 1200, "NANA"
     ; EV_SAIL  Harbour Regatta
     REC 4500, "GOOSE"
-    REC 3600, "SKIPPER"
-    REC 2800, "FERRYMAN"
-    REC 2200, "KAYAKER"
-    REC 1500, "SEAGULL"
+    REC 3700, "SKIPPER"
+    REC 3000, "FERRYMAN"
+    REC 2500, "KAYAKER"
+    REC 2000, "SEAGULL"
     ; EV_PARKING  Parallel Parking
     REC 3800, "GREEN P"
     REC 3100, "VALET"
