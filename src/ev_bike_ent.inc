@@ -13,7 +13,7 @@ LANE_GAP  = 120                 ; spawn spacing between vehicles in a lane
 DRAFT_NEAR = 58                 ; slipstream: this far behind the 501's centre...
 DRAFT_LEN  = 66                 ; ...for this long
 DRAFT_DX   = 12
-DRAFT_PER  = 3                  ; DRAFT moves one streetcar is good for
+DRAFT_PER  = 4                  ; DRAFT moves one streetcar is good for
 DRAFT_SPD  = $0200              ; slower than this isn't drafting, it's queueing
 
 ; ---- course RNG (fixed seed => same course for every player) ----
@@ -191,26 +191,57 @@ spawn_segment:
     stx b_nextsp
     rts
 @normal:
+    ; the warm-up deals from a gentler deck
+    A16
+    lda b_nextsp
+    cmp #WARMUP
+    A8
+    bcs @full_deck
+    lda #8
+    jsr brange
+    asl a
+    TAXB
+    jsr (.loword(seg_easy),x)
+    ; warm-up gaps: 150..213 px of road between segments
+    lda #64
+    jsr brange
+    A16
+    and #$00FF
+    clc
+    adc #150
+    clc
+    adc b_nextsp
+    sta b_nextsp
+    A8
+    rts
+@full_deck:
     lda #16
     jsr brange
     asl a
     TAXB
     jsr (.loword(seg_table),x)
-    ; gap to the next segment, tighter as the ride goes on
+    ; gap to the next segment: 112..159 px just after the warm-up,
+    ; closing to 64..111 by Spadina
     lda #48
     jsr brange
     A16
     and #$00FF
     clc
-    adc #54
+    adc #112
     sta tmp0
-    lda b_dist
-    xba
+    lda b_nextsp
+    sec
+    sbc #WARMUP
     lsr a
-    and #$00FF
-    cmp #26
+    lsr a
+    lsr a
+    lsr a
+    lsr a
+    lsr a
+    lsr a                       ; /128: 0..45 over the rest of the course
+    cmp #48
     bcc @t
-    lda #26
+    lda #48
 @t:
     sta tmp1
     lda tmp0
@@ -223,10 +254,15 @@ spawn_segment:
     rts
 
 seg_table:
-    .addr seg_parked, seg_parked, seg_parked, seg_parked
-    .addr seg_parked_l, seg_car_n, seg_car_n, seg_car_s
-    .addr seg_car_s, seg_tram_n, seg_tram_s, seg_hole
-    .addr seg_hole, seg_tokens, seg_tokens, seg_ped
+    .addr seg_parked, seg_parked, seg_parked, seg_parked_l
+    .addr seg_car_n, seg_car_n, seg_car_s, seg_car_s
+    .addr seg_tram_n, seg_tram_s, seg_hole, seg_hole
+    .addr seg_tokens, seg_tokens, seg_tokens, seg_ped
+; warm-up: tokens to learn on, parked cars (doors shut), traffic you pass
+; or that stays on its own side, potholes only out on the left
+seg_easy:
+    .addr seg_tokens, seg_tokens, seg_tokens, seg_parked
+    .addr seg_car_n, seg_car_s, seg_parked_l, seg_hole
 
 ; a row of parked cars on the right; some drivers are about to open up
 seg_parked:
@@ -249,7 +285,7 @@ seg_parked:
     A16
     lda #T_PARKED
     sta E_TYPE,x
-    lda #(216*256)
+    lda #(218*256)
     sta E_X,x
     lda RDMPYL
     clc
@@ -258,15 +294,22 @@ seg_parked:
     A8
     jsr rand_car_pal
     sta E_PAL,x
+    ; half the drivers open up: the door swings out while the car is
+    ; still near the top of the screen (rel 140..187), never in the warm-up
+    A16
+    lda b_nextsp
+    cmp #WARMUP
+    A8
+    bcc @nodoor
     lda #2
     jsr brange
     beq @nodoor
-    lda #50
+    lda #48
     jsr brange
     A16
     and #$00FF
     clc
-    adc #100
+    adc #140
     sta E_TIMER,x
     A8
 @nodoor:
@@ -548,8 +591,20 @@ tram_ahead:
 seg_hole:
     jsr alloc_ent
     bcs @x
+    A16
+    lda b_nextsp
+    cmp #WARMUP
+    A8
+    bcs @any
+    lda #3
+    jsr brange
+    clc
+    adc #3                      ; warm-up: 122 / 88 / 60 only
+    bra @lane
+@any:
     lda #6
     jsr brange
+@lane:
     TAYB
     lda #13
     jsr brange
@@ -584,10 +639,10 @@ seg_tokens:
     TAYB
     lda token_drift,y
     sta tmp5+1
-    lda #2
+    lda #3
     jsr brange
     clc
-    adc #3
+    adc #4                      ; 4..6 tokens a line
     sta tmp7
     stz tmp6
 @t:
@@ -933,7 +988,7 @@ tram_follow:
     rts
 
 ; hw+4, hh+10, kind (1 car, 2 tram, 3 hole, 4 token, 5 ped), near-miss
-hw_tab:   .byte 0, 15, 15, 15, 15, 20, 20, 11,  9,  8, 0
+hw_tab:   .byte 0, 15, 15, 15, 15, 19, 19, 11,  9,  8, 0
 hh_tab:   .byte 0, 29, 29, 29, 29, 55, 55, 14, 15, 14, 0
 kind_tab: .byte 0,  1,  1,  1,  1,  2,  2,  3,  4,  5, 0
 near_tab: .byte 0,  1,  1,  1,  1,  1,  1,  0,  0,  0, 0
@@ -983,7 +1038,7 @@ ent_collide:
     jcs @miss
     lda kind_tab,y
     cmp #4
-    beq @token
+    jeq @token
     ldx b_inv
     bne @restore
     ldx b_cur
@@ -1014,14 +1069,27 @@ ent_collide:
     lda #CA_PED
     jmp crash
 @hole:
-    lda b_hop
-    bne @r                      ; hopped it
     lda E_FLAGS,x
     and #$04
     bne @r
     lda E_FLAGS,x
     ora #$04
     sta E_FLAGS,x
+    lda b_hop
+    beq @ground                 ; hopped clean over it: POTHOLE HOP
+    lda tmp0
+    pha
+    lda tmp0+1
+    pha
+    lda #SM_BUNNY
+    jsr style_award
+    pla
+    sta tmp0+1
+    pla
+    sta tmp0
+    ldx b_cur
+    rts
+@ground:
     A16
     lda b_speed
     cmp #$0180
@@ -1397,7 +1465,7 @@ dr_finish:
     sta b_banner
     LDPTR0 str_spadina
     lda #TP_CYAN
-    jsl event_popup
+    jsr pop_mid
     ldx #90
     stx b_popup
 @x:

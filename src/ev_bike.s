@@ -1,14 +1,19 @@
 ; EVENT 1: BIKE COURIER — Queen St West, top-down.
 ; Pedal up Queen without getting doored, eating a pothole, or meeting the
-; 501 head-on. Everyone rides the same course (fixed seed).
+; 501 head-on. Everyone rides the same course (fixed seed). The first stretch
+; (WARMUP) is a quiet warm-up: wide gaps, no doors, nothing in the bike lane.
 ;
-; STYLE: TRACK HOP (cross the streetcar rails at full lock and you hop
-; them), CLOSE CALL (a car slides past your shoulder) and DRAFTING THE 501
-; (tuck in behind a streetcar: it pulls you along). Mix them inside 2.5 s
-; of each other and they chain, x2 x3 x4. Cross a rail lazily and the
-; groove grabs your wheel: RAIL WOBBLE, half your speed and the chain.
-; Sit in one line too long and Queen St comes for you: a fresh pothole in
-; your lane, or the 501 up the tracks behind you (bell + sign).
+; Controls: D-pad steers (the bike goes where you point it and settles the
+; moment you let go), A or UP pedals, DOWN brakes, B or Y bunny-hops.
+; STYLE (all of it earned with the hop button or a risk):
+;   TRACK HOP    hop, and be in the air as you cross a streetcar rail
+;   POTHOLE HOP  hop clean over a pothole
+;   CLOSE CALL   a car slides past your shoulder
+;   DRAFTING     tuck in behind the 501: it pulls you along
+; Mix them inside 2.5 s of each other and they chain, x2 x3 x4. Cross a rail
+; lazily on the ground and the groove grabs your wheel: RAIL WOBBLE, half
+; your speed and the chain. Sit in one line too long and Queen St comes for
+; you: a fresh pothole in your lane, or the 501 up the tracks behind you.
 .p816
 .smart -
 .include "globals.inc"
@@ -18,21 +23,24 @@
 
 PLAYER_SY   = 176
 COURSE_LEN  = 9000
+WARMUP      = 3200          ; the first ~20 s: sparse, wide gaps, a quiet bike lane
 TIME_LIMIT  = 80*60
 MAXSPD      = $0300
 ACCEL       = $000A
 BRAKE       = $0024
 COAST       = $0003
-STEER_ACC   = $0038
-STEER_MAX   = $01A0
-STEER_DECAY = $0030
+; steering: hold to slide over at STEER_SPD, let go and it settles in
+; ~4 frames (a few px), so a tap moves a little and a hold moves a lot
+STEER_SPD   = $0200
+STEER_ACC   = $0040         ; up to speed in 8 frames
+STEER_REL   = $0080         ; let go / reverse: stops in 4
 RAIL_MIN    = $0030         ; slower than max(speed/4, this) sideways = wobble
-HOP_SPD     = $0180         ; a hop needs this much forward speed...
-HOP_MIN     = $00C0         ; ...and max(speed/2, this) sideways
-HOP_T       = 16            ; frames in the air
-HOP_GAP     = 300           ; road between two scoring hops
+HOP_SPD     = $0140         ; a hop needs this much forward speed
+HOP_T       = 20            ; frames in the air
+HOP_CD      = 10            ; frames on the ground before the next hop
+HOP_GAP     = 240           ; road between two scoring track hops
 WOB_T       = 24
-BIKE_LANE   = 184           ; respawn here after a wipeout (outside the door zone)
+BIKE_LANE   = 186           ; start / respawn here (clear of the 501 and the doors)
 INV_GETUP   = 120           ; blink frames after getting back on
 WIPE_COST   = 200           ; points per wipeout on a delivered run
 CHAIN_WIN   = 150           ; 2.5 s to land the next style move
@@ -40,7 +48,8 @@ CHAIN_MAX   = 4
 CAMP_T      = 300           ; 5 s in one line...
 CAMP_BAND   = 12            ; ...means within this many px
 STILL_T     = 480           ; 8 s stopped: FIRED
-DRAFT_TICK  = 40            ; frames of slipstream per DRAFT move
+DRAFT_TICK  = 36            ; frames of slipstream per DRAFT move
+POP_ROW     = 16            ; crash messages: just over the rider
 
 ST_RIDE   = 0
 ST_CRASH  = 1
@@ -60,6 +69,7 @@ CA_REAR  = 6
 SM_HOP   = 0
 SM_CLOSE = 1
 SM_DRAFT = 2
+SM_BUNNY = 3
 
 ; run state (words)
 b_px     = ev_ram + 0
@@ -82,13 +92,17 @@ b_shake  = ev_ram + 32
 b_oldx   = ev_ram + 34
 b_finish = ev_ram + 36
 b_banner = ev_ram + 38
+b_hopcd  = ev_ram + 42      ; frames until the next hop is allowed
+b_hopsc  = ev_ram + 44      ; 1 = this hop already scored a rail
+b_prow   = ev_ram + 46      ; 1 = a crash message is up on POP_ROW
+b_fired  = ev_ram + 48      ; 1 = stood still too long: YOU'RE FIRED! (ev_fail 4)
 ; drawer / HUD bookkeeping (cleared by init, < 512)
 b_oamhw  = ev_ram + 384     ; OAM bytes used last frame (the local clear)
 b_hq     = ev_ram + 386     ; HUD caches: what is on screen now
 b_hw     = ev_ram + 388
 b_ht     = ev_ram + 390
 b_htk    = ev_ram + 392
-b_tout   = ev_ram + 394     ; 1 = the clock ran out (or FIRED)
+b_tout   = ev_ram + 394     ; 1 = the clock ran out
 b_pass   = ev_ram + 396     ; ents_draw pass: 0 traffic, 1 road-level things
 b_hop    = ev_ram + 400     ; frames left in the air
 b_hopd   = ev_ram + 402     ; distance at the last scoring hop
@@ -151,8 +165,19 @@ ev_bike:
     jsl music_play
 @loop:
     jsl wait_frame
-    lda ev_giveup               ; pause menu: GIVE UP ends the run now
+    lda ev_giveup               ; pause menu: GIVE UP ends the run now...
     beq @play
+    lda b_state                 ; ...unless it already ended on its own
+    cmp #ST_FINISH              ; (delivered, fired: that result stands)
+    beq @over
+    cmp #ST_DONE
+    beq @over
+    cmp #ST_CRASH               ; (the third wipeout: WIPED OUT! stands)
+    bne @quit
+    lda b_wipes
+    cmp #3
+    bcs @over
+@quit:
     lda #$01
     sta b_quit
     bra @over
@@ -198,7 +223,7 @@ bike_init:
     stx b_time
     ldx #$9E37
     stx b_seed
-    ldx #140
+    ldx #300
     stx b_nextsp
     ldx #($10000 - HOP_GAP)
     stx b_hopd
@@ -305,6 +330,10 @@ bike_update:
     beq @nohop
     dec b_hop
 @nohop:
+    lda b_hopcd
+    beq @nohopcd
+    dec b_hopcd
+@nohopcd:
     lda b_wob
     beq @nowob
     dec b_wob
@@ -320,7 +349,7 @@ bike_update:
     dec b_popup
     bne @nopop
     A8
-    jsl event_popup_clear
+    jsr pop_clear
     A16
 @nopop:
     ; delivered?
@@ -338,7 +367,7 @@ bike_update:
     SFX SFX_CHEER
     LDPTR0 str_delivered
     lda #TP_GREEN
-    jsl event_popup
+    jsr pop_mid
     ldx #200
     stx b_popup
     A16
@@ -362,8 +391,8 @@ ride_checks:
     cmp #STILL_T
     bcc @camp
     A8
-    lda #$01                    ; ends as OUT OF TIME, scored as a DNF
-    sta b_tout
+    lda #$01                    ; ends as YOU'RE FIRED! (ev_fail 4), a DNF
+    sta b_fired
     lda #ST_FINISH
     sta b_state
     ldx #90
@@ -371,7 +400,7 @@ ride_checks:
     SFX SFX_GROAN
     LDPTR0 str_fired
     lda #TP_RED
-    jsl event_popup
+    jsr pop_mid
     ldx #200
     stx b_popup
     rts
@@ -379,7 +408,15 @@ ride_checks:
     .a16
     stz b_still
 @camp:
-    ; same line (within CAMP_BAND px) for CAMP_T frames?
+    ; same line (within CAMP_BAND px) for CAMP_T frames? (not in the warm-up)
+    lda b_dist
+    cmp #WARMUP
+    bcs @campon
+    stz b_camp
+    A8
+    rts
+@campon:
+    .a16
     lda b_px
     xba
     and #$00FF
@@ -425,7 +462,7 @@ clear_ahead:
     sbc b_dist
     clc
     adc #40
-    cmp #300                    ; rel -40 .. +260
+    cmp #360                    ; rel -40 .. +320
     A8
     bcs @n
     lda E_TYPE,x
@@ -469,42 +506,75 @@ slow_down:
 
 steer_and_pedal:
     A16
+    ; bunny hop: B or Y, at speed, on the ground, off cooldown
+    lda pad_new
+    and #(PAD_B | PAD_Y)
+    beq @nohop
+    lda b_hop
+    ora b_hopcd
+    bne @nohop
+    lda b_speed
+    cmp #HOP_SPD
+    bcc @nohop
+    lda #HOP_T
+    sta b_hop
+    lda #(HOP_T + HOP_CD)
+    sta b_hopcd
+    stz b_hopsc
+    A8
+    SFX SFX_JUMP
+    A16
+@nohop:
+    ; steering: the bike goes where the pad points and settles on release
     lda pad
     bit #PAD_LEFT
-    beq @not_left
-    lda b_vx
-    sec
-    sbc #STEER_ACC
-    bpl @sv
-    cmp #($10000 - STEER_MAX)
-    bcs @sv
-    lda #($10000 - STEER_MAX)
-    bra @sv
-@not_left:
+    bne @left
     bit #PAD_RIGHT
-    beq @decay
-    lda b_vx
-    clc
-    adc #STEER_ACC
-    bmi @sv
-    cmp #STEER_MAX
-    bcc @sv
-    lda #STEER_MAX
-    bra @sv
-@decay:
+    bne @right
     lda b_vx
     beq @sv
     bmi @neg
     sec
-    sbc #STEER_DECAY
+    sbc #STEER_REL
     bpl @sv
     lda #$0000
     bra @sv
 @neg:
     clc
-    adc #STEER_DECAY
+    adc #STEER_REL
     bmi @sv
     lda #$0000
+    bra @sv
+@left:
+    lda b_vx
+    beq @la
+    bmi @la
+    sec
+    sbc #STEER_REL              ; reversing: brake the slide first
+    bra @lc
+@la:
+    sec
+    sbc #STEER_ACC
+@lc:
+    bpl @sv
+    cmp #($10000 - STEER_SPD)
+    bcs @sv
+    lda #($10000 - STEER_SPD)
+    bra @sv
+@right:
+    lda b_vx
+    bpl @ra
+    clc
+    adc #STEER_REL
+    bra @rc
+@ra:
+    clc
+    adc #STEER_ACC
+@rc:
+    bmi @sv
+    cmp #STEER_SPD
+    bcc @sv
+    lda #STEER_SPD
 @sv:
     sta b_vx
     ; pedal / brake / coast; a slipstream lifts the top speed
@@ -540,7 +610,7 @@ steer_and_pedal:
     lda tmp2
     bra @ss
 @no_pedal:
-    bit #(PAD_B | PAD_DOWN)
+    bit #PAD_DOWN
     beq @coast
     lda b_speed
     sec
@@ -567,6 +637,7 @@ move_x:
     A16
     lda b_px
     sta b_oldx
+    jsr settle
     clc
     adc b_vx
     cmp #(26*256)
@@ -611,11 +682,32 @@ move_x:
     bne @rail
     rts
 
-; crossed a rail with |vx| in tmp1. Square on at speed: TRACK HOP.
-; Lazy drift: the groove grabs the wheel (RAIL WOBBLE). Keeps Y.
+; crossed a rail with |vx| in tmp1. In the air (a hop): TRACK HOP, once a
+; hop, HOP_GAP of road between scoring ones. On the ground: fine if you're
+; really steering, but drift over lazily and the groove grabs the wheel
+; (RAIL WOBBLE). Keeps Y.
 rail_cross:
     lda b_hop
-    jne @x                      ; already in the air
+    beq @ground
+    lda b_hopsc
+    jne @x
+    lda #$01
+    sta b_hopsc
+    A16
+    lda b_dist
+    sec
+    sbc b_hopd
+    cmp #HOP_GAP
+    jcc @x16
+    lda b_dist
+    sta b_hopd
+    A8
+    phy
+    lda #SM_HOP
+    jsr style_award
+    ply
+    rts
+@ground:
     A16
     ; wobble below max(speed/4, RAIL_MIN)
     lda b_speed
@@ -626,40 +718,8 @@ rail_cross:
     lda #RAIL_MIN
 @w:
     cmp tmp1
-    beq @mid
-    bcs @wobble
-@mid:
-    ; hop at max(speed/2, HOP_MIN), from HOP_SPD up
-    lda b_speed
-    cmp #HOP_SPD
     bcc @x16
-    lsr a
-    cmp #HOP_MIN
-    bcs @h
-    lda #HOP_MIN
-@h:
-    cmp tmp1
-    beq @hop
-    bcs @x16
-@hop:
-    lda #HOP_T
-    sta b_hop
-    A8
-    SFX SFX_JUMP
-    A16
-    lda b_dist
-    sec
-    sbc b_hopd
-    cmp #HOP_GAP
-    bcc @x16
-    lda b_dist
-    sta b_hopd
-    A8
-    phy
-    lda #SM_HOP
-    jsr style_award
-    ply
-    rts
+    beq @x16
 @wobble:
     .a16
     lda b_wob
@@ -678,7 +738,7 @@ rail_cross:
     SFX SFX_STEP
     LDPTR0 str_wobble
     lda #TP_ORANGE
-    jsl event_popup
+    jsr pop_mid
     ldx #50
     stx b_popup
     ply
@@ -687,6 +747,69 @@ rail_cross:
     A8
 @x:
     rts
+
+; Hands off the pad and not sliding: ease into the nearest riding line
+; (within SETTLE_W px) at half a px a frame, so a tap that ends a few px
+; off still lands you in the lane. A16 in/out: A = b_px -> A = new b_px.
+SETTLE_W = 7
+settle:
+    .a16
+    ldx b_vx
+    bne @x
+    tax                         ; keep b_px
+    lda pad
+    and #(PAD_LEFT | PAD_RIGHT)
+    bne @keep
+    lda b_state
+    and #$00FF
+    bne @keep
+    ldy #$0000
+@l:
+    lda lines,y
+    and #$00FF
+    xba                         ; line * 256
+    sta tmp1
+    txa
+    sec
+    sbc tmp1                    ; px - line (signed 8.8)
+    bpl @pos
+    eor #$FFFF
+    inc a
+    cmp #((SETTLE_W + 1) * 256)
+    bcs @n
+    cmp #$0081
+    bcc @snap
+    txa
+    clc
+    adc #$0080
+    rts
+@pos:
+    cmp #((SETTLE_W + 1) * 256)
+    bcs @n
+    cmp #$0081
+    bcc @snap
+    txa
+    sec
+    sbc #$0080
+    rts
+@snap:
+    lda tmp1
+    rts
+@n:
+    iny
+    cpy #(lines_end - lines)
+    bne @l
+@keep:
+    txa
+@x:
+    rts
+
+; the riding lines: the left parking lane, the southbound lane, between
+; the southbound rails, by the yellow line, the northbound lane, between
+; the northbound rails, the bike lane
+lines: .byte 40, 66, 95, 117, 140, 163, BIKE_LANE
+lines_end:
+.a8
 
 str_wobble: .byte "RAIL WOBBLE! STEER HARDER", 0
 
@@ -732,9 +855,8 @@ crash:
     A8
     lda #^crash_msgs
     sta ptr0+2
-    lda #TP_RED
-    jsl event_popup
-    ldx #70
+    jsr pop_near
+    ldx #80
     stx b_popup
     ply
     plx
@@ -743,6 +865,84 @@ crash:
     pla
     ply
     plx
+    rts
+
+; ------------------------------------------------------------------
+; popups. pop_mid: ptr0 = text, A = palette, the usual centre banner (row 9).
+; pop_near: ptr0 = text, in yellow on POP_ROW right over the rider, so a
+; wipeout's SPLAT! lands where the crash is. pop_clear: whichever is up.
+pop_mid:
+    pha
+    jsr pop_clear
+    pla
+    jsl event_popup
+    rts
+
+pop_near:
+    jsr pop_clear
+    ; length -> tmp6
+    ldy #$0000
+@len:
+    lda [ptr0],y
+    beq @got
+    iny
+    bra @len
+@got:
+    sty tmp6
+    ; column: rider column - len/2, kept on screen (1 .. 31-len)
+    lda b_px+1
+    lsr a
+    lsr a
+    lsr a
+    sta tmp7
+    lda tmp6
+    lsr a
+    sta tmp6+1
+    lda tmp7
+    sec
+    sbc tmp6+1
+    bcs @c1
+    lda #$00
+@c1:
+    cmp #1
+    bcs @c2
+    lda #1
+@c2:
+    sta tmp7
+    lda #31
+    sec
+    sbc tmp6
+    cmp tmp7
+    bcs @c3
+    sta tmp7
+@c3:
+    A16
+    lda tmp7
+    and #$00FF
+    clc
+    adc #(POP_ROW*32)
+    tax
+    A8
+    lda #($20 | (TP_YELLOW << 2))
+    jsl txt_print
+    lda #$01
+    sta b_prow
+    rts
+
+pop_clear:
+    jsl event_popup_clear
+    lda b_prow
+    beq @x
+    stz b_prow
+    ldx #(POP_ROW*32)
+    A16
+    lda #$0120
+    sta tmp1
+    A8
+    stz tmp2
+    lda #$20
+    jsl txt_fill
+@x:
     rts
 
 crash_msgs: .addr cm0, cm1, cm2, cm3, cm4, cm5, cm6
@@ -860,7 +1060,7 @@ style_award:
     bcc @pal
     lda #TP_YELLOW              ; x3, x4: gold
 @pal:
-    jsl event_popup
+    jsr pop_mid
     ldx #50
     stx b_popup
     SFX SFX_COIN
@@ -895,11 +1095,12 @@ style_award:
     pla
     rts
 
-sm_base:  .byte 15, 15, 10
-sm_names: .addr smn0, smn1, smn2
+sm_base:  .byte 15, 15, 25, 20
+sm_names: .addr smn0, smn1, smn2, smn3
 smn0: .byte "TRACK HOP!", 0
 smn1: .byte "CLOSE CALL!", 0
 smn2: .byte "DRAFTING THE 501", 0
+smn3: .byte "POTHOLE HOP!", 0
 
 ; ------------------------------------------------------------------
 bike_draw:
@@ -1136,8 +1337,9 @@ draw_player:
 rider_tab:
     .addr bm_rider_0, bm_rider_1, bm_rider_2, bm_rider_3
     .addr bm_rider_l0, bm_rider_l1, bm_rider_r0, bm_rider_r1
-; px of lift by frames left in the air (HOP_T = 16)
-hop_lift: .byte 0, 1, 2, 4, 5, 6, 7, 7, 8, 8, 7, 7, 6, 5, 4, 2, 1
+; px of lift by frames left in the air (HOP_T = 20)
+hop_lift: .byte 0, 1, 3, 4, 5, 6, 7, 8, 9, 9, 9, 9, 9, 8, 7, 6, 5, 4, 3, 1, 0
+.assert HOP_T = 20, error, "hop_lift: one entry per frame in the air"
 
 ; streetcar coming up behind: blinking sign + bell
 draw_warning:
@@ -1181,18 +1383,18 @@ hud_full:
     lda #$20
     jsl txt_fill
     A16
-    lda #$0120                  ; 32 x 1: row 27
-    sta tmp1
+    lda #$0220                  ; 32 x 2: rows 26-27 (the text sits on 26,
+    sta tmp1                    ; clear of the last 8 overscan lines)
     A8
-    ldx #(27*32)
+    ldx #(26*32)
     lda #$20
     jsl txt_fill
     lda #TXT_WIN
     sta txt_bg
     PRINT 1, 1, TP_WHITE, str_time
     PRINT 10, 1, TP_WHITE, str_tokens
-    PRINT 1, 27, TP_WHITE, str_start
-    PRINT 24, 27, TP_YELLOW, str_end
+    PRINT 1, 26, TP_WHITE, str_start
+    PRINT 24, 26, TP_YELLOW, str_end
     stz txt_bg
     ldx #$FFFF
     stx b_hq
@@ -1327,7 +1529,7 @@ hud_hearts:
     bne @heart
     rts
 
-    ; progress bar, row 27, cols 7..22 (16 cells = 64 quarters)
+    ; progress bar, row 26, cols 7..22 (16 cells = 64 quarters)
 hud_bar:
     A16
     lda b_dist
@@ -1366,7 +1568,7 @@ hud_bar:
     A16
     txa
     clc
-    adc #(27*32 + 7)
+    adc #(26*32 + 7)
     tax
     A8
     lda #($20 | (TP_GREEN << 2))
@@ -1383,11 +1585,15 @@ str_start:  .byte "QUEEN", 0
 str_end:    .byte "SPADINA", 0
 
 ; ------------------------------------------------------------------
-; Delivered: 1000 + distance/16 + 50/token + STYLE + ~20/s left
-;            - 200/wipeout.
-; Not delivered (wiped out, out of time, fired, gave up): distance/16
-; only, so a failed run can never beat a finished one.
-; Stats: DISTANCE, TOKENS, WIPEOUTS, STYLE.
+; Delivered:  RIDE     1000 + distance/16 (562) + time left/3 (~20 a s)
+;              TIPS     50 a token + STYLE
+;              WIPEOUTS 200 each
+; Not delivered (wiped out 1, out of time 2, gave up 3, fired 4):
+;              RIDE     distance/24 (up to 375)
+;              TIPS     15 a token (up to 600)
+; so a failed run (<= 975) never beats a delivery (>= 1162).
+; ev_break = RIDE, TIPS, WIPEOUTS; ev_score = RIDE + TIPS - WIPEOUTS.
+; Stats: METRES (distance / 6), TOKENS, WIPEOUTS, STYLE.
 bike_score:
     A16
     lda b_dist
@@ -1395,18 +1601,21 @@ bike_score:
     bcc @d
     lda #COURSE_LEN
 @d:
-    lsr a
-    lsr a
-    sta ev_stat                 ; DISTANCE
-    lsr a
-    lsr a
-    sta tmp4                    ; distance points (max 562)
+    sta tmp3                    ; distance, clamped
+    sta tmp0
+    A8
+    lda #6
+    jsl div16
+    A16
+    lda tmp0
+    sta ev_stat                 ; METRES
     lda b_tokens
     sta ev_stat+2
     lda b_wipes
     sta ev_stat+4
     lda b_style
     sta ev_stat+6
+    stz ev_break+4
     lda b_quit
     bne @dnf
     lda b_dist
@@ -1414,7 +1623,24 @@ bike_score:
     bcs @delivered
     jmp @dnf
 @delivered:
-    ; tokens * 50
+    ; RIDE = 1000 + distance/16 + time/3
+    lda b_time
+    sta tmp0
+    A8
+    lda #3
+    jsl div16
+    A16
+    lda tmp3
+    lsr a
+    lsr a
+    lsr a
+    lsr a
+    clc
+    adc tmp0
+    clc
+    adc #1000
+    sta ev_break
+    ; TIPS = 50 * tokens + style
     lda b_tokens
     asl a
     sta tmp1                    ; t*2
@@ -1428,45 +1654,61 @@ bike_score:
     clc
     adc tmp1
     clc
-    adc tmp4
-    clc
     adc b_style
-    sta tmp4
-    ; 1000 + about 20 a second left
-    lda b_time
-    sta tmp0
-    A8
-    lda #3
-    jsl div16
-    A16
-    lda tmp0
-    clc
-    adc #1000
-    clc
-    adc tmp4
-    sta tmp4
-    ; each wipeout costs
+    sta ev_break+2
+    ; WIPEOUTS = 200 each
+    lda #$0000
     ldx b_wipes
     beq @nowipe
 @wipe:
-    sec
-    sbc #WIPE_COST
+    clc
+    adc #WIPE_COST
     dex
     bne @wipe
-    sta tmp4
 @nowipe:
-    lda tmp4
+    sta ev_break+4
+    lda ev_break
+    clc
+    adc ev_break+2
+    sec
+    sbc ev_break+4
     sta ev_score
     A8
     stz ev_fail
     rts
 @dnf:
     .a16
-    lda tmp4
+    ; RIDE = distance/24, TIPS = 15 a token (capped at 40)
+    lda tmp3
+    sta tmp0
+    A8
+    lda #24
+    jsl div16
+    A16
+    lda tmp0
+    sta ev_break
+    lda b_tokens
+    cmp #40
+    bcc @tk
+    lda #40
+@tk:
+    sta tmp1
+    asl a
+    asl a
+    asl a
+    asl a
+    sec
+    sbc tmp1                    ; t*15
+    sta ev_break+2
+    clc
+    adc ev_break
     sta ev_score
     A8
     lda #$03                    ; gave up
     ldx b_quit
+    bne @f
+    lda #$04                    ; YOU'RE FIRED!
+    ldx b_fired
     bne @f
     lda #$01                    ; WIPED OUT!
     ldx b_tout
