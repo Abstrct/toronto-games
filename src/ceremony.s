@@ -5,7 +5,7 @@
 .include "globals.inc"
 .include "screens.inc"
 
-.import c_order, c_place, c_champs, champ_names
+.import c_order, c_place, c_champs, champ_names, why_line
 
 NUM_FW  = 8
 FW_LIFE = 56                    ; frames: rocket, small burst, big burst, sparkle
@@ -18,6 +18,8 @@ GROUND_Y = 222
 MQ_L = 2
 MQ_R = 29
 BULB_TILE = 100                 ; spare BG3 tile (the countdown's, unused here)
+PRESS_AT  = 240                 ; frames before PRESS A shows and A works (~4 s)
+WIDE_MIN  = 5                   ; co-champions from here on share one wide top step
 
 .segment "BSS"
 fw_x:     .res NUM_FW*2
@@ -31,6 +33,7 @@ cer_m:    .res 1
 cer_k:    .res 1
 cer_n:    .res 1                ; athletes on the podium (0-8)
 cer_pr:   .res 1                ; PRESS A shown
+cer_wide: .res 1                ; 1 = the podium is one wide gold step (a mass tie)
 pod_step: .res MAX_PLAYERS      ; 0 gold step, 1 silver, 2 bronze
 pod_x:    .res MAX_PLAYERS*2
 pod_y:    .res MAX_PLAYERS*2
@@ -98,10 +101,9 @@ podium_scene:
     ldx #(5*32)
     lda #($20 | (TP_WHITE << 2))
     jsr strip_line
-    lda c_champs
-    cmp #$04
-    bcs @titled
-    LDPTR0 str_dead_heat
+    lda #$00                    ; "TIED ON 13 PTS AND MEDALS"
+    jsl why_line
+    bcc @titled
     ldx #(7*32)
     lda #($20 | (TP_CYAN << 2))
     jsr strip_line
@@ -110,6 +112,12 @@ podium_scene:
     LDPTR0 str_champ
     jsr marquee_title
     jsr champ_lines
+    lda #$01                    ; why: "13 PTS TO 8", "TIED ON 13 PTS: MORE GOLD"
+    jsl why_line
+    bcc @titled
+    ldx #(9*32)
+    lda #($20 | (TP_CYAN << 2))
+    jsr strip_line
     jmp @titled
 @solo:
     ; going solo: no "champion" over nobody, just the haul
@@ -153,7 +161,7 @@ podium_scene:
     A16
     inc cer_wait
     lda cer_wait
-    cmp #90
+    cmp #PRESS_AT
     A8
     bcc @loop
     lda cer_pr
@@ -176,7 +184,6 @@ podium_scene:
 
 str_champ:     .byte "CHAMPION OF TORONTO", 0
 str_cochamps:  .byte "CO-CHAMPIONS OF TORONTO", 0
-str_dead_heat: .byte "A DEAD HEAT!", 0
 str_nobody:    .byte "NO MEDALS TODAY", 0
 str_next_year: .byte "WE'LL GET 'EM NEXT YEAR", 0
 str_solo:      .byte "TORONTO SALUTES YOU", 0
@@ -418,10 +425,21 @@ bulbs:
 ; crowd spills along the podium and onto the square. Palettes: slot = order.
 pod_layout:
     stz cer_n
+    stz cer_wide
     lda c_champs
     bne @any
     rts
 @any:
+    ; five or more co-champions: one wide gold step instead of 1-2-3, so
+    ; nobody who tied for first stands on a 2 or a 3 (or on the pavement)
+    cmp #WIDE_MIN
+    bcc @steps
+    lda num_players
+    cmp #$02
+    bcc @steps
+    inc cer_wide
+    VLOAD (VRAM_BG1MAP + 24*32), cer_wide_rows, (4*64)
+@steps:
     stz cer_i
 @who:
     lda cer_i
@@ -516,7 +534,7 @@ pod_layout:
     adc tmp0
     pha
     lda f:step_y,x
-    bra @set
+    jmp @set
 @fan:
     A16
     lda cer_k
@@ -534,7 +552,7 @@ pod_layout:
     lda #104
     sec
     sbc tmp0
-    bra @surf
+    jmp @surf
 @right:
     lda #152
     clc
@@ -542,6 +560,8 @@ pod_layout:
     bra @surf
 @gold:
     .a8
+    lda cer_wide
+    bne @wide
     lda cer_m
     cmp #5
     bcs @crowd
@@ -553,6 +573,35 @@ pod_layout:
     pha
     lda #STEP1_Y
     bra @set
+@wide:
+    .a8
+    ; x = wide_x0[m] + k * wide_sp[m], all on the wide top step
+    lda cer_m
+    sec
+    sbc #WIDE_MIN
+    TAXB
+    lda f:wide_x0,x
+    sta tmp0
+    stz tmp0+1
+    lda f:wide_sp,x
+    sta tmp1
+    ldx #$0000
+@wk:
+    txa
+    cmp cer_k
+    beq @wset
+    lda tmp0
+    clc
+    adc tmp1
+    sta tmp0
+    inx
+    bra @wk
+@wset:
+    A16
+    lda tmp0
+    pha
+    lda #STEP1_Y
+    jmp @set
 @crowd:
     ; x = 128 - 8(m-1) + 16k, standing on whatever is under them
     A16
@@ -634,6 +683,12 @@ table_dx:
     A8
     rts
 
+; the wide step (80..176): m = 5..8 co-champions
+wide_x0: .byte 96, 88, 86, 86
+wide_sp: .byte 16, 16, 14, 12
+; BG1 rows 24-27 of the one-wide-step podium (tools/art_ceremony.py)
+cer_wide_rows: .incbin "cer_bg1w.bin", 24*64, 4*64
+
 step_x: .word 128, 96, 160
 step_y: .word STEP1_Y, STEP2_Y, STEP3_Y
 ; x offset for the k-th of m athletes sharing a step: [m-1][k]
@@ -689,7 +744,7 @@ draw_podium:
     lda spr_y
     pha
     sec
-    sbc #16
+    sbc #14                     ; hangs to the belt: reads on any jersey
     sta spr_y
     A8
     lda tmp3
@@ -753,17 +808,24 @@ fireworks:
     bra @age
 @new:
     stx cer_i
-    lda #224
+    ; only where there is sky to see it: left of City Hall, the gap between
+    ; the towers, right of it (a burst over a tower would sit on its roof)
+    lda #3
+    jsl rand_range
+    TAXB
+    lda f:fw_zx,x
+    sta tmp0
+    lda f:fw_zw,x
     jsl rand_range
     clc
-    adc #16
+    adc tmp0
     ldx cer_i
     sta fw_x,x
     stz fw_x+1,x
-    lda #88
+    lda #61                     ; y 40..100: clear of the marquee and the chamber
     jsl rand_range
     clc
-    adc #20
+    adc #40
     ldx cer_i
     sta fw_y,x
     stz fw_y+1,x
@@ -788,6 +850,10 @@ fireworks:
     cpx #(NUM_FW*2)
     bne @a
     rts
+
+; firework zones: first x, how many x
+fw_zx: .byte 12, 114, 236
+fw_zw: .byte 13, 29, 12
 
 draw_fireworks:
     ldx #$0000

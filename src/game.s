@@ -150,7 +150,7 @@ only_event:
 run_event:
     stz cur_player
 @pl:
-    stz ev_giveup
+    jsr turn_reset
     jsl call_event
     jsr store_score
     inc cur_player
@@ -159,6 +159,18 @@ run_event:
     bne @pl
     jsl award_medals
     jsl event_standings
+    rts
+
+; a clean slate for the turn: no give-up, no result, no arithmetic. An event
+; that never fills ev_break gets the plain result card.
+turn_reset:
+    stz ev_giveup
+    stz ev_fail
+    A16
+    stz ev_break
+    stz ev_break+2
+    stz ev_break+4
+    A8
     rts
 
 ; call_event: jump into the event_idx entry point (it returns to our caller)
@@ -259,7 +271,7 @@ demo_play:
     ldx #$0000
     stx demo_off                ; recording: the log starts at $7F:0000
 @go:
-    stz ev_giveup
+    jsr turn_reset
     stz pause_ok
     tsx
     stx demo_sp
@@ -753,24 +765,24 @@ skins:
     .word RGB($e8,$b0,$80), RGB($b0,$78,$48), RGB($70,$70,$70), 0
 
 ; ------------------------------------------------------------------
-; Records live in battery SRAM at $70:0000: "TG04", then the Toronto board:
+; Records live in battery SRAM at $70:0000: the signature (REC_SIG), then the Toronto board:
 ; 5 ranks x NUM_EVENTS events x 16 bytes (score word, name 9, pad 5), rank-major, so
 ; records + event*16 is still each event's #1 and records + rank*16*NUM_EVENTS + event*16
 ; its rank-th. Each event's five stay sorted, highest first.
 REC_BYTES = 16 * NUM_EVENTS * 5
+; bump the last character whenever default_records changes: carts with the
+; old signature are re-seeded (and lose their saved board) on the next boot
+.define REC_SIG "TG05"
 records_load:
-    lda f:$700000
-    cmp #'T'
+    ldx #$0000
+@sig:
+    lda f:$700000,x
+    cmp f:rec_sig,x
     bne @fresh
-    lda f:$700001
-    cmp #'G'
-    bne @fresh
-    lda f:$700002
-    cmp #'0'
-    bne @fresh
-    lda f:$700003
-    cmp #'4'
-    beq @copy
+    inx
+    cpx #4
+    bne @sig
+    bra @copy
 @fresh:
     ; default_records is event-major (five per event); the board is rank-major
     ldx #$0000                  ; source
@@ -814,14 +826,13 @@ records_load:
 records_save:
     lda demo_on                 ; a demo never touches the cart's battery
     bne @x
-    lda #'T'
-    sta f:$700000
-    lda #'G'
-    sta f:$700001
-    lda #'0'
-    sta f:$700002
-    lda #'4'
-    sta f:$700003
+    ldx #$0000
+@sig:
+    lda f:rec_sig,x
+    sta f:$700000,x
+    inx
+    cpx #4
+    bne @sig
     ldx #$0000
 @c:
     lda records,x
@@ -832,14 +843,20 @@ records_save:
 @x:
     rtl
 
+rec_sig: .byte REC_SIG
+
 ; ==================================================================
 ; DEFAULT TORONTO RECORDS: the ghost rivals seeded into SRAM the first time
-; the cart boots (or whenever the "TG04" signature is missing). Five per
+; the cart boots (or whenever the REC_SIG signature is missing). Five per
 ; event, highest first, events in event order (records_load deals them out
 ; into the rank-major board). #1 is the bar a good player should clear and a
 ; solo player's medal lines (gold = #1, silver 2/3, bronze 1/3).
-; A cart that already has saved records keeps them; bump the signature in
-; records_load / records_save to force a re-seed. Names: 8 characters max.
+; A cart that already has saved records keeps them; bump REC_SIG to force a
+; re-seed. Names: 8 characters max.
+; Seeding: every event aims at the same scale (a skilled finish 2500-4500,
+; an average finish 1200-2500, no-skill input under 400, any finish above any
+; failed run), so #5 sits where an average finish lands, out of reach of a
+; failed or abandoned run. #1 also sets the solo medal lines.
 ; A new event adds five lines here (the .assert checks the count).
 .macro REC score, name
     .word score
@@ -849,47 +866,47 @@ records_save:
 
 default_records:
     ; EV_BIKE  Bike Courier
-    REC 3600, "COURIER"
-    REC 2900, "FIXIE"
-    REC 2200, "TTC GUS"
-    REC 1500, "PEDICAB"
-    REC 800,  "SALMON"
+    REC 3800, "COURIER"
+    REC 3200, "FIXIE"
+    REC 2600, "TTC GUS"
+    REC 2000, "PEDICAB"
+    REC 1500, "SALMON"
     ; EV_BAY   Bay St Power Walk
-    REC 3000, "SUITGUY"
-    REC 2400, "BAYBANKR"
-    REC 1800, "MEL"
-    REC 1200, "INTERN"
-    REC 600,  "DECAF"
+    REC 3600, "SUITGUY"
+    REC 3000, "BAYBANKR"
+    REC 2400, "MEL"
+    REC 1900, "INTERN"
+    REC 1400, "DECAF"
     ; EV_PARK  Off-Leash Alert
-    REC 2500, "DOODLE"
-    REC 2000, "GOLDIE"
-    REC 1500, "FRISBEE"
-    REC 1000, "HIPSTER"
-    REC 500,  "SQUIRREL"
+    REC 3400, "DOODLE"
+    REC 2900, "GOLDIE"
+    REC 2400, "FRISBEE"
+    REC 1900, "HIPSTER"
+    REC 1400, "SQUIRREL"
     ; EV_COPS  Tallboy Trot
-    REC 3000, "RACCOON"
-    REC 2400, "BIKE COP"
-    REC 1800, "BANDIT"
-    REC 1200, "BUSKER"
-    REC 600,  "NANA"
+    REC 3600, "RACCOON"
+    REC 3000, "BIKE COP"
+    REC 2400, "BANDIT"
+    REC 1900, "BUSKER"
+    REC 1400, "NANA"
     ; EV_SAIL  Harbour Regatta
-    REC 3000, "GOOSE"
-    REC 2400, "SKIPPER"
-    REC 1800, "FERRYMAN"
-    REC 1200, "KAYAKER"
-    REC 600,  "SEAGULL"
+    REC 3400, "GOOSE"
+    REC 2900, "SKIPPER"
+    REC 2400, "FERRYMAN"
+    REC 1900, "KAYAKER"
+    REC 1400, "SEAGULL"
     ; EV_PARKING  Parallel Parking
-    REC 1100, "GREEN P"
-    REC 900,  "VALET"
-    REC 700,  "CABBIE"
-    REC 450,  "LEARNER"
-    REC 200,  "TOWTRUCK"
+    REC 3400, "GREEN P"
+    REC 2900, "VALET"
+    REC 2400, "CABBIE"
+    REC 1900, "LEARNER"
+    REC 1400, "TOWTRUCK"
     ; EV_SUBWAY   TTC Surfing
-    REC 1500, "HANDRAIL"
-    REC 1200, "COMMUTER"
-    REC 900,  "TOURIST"
-    REC 600,  "STROLLER"
-    REC 300,  "LINE 1"
+    REC 3400, "HANDRAIL"
+    REC 2900, "COMMUTER"
+    REC 2400, "TOURIST"
+    REC 1900, "STROLLER"
+    REC 1400, "LINE 1"
 default_records_end:
 .assert default_records_end - default_records = REC_BYTES, error, "default_records: five REC lines per event"
 ; ==================================================================

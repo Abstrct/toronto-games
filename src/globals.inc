@@ -19,6 +19,7 @@
 ; ---------- low RAM ----------
 .global oam_buf, oam_hi, txt_map, pal_buf, dmaq
 .global players, num_players, cur_player, game_mode
+; the turn's result: see vars.s for ev_fail / ev_giveup / ev_break rules
 .global event_on, event_idx, ev_score, ev_fail, ev_stat, ev_giveup, ev_break
 .global records, ev_ram, pause_ok
 ; attract demo (game.s demo_play, boot.s demo_pads)
@@ -51,6 +52,13 @@ EV_SUBWAY  = 6
 GM_ALL      = 0
 GM_SOME     = 1
 GM_PRACTICE = 2
+
+; ev_fail values (vars.s)
+FAIL_NONE    = 0    ; finished
+FAIL_OWN     = 1    ; the event's own fail line (cards.s ev_fails)
+FAIL_TIME    = 2    ; out of time
+FAIL_GAVE_UP = 3    ; CALL IT A DAY: scored as a failed run
+FAIL_OWN2    = 4    ; the event's second fail line (cards.s ev_fails2)
 
 ; ---------- engine routines (bank $80, all jsl/rtl, A8 XY16 in & out) ----------
 .global wait_frame, ppu_off, fade_in, fade_out, wait_frames
