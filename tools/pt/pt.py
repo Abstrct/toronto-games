@@ -322,6 +322,54 @@ class Game:
         return st
 
 
+    # ---- presentation lint: things the panel kept finding by eye
+    def text_rows(self):
+        """BG3 text layer as 28 strings (non-glyph tiles shown as '.')."""
+        tm = self.core.peek(self.sym['txt_map'], 2048)
+        rows = []
+        for y in range(28):
+            line = ''
+            for x in range(32):
+                t = tm[(y * 32 + x) * 2] & 0x7F
+                line += chr(t + 32) if 1 <= t <= 63 else ('.' if t else ' ')
+            rows.append(line)
+        return rows
+
+    def sprites(self):
+        """Visible sprites from the OAM shadow: (x, y, w, h). OBSEL is 8x8 / 16x16."""
+        oam = self.core.peek(self.sym['oam_buf'], 512)
+        hi = self.core.peek(self.sym['oam_hi'], 32)
+        out = []
+        for i in range(128):
+            x, y = oam[i * 4], oam[i * 4 + 1]
+            b = (hi[i >> 2] >> ((i & 3) * 2)) & 3
+            if b & 1:
+                x -= 256
+            size = 16 if b & 2 else 8
+            if y >= 224 or x <= -size or x >= 256:
+                continue
+            out.append((x, y, size, size))
+        return out
+
+    def lint(self):
+        issues = []
+        rows = self.text_rows()
+        glyph = lambda c: c not in ' .'
+        for r in (0, 27):
+            if any(glyph(c) for c in rows[r]):
+                issues.append(('overscan', 'text on row %d (scanlines %d-%d, hidden by CRT overscan): %r'
+                               % (r, r * 8, r * 8 + 7, rows[r].strip(' .'))))
+        hit = {}
+        for (x, y, w, h) in self.sprites():
+            for cy in range(max(0, (y + 1) // 8), min(28, (y + h + 7) // 8)):
+                for cx in range(max(0, x // 8), min(32, (x + w + 7) // 8)):
+                    if glyph(rows[cy][cx]):
+                        hit.setdefault(cy, set()).add(cx)
+        for cy, xs in sorted(hit.items()):
+            issues.append(('sprite_over_text', 'sprite overlaps text on row %d: %r' % (cy, rows[cy].strip(' .'))))
+        return issues
+
+
 # ---------------------------------------------------------------- scenes
 NAV_MENU = 'w200 pSTART w40'
 NAV_PRACTICE = NAV_MENU + ' pDOWN pDOWN pA w40 pSTART w40 pA w60 pSTART w60'
@@ -1091,6 +1139,35 @@ def cmd_fuzz(a):
         print('  ! seed %d @%d (%s): %s  -> %s/finding.json' % (f['seed'], f['frame'], f['scene'], f['problem'], f['dir']))
 
 
+# ---------------------------------------------------------------- lint
+def _lint_job(job):
+    target, frames, mask = job
+    g = Game()
+    goto_target(g, target)
+    found = {}
+    for t in range(0, frames + 1, 15):
+        if t:
+            g.step(15, mask)
+        for kind, msg in g.lint():
+            found.setdefault((kind, msg), (t, g.scene()))
+    g.core.close()
+    return target, [{'kind': k, 'msg': m, 'frame': f, 'scene': sc} for (k, m), (f, sc) in found.items()]
+
+
+def cmd_lint(a):
+    targets = a.targets or list(TARGETS)
+    _warm(targets)
+    res = parallel_map(_lint_job, [(t, a.frames, mask_of(a.hold) if a.hold else 0) for t in targets], a.jobs)
+    n = 0
+    for target, issues in res:
+        print('%-14s %s' % (target, 'clean' if not issues else '%d issue(s)' % len(issues)))
+        for i in issues:
+            print('    %-16s @%-4d %s' % (i['kind'], i['frame'], i['msg']))
+        n += len(issues)
+    print('\n%d issue(s). Heuristics: overscan = text in the top/bottom 8 scanlines; sprite_over_text = an OAM box'
+          ' over a text glyph (fine if the sprite is meant to sit behind a panel).' % n)
+
+
 # ---------------------------------------------------------------- golden
 def cmd_golden(a):
     path = os.path.join(ROOT, 'tools', 'pt', 'golden.json')
@@ -1296,6 +1373,11 @@ def main():
     p.add_argument('-s', '--seed', type=int, default=1)
     p.add_argument('-j', '--jobs', type=int, default=os.cpu_count())
     p.add_argument('--start', default='power', help="'power' or a goto target")
+    p = sub.add_parser('lint', help='presentation lint: overscan text, sprites over text')
+    p.add_argument('targets', nargs='*')
+    p.add_argument('-f', '--frames', type=int, default=180)
+    p.add_argument('--hold', help='buttons held while sampling, e.g. A')
+    p.add_argument('-j', '--jobs', type=int, default=os.cpu_count())
     p = sub.add_parser('golden', help='screen-hash regression of every goto target')
     p.add_argument('mode', choices=['record', 'check'])
     p = sub.add_parser('bug', help='file a finding at the session\'s current moment (screenshot, state, verified repro)')
@@ -1338,6 +1420,8 @@ def main():
         cmd_fuzz(a)
     elif a.cmd == 'golden':
         cmd_golden(a)
+    elif a.cmd == 'lint':
+        cmd_lint(a)
     elif a.cmd == 'bug':
         cmd_bug(a)
     elif a.cmd == 'findings':
