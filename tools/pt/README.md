@@ -43,7 +43,7 @@ Space-separated tokens. It's a superset of `tools/run.py`'s.
 | Token | Meaning |
 |---|---|
 | `wN` | run N frames with the held buttons |
-| `hBTN` `rBTN` `rALL` | hold / release (`hA+RIGHT` for a chord) |
+| `hBTN` `rBTN` `rALL` | hold / release (`hA+RIGHT` for a chord). Like a real d-pad, holding a direction lets go of its opposite |
 | `pBTN` | tap: 3 frames down, 3 up |
 | `(…)*N`, `pA*5` | repeat |
 | `s:NAME` | screenshot |

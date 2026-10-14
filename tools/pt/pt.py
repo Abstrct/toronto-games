@@ -74,6 +74,18 @@ EVENT_SYMS = {'ev_bike': 'bike', 'ev_bay': 'bay', 'ev_park': 'park', 'ev_cops': 
 EVENT_SUB = {'event_card': 'intro', 'event_countdown': 'countdown', 'score_card': 'results'}
 
 
+def press(held, m):
+    """held | m, as a real d-pad allows: pressing a direction lets go of its
+    opposite (libretro snes9x would otherwise drop one of the pair)."""
+    for x, y in (('LEFT', 'RIGHT'), ('UP', 'DOWN')):
+        bx, by = 1 << BTN[x], 1 << BTN[y]
+        if m & bx and not m & by:
+            held &= ~by
+        elif m & by and not m & bx:
+            held &= ~bx
+    return held | m
+
+
 def mask_of(spec):
     m = 0
     for b in spec.split('+'):
@@ -512,7 +524,7 @@ class Runner:
     def tap(self, spec):
         m = mask_of(spec)
         keep = self.g.held
-        self.g.held = keep | m
+        self.g.held = press(keep, m)
         self.tokens.append('h' + spec)
         self.wait(3)
         self.g.held = keep
@@ -628,7 +640,7 @@ class Runner:
             if int(tok[1:]) >= 30:
                 self.scene_check()
         elif tok[0] == 'h' and tok[1:2].isupper():
-            g.held |= mask_of(tok[1:])
+            g.held = press(g.held, mask_of(tok[1:]))
             self.tokens.append(tok)
         elif tok[0] == 'r' and tok[1:2].isupper():
             g.held &= ~mask_of(tok[1:])
