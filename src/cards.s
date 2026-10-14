@@ -3906,7 +3906,7 @@ card_rate:
     .addr rt_bike_fin, 0, 0     ; bike
     .addr rt_bay_walk, 0, rt_40each ; bay
     .addr 0, 0, 0               ; park
-    .addr 0, 0, 0               ; cops
+    .addr rt_hurdles, 0, 0      ; cops
     .addr rt_sail, 0, 0         ; sail
     .addr 0, 0, 0               ; parking
     .addr 0, 0, rt_sub_pen      ; subway
@@ -3914,7 +3914,7 @@ card_rate_fail:
     .addr rt_bike_m, 0, 0       ; bike
     .addr rt_bydist, 0, rt_40each ; bay
     .addr 0, 0, 0               ; park
-    .addr 0, 0, 0               ; cops
+    .addr rt_hurdles, 0, 0      ; cops
     .addr 0, 0, 0               ; sail
     .addr 0, 0, 0               ; parking
     .addr rt_sub_leg, 0, 0      ; subway
@@ -3927,6 +3927,7 @@ rt_bydist:  .byte "BY DISTANCE", 0
 rt_40each:  .byte "40 EACH", 0
 rt_sub_leg: .byte "40 A LEG", 0
 rt_sub_pen: .byte "X40", 0
+rt_hurdles: .byte "HURDLES+ROAD", 0
 rt_bike_fin: .byte "1562+20/S", 0
 rt_bike_m:  .byte "1 PER 4 M", 0
 rt_sail:    .byte "1000+25/S", 0   ; ev_sail.s FINISH_MIN + PTS_SEC a second left

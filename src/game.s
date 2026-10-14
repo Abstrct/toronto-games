@@ -924,11 +924,11 @@ default_records:
     REC 2700, "HIPSTER"
     REC 1900, "SQUIRREL"
     ; EV_COPS  Tallboy Trot
-    REC 3600, "RACCOON"
-    REC 3000, "BIKE COP"
-    REC 2400, "BANDIT"
-    REC 1800, "BUSKER"
-    REC 1200, "NANA"
+    REC 5800, "RACCOON"
+    REC 4600, "BIKE COP"
+    REC 3600, "BANDIT"
+    REC 2600, "BUSKER"
+    REC 1600, "NANA"
     ; EV_SAIL  Harbour Regatta
     REC 4500, "GOOSE"
     REC 3700, "SKIPPER"
