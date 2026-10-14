@@ -943,8 +943,8 @@ song_mvol:
     .byte $6C   ; 2 bike        Gold Guns Gulls
     .byte $70   ; 3 standings   Ahead by a Centimetre
     .byte $64   ; 4 bay         Whelp, I'm Alive
-    .byte $70   ; 5 tallboy     Hay, Officer
-    .byte $72   ; 6 regatta     Brother Downwind
+    .byte $78   ; 5 tallboy     Hay, Officer
+    .byte $6A   ; 6 regatta     Brother Downwind (the start horn rides on top)
     .byte $70   ; 7 off-leash   If I Had a Million Collars
     .byte $76   ; 8 podium      Podium Reprise: a lift over the events (see below)
     .byte $6C   ; 9 parking     Green P Shuffle

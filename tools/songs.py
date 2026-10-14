@@ -318,8 +318,11 @@ def hay_officer():
     half = 'k . h . k . h . s . h . h . k .'
     drive = 'k . o . s . o . k . o . s . o .'
     roll = 's . s . s . s . s s s s s s s s'
-    intro = sec('intro', rest(4), '@9 ' + loop, rest(4),
-                rest(3) + ' . . . . . . . . s s s s s s s s')
+    # the riff alone for two bars, then the bass bounce and hats join (a race
+    # starts here, so the build-up can't be four bars of near silence)
+    intro = sec('intro', rest(4), '@9 ' + loop,
+                rest(2) + ' ' + ' '.join(rep('%s:2 %s:2' % r, 4) for r in roots[2:]),
+                rest(2) + ' ' + half + ' . . . . . . . . s s s s s s s s')
     lead = sec('lead',
                '@10 E5:2 E5:2 E5:2 E5:2 -:2 E5:2 E5:2 -:2 E5:2 F5:2 G5:2 A5:2 -:8 '
                'E5:2 E5:2 E5:2 E5:2 -:2 E5:2 E5:2 -:2 E5:2 F5:2 G5:2 A5:2 A6:6 -:2 '
