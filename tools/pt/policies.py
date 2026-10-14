@@ -184,6 +184,9 @@ CURVE = {}
 
 # per-event bots live in policies_<event>.py next to this file; each may define
 # POLICIES (name -> class) and DEFAULTS (event -> list) to add or replace
+_OWNER = {}
+
+
 def _plugins():
     import importlib
     import os
@@ -191,6 +194,11 @@ def _plugins():
     for f in sorted(os.listdir(here)):
         if f.startswith('policies_') and f.endswith('.py'):
             m = importlib.import_module(f[:-3])
+            for name in getattr(m, 'POLICIES', {}):
+                # two plugins defining the same bot silently replaced one with the other
+                if name in _OWNER and _OWNER[name] != f:
+                    raise ValueError('bot %r is defined in both %s and %s' % (name, _OWNER[name], f))
+                _OWNER[name] = f
             POLICIES.update(getattr(m, 'POLICIES', {}))
             DEFAULTS.update(getattr(m, 'DEFAULTS', {}))
             CURVE.update(getattr(m, 'CURVE', {}))
