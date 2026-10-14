@@ -3502,7 +3502,7 @@ card_finish: .addr fh0, fh1, fh2, fh3, fh4, fh5, fh6
 fh0: .byte "DELIVERED!", 0
 fh1: .byte "MADE THE 5:42!", 0
 fh2: .byte "MADE IT TO DUNDAS!", 0
-fh3: .byte "MADE SPADINA!", 0
+fh3: .byte "SPADINA! YOU LOST HIM!", 0
 fh4: .byte "CROSSED THE LINE!", 0
 fh5: .byte "PARKED!", 0
 fh6: .byte "UNION! EVERYBODY OFF!", 0
@@ -3516,7 +3516,7 @@ eb6: .byte "SURF LINE 1 TO UNION.", $0A, "GRAB A POLE, GET GERMS.", 0
 ec0: .byte "D-PAD STEER    A PEDAL", $0A, "B HOP          DOWN BRAKE", $0A, "HOP RAILS, DODGE LATE: X8", 0
 ec1: .byte "ALTERNATE ", TXT_ARROW_L+32, " ", TXT_ARROW_R+32, " ON BIG DOTS", $0A, "SMALL DOTS = DOUBLE TIME", $0A, "UP/DOWN LANE  A EXCUSE ME", 0
 ec2: .byte "D-PAD WALK   A THROW BALL", $0A, "SAFE: B WHEN ! SHOWS: 50", $0A, "BOLD: B AS HE LUNGES: 150+", 0
-ec3: .byte "TAP A AT CHALK. RED: HOLD", $0A, "B: SIP WHILE COP CAN'T SEE", $0A, "B MID-AIR = SIP 'N' HOP", 0
+ec3: .byte "YELLOW CHALK: TAP A", $0A, "RED CHALK: HOLD A", $0A, "B: SIP WHILE COP CAN'T SEE", 0
 ec4: .byte "LEFT/RIGHT: TURN  A: HIKE", $0A, "WIND FROM TOP: ZIG-ZAG UP", $0A, "SURF THE FERRY'S WAKE!", 0
 ec5: .byte "UP: REAR BUMPER TO LINE", $0A, "BACK IN: DOWN+RIGHT, THEN", $0A, "DOWN+LEFT. A: PARK IT!", 0
 ec6: .byte "HOLLOW ARROW: GET READY", $0A, "SOLID: D-PAD THAT WAY NOW", $0A, "GOLD DOT ALL LEG: SURF X3", 0
@@ -3620,14 +3620,18 @@ card_rate:
 card_rate_fail:
     .addr 0, 0, 0               ; bike
     .addr rt_bydist, 0, rt_40each ; bay
-rt_bay_walk: .byte "1000+40/S", 0
-rt_bydist:  .byte "BY DISTANCE", 0
-rt_40each:  .byte "40 EACH", 0
     .addr 0, 0, 0               ; park
     .addr 0, 0, 0               ; cops
     .addr 0, 0, 0               ; sail
     .addr 0, 0, 0               ; parking
     .addr rt_sub_leg, 0, 0      ; subway
+card_rate_end:
+.assert card_rate_fail - card_rate = NUM_EVENTS * 6, error, "card_rate: three .addr per event, nothing else"
+.assert card_rate_end - card_rate_fail = NUM_EVENTS * 6, error, "card_rate_fail: three .addr per event, nothing else"
+; the rate strings (after both tables: a string inside one shifts its rows)
+rt_bay_walk: .byte "1000+40/S", 0
+rt_bydist:  .byte "BY DISTANCE", 0
+rt_40each:  .byte "40 EACH", 0
 rt_sub_leg: .byte "40 A LEG", 0
 rt_sub_pen: .byte "X40", 0
 
