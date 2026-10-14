@@ -26,13 +26,16 @@ WATER = ['#1850a8', '#2464b8', '#3c80d0', '#78b4e8']   # base + 3 cycling wave c
 CITY_Y = 96          # first water row under the seawall
 WEST_X = 32          # breakwater
 EAST_X = 480         # Port Lands quay
-FERRY_X = 356        # ferry lane: Bay St slip <-> Centre Island dock
-FERRY_Y0, FERRY_Y1 = 122, 418
-# leg 1 is a reach (mark 1 is in view from the start), leg 2 the beat (tacking),
-# leg 3 the run past the ferry lane (surf its wake), leg 4 a reach to the line
-MARKS = [(300, 300), (270, 128), (410, 388)]   # reach, windward, leeward
+FERRY_X = 356        # Jack Layton terminal slip (scenery)
+# the Island ferry runs crosswind along the Islands, Hanlan's <-> Ward's, so its
+# wake is a beam reach both ways: dip south after mark 3 to ride it to the line
+FERRY_Y = 440
+FERRY_X0, FERRY_X1 = 154, 444
+# leg 1 is a reach (one tap left from the start heading, mark 1 in view), leg 2
+# the beat (tacking), leg 3 the run, leg 4 a reach to the line past the ferry lane
+MARKS = [(280, 236), (224, 144), (408, 368)]   # reach, windward, leeward
 LINE_X, LINE_Y, LINE_HALF = 184, 380, 40
-START = (112, 308)                               # open water, sea room all round
+START = (112, 300)                               # open water, sea room all round
 FREIGHTER = (456, 168, 479, 327)
 
 
@@ -206,13 +209,12 @@ def harbour():
     # Gibraltar Point lighthouse
     d.ellipse([150, 488, 162, 500], fill=C['white'])
     d.ellipse([153, 491, 159, 497], fill=C['red'])
-    # Centre Island ferry dock
-    d.rectangle([FERRY_X - 22, 444, FERRY_X - 17, 476], fill=C['deck'])
-    d.rectangle([FERRY_X + 17, 444, FERRY_X + 22, 476], fill=C['deck'])
-    d.rectangle([FERRY_X - 22, 470, FERRY_X + 22, 478], fill=C['deck'])
-    d.line([FERRY_X - 22, 444, FERRY_X + 22, 444], fill=C['deck2'])
-    mark(FERRY_X - 22, 444, FERRY_X - 17, 476)
-    mark(FERRY_X + 17, 444, FERRY_X + 22, 476)
+    # ferry piers at each end of the crosswind lane (Hanlan's west, Ward's east)
+    for (px0, px1) in ((FERRY_X0 - 34, FERRY_X0 - 28), (FERRY_X1 + 28, FERRY_X1 + 34)):
+        d.rectangle([px0, FERRY_Y - 14, px1, 478], fill=C['deck'])
+        d.line([px1, FERRY_Y - 14, px1, 478], fill=C['deck2'])
+        d.line([px0, FERRY_Y - 14, px1, FERRY_Y - 14], fill=C['deck2'])
+        mark(px0, FERRY_Y - 14, px1, 478)
     # Western breakwater
     rocks(d, 0, CITY_Y, WEST_X - 1, H - 1, rnd)
     d.line([WEST_X - 1, CITY_Y, WEST_X - 1, H - 1], fill=C['rock3'])
@@ -359,7 +361,7 @@ def build_sprites():
     (64..127, 128..159)  crew x2, foam x2, 8x8 helpers
     y 160     marks, geese, kayaks, pin, splash
     y 176-207 pointer arrows, 16 directions
-    y 208-255 ferry, committee boat, cat's paws, ferry wake"""
+    y 208-255 ferry (48x32), cat's paws, committee boat, ferry wake (16x32)"""
     sh = Sheet(256)
     d = sh.draw()
     for side_i, side in enumerate((1, -1)):
@@ -428,26 +430,35 @@ def build_sprites():
     # mark pointer: yellow arrows, 16 directions
     for k in range(16):
         draw_arrow(sh, (k % 8) * 16, 176 + (k // 8) * 16, k, 4, 1)
-    # the Island ferry, double-ended, 32x48 at (0,208), bow up/down
-    F = 208 - 96
-    d.rounded_rectangle([5, 97 + F, 26, 142 + F], radius=8, fill=2, outline=1)
-    d.rectangle([6, 108 + F, 25, 131 + F], fill=4)
-    d.rectangle([9, 104 + F, 22, 135 + F], fill=3, outline=1)
-    d.rectangle([12, 110 + F, 19, 129 + F], fill=2, outline=10)
-    d.rectangle([14, 116 + F, 17, 123 + F], fill=7)
+    # the Island ferry, double-ended, drawn bow up/down then turned on its side:
+    # 48x32 at (0,208), running east-west
+    fv = Image.new('P', (32, 48), 0)
+    d2 = ImageDraw.Draw(fv)
+    F = -96
+    d2.rounded_rectangle([5, 97 + F, 26, 142 + F], radius=8, fill=2, outline=1)
+    d2.rectangle([6, 108 + F, 25, 131 + F], fill=4)
+    d2.rectangle([9, 104 + F, 22, 135 + F], fill=3, outline=1)
+    d2.rectangle([12, 110 + F, 19, 129 + F], fill=2, outline=10)
+    d2.rectangle([14, 116 + F, 17, 123 + F], fill=7)
     for y in range(106, 136, 3):
-        d.point((9, y + F), fill=9)
-        d.point((22, y + F), fill=9)
-    d.rectangle([13, 99 + F, 18, 100 + F], fill=6)
-    d.rectangle([13, 139 + F, 18, 140 + F], fill=6)
+        d2.point((9, y + F), fill=9)
+        d2.point((22, y + F), fill=9)
+    d2.rectangle([13, 99 + F, 18, 100 + F], fill=6)
+    d2.rectangle([13, 139 + F, 18, 140 + F], fill=6)
     # paddle boxes amidships (the Trillium is a sidewheeler)
-    d.rectangle([3, 114 + F, 5, 125 + F], fill=8, outline=1)
-    d.rectangle([26, 114 + F, 28, 125 + F], fill=8, outline=1)
-    # committee boat 32x16 at (32,208)
-    d.rounded_rectangle([33, 211, 62, 221], radius=4, fill=4, outline=1)
-    d.rectangle([42, 213, 54, 219], fill=2)
-    d.line([48, 210, 48, 212], fill=1)
-    d.rectangle([49, 208, 53, 210], fill=8)
+    d2.rectangle([3, 114 + F, 5, 125 + F], fill=8, outline=1)
+    d2.rectangle([26, 114 + F, 28, 125 + F], fill=8, outline=1)
+    fh = fv.transpose(Image.ROTATE_90)
+    fp = fh.load()
+    for y in range(32):
+        for x in range(48):
+            if fp[x, y]:
+                sh.px(x, 208 + y, fp[x, y])
+    # committee boat 32x16 at (96,208)
+    d.rounded_rectangle([97, 211, 126, 221], radius=4, fill=4, outline=1)
+    d.rectangle([106, 213, 118, 219], fill=2)
+    d.line([112, 210, 112, 212], fill=1)
+    d.rectangle([113, 208, 117, 210], fill=8)
     # cat's paw ripples (gusts): dark patches of short arcs, 2 frames (arrows palette)
     for k in range(2):
         x0 = 64 + k * 16
@@ -462,21 +473,34 @@ def build_sprites():
             y = 209 + r2.randrange(2, 13)
             d.point((x, y), fill=9)
     # ferry wake (ferry palette: 2 white, 10 grey-blue): a churned V astern of
-    # the paddle wheels, 32x16, 2 frames; drawn below a northbound ferry
+    # the paddle wheels, 16x32 (opening east: astern of a westbound ferry),
+    # 2 frames at (48,224) and (64,224)
     for k in range(2):
-        x0, y0 = 32 + k * 32, 224
+        wv = Image.new('P', (32, 16), 0)
+        wp = wv.load()
         for j in range(16):
             spread = 5 + j * 0.68
             ph = (j // 2 + k) % 2
             for sgn in (-1, 1):
-                x = int(round(x0 + 15.5 + sgn * spread))
-                if x0 <= x < x0 + 32:
-                    sh.px(x, y0 + j, 2 if ph == 0 else 10)
+                x = int(round(15.5 + sgn * spread))
+                if 0 <= x < 32:
+                    wp[x, j] = 2 if ph == 0 else 10
                     if j < 11:
-                        sh.px(x - sgn, y0 + j, 10)
+                        wp[x - sgn, j] = 10
             if j < 10 and (j + k) % 3 == 0:
-                sh.px(x0 + 14 + (j // 2) % 3, y0 + j, 2)
-                sh.px(x0 + 17 - (j // 2) % 3, y0 + j, 10)
+                wp[14 + (j // 2) % 3, j] = 2
+                wp[17 - (j // 2) % 3, j] = 10
+        wh = wv.transpose(Image.ROTATE_90)       # narrow end west, opening toward +x
+        hp = wh.load()
+        for y in range(32):
+            for x in range(16):
+                if hp[x, y]:
+                    sh.px(48 + k * 16 + x, 224 + y, hp[x, y])
+    # rounding-ring dot, 8x8 at (64,152): yellow (arrows palette) with a dark rim
+    d.rectangle([66, 154, 69, 157], fill=4, outline=1)
+    # heading dots (bow line), 8x8 at (120,144): white diamonds with a dark rim
+    # (the no-go ticks are squares)
+    d.polygon([(123, 144), (126, 147), (123, 150), (120, 147)], fill=4, outline=1)
     # (96,224)-(127,255) spare
     for n in range(2 * BOAT_FRAMES):
         sh.obj('boat%d' % n, (n % 4) * 32, (n // 4) * 32, 32, 32)
@@ -500,12 +524,14 @@ def build_sprites():
     sh.obj('splash', 112, 160, 16, 16)
     for k in range(16):
         sh.obj('arrow%d' % k, (k % 8) * 16, 176 + (k // 8) * 16, 16, 16)
-    sh.obj('ferry', 0, 208, 32, 48)
-    sh.obj('committee', 32, 208, 32, 16)
+    sh.obj('ferry', 0, 208, 48, 32)
+    sh.obj('committee', 96, 208, 32, 16)
     sh.obj('paw0', 64, 208, 16, 16)
     sh.obj('paw1', 80, 208, 16, 16)
-    sh.obj('fwake0', 32, 224, 32, 16, 16, 0)
-    sh.obj('fwake1', 64, 224, 32, 16, 16, 0)
+    sh.obj('fwake0', 48, 224, 16, 32, 0, 16)
+    sh.obj('fwake1', 64, 224, 16, 32, 0, 16)
+    sh.obj('hdot', 120, 144, 8, 8)
+    sh.obj('rdot', 64, 152, 8, 8)
     out('sail_obj.bin', sh.tiles())
     with open(os.path.join(BUILD, 'sail_meta.inc'), 'w') as f:
         f.write(sh.meta_inc())
@@ -542,7 +568,7 @@ def wind_tiles():
 def layout_inc():
     lines = ['; generated by tools/art_sail.py: course layout',
              'CITY_Y = %d' % CITY_Y, 'FERRY_X = %d' % FERRY_X,
-             'FERRY_Y0 = %d' % FERRY_Y0, 'FERRY_Y1 = %d' % FERRY_Y1,
+             'FERRY_Y = %d' % FERRY_Y, 'FERRY_X0 = %d' % FERRY_X0, 'FERRY_X1 = %d' % FERRY_X1,
              'LINE_X = %d' % LINE_X, 'LINE_Y = %d' % LINE_Y, 'LINE_HALF = %d' % LINE_HALF,
              'START_X = %d' % START[0], 'START_Y = %d' % START[1],
              '.define MARK_XS %s' % ', '.join(str(m[0]) for m in MARKS),
@@ -592,8 +618,10 @@ def build():
     for (mx, my) in MARKS:
         full.alpha_composite(render(sh, (0, 160, 16, 16), SP_MARKS), (mx - 8, my - 8))
     fd.line([LINE_X - LINE_HALF, LINE_Y, LINE_X + LINE_HALF, LINE_Y], fill=(255, 255, 255, 255))
-    full.alpha_composite(render(sh, (0, 208, 32, 48), SP_FERRY), (FERRY_X - 16, 260))
-    full.alpha_composite(render(sh, (32, 224, 32, 16), SP_FERRY), (FERRY_X - 16, 284))
+    full.alpha_composite(render(sh, (0, 208, 48, 32), SP_FERRY), (300 - 24, FERRY_Y - 16))
+    full.alpha_composite(render(sh, (48, 224, 16, 32), SP_FERRY), (300 + 24, FERRY_Y - 16))
+    for (mx, my) in MARKS:
+        fd.ellipse([mx - 30, my - 30, mx + 30, my + 30], outline=(255, 255, 255, 255))
     full.alpha_composite(render(sh, (0, 0, 32, 32), P.ATHLETE), (START[0] - 16, START[1] - 16))
     preview(full, 'sail_full.png', 2)
     # every heading, both sail sides (west headings are mirrored frames), crew on top
