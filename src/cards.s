@@ -1311,11 +1311,11 @@ card_style_labels:
     .addr 0, 0, 0, 0, 0                                     ; subway
 card_style_labels_end:
 .assert card_style_labels_end - card_style_labels = NUM_EVENTS * STYLE_N * 2, error, "card_style_labels: STYLE_N .addr per event, nothing else"
-sty_combo:  .byte "COMBO", 0
+sty_combo:  .byte "PERFECT STEPS", 0
 sty_double: .byte "DOUBLE TIME", 0
-sty_near:   .byte "NEAR MISSES", 0
-sty_presto: .byte "PRESTO", 0
-sty_other:  .byte "OTHER", 0
+sty_near:   .byte "DODGES & CUTS", 0
+sty_presto: .byte "PRESTO TAPS", 0
+sty_other:  .byte "SLALOM", 0
 sty_tight:  .byte "TIGHT ROUNDING", 0
 sty_ctack:  .byte "CLEAN TACKS", 0
 sty_fsurf:  .byte "FERRY SURF", 0
@@ -4345,14 +4345,14 @@ card_part_need: .byte 0, 0, 0, 0, 0, 3, 0
 card_part:      .addr 0, 0, 0, 0, 0, fp5, 0
 fp5: .byte "PARKED # OF 3 ON BRUNSWICK", 0
 eb0: .byte "GET THE PACKAGE TO SPADINA", $0A, "IN TIME. PREFERABLY ALIVE.", 0
-eb1: .byte "MAKE THE 5:42 GO TRAIN.", $0A, "RED !: ", TXT_ARROW_U+32, "/", TXT_ARROW_D+32, " AS ARROW, OR A", 0
+eb1: .byte "MAKE THE 5:42 GO TRAIN.", $0A, "RED ! = SOMEONE IN THE WAY", 0
 eb2: .byte "QUEEN GATE TO DUNDAS GATE.", $0A, "DODGE DOGS, THEN PAT THEM!", 0
 eb3: .byte "THE BIKE COP SAW THAT", $0A, "TALLBOY. RUN TO SPADINA!", 0
 eb4: .byte "ROUND MARKS 1, 2 AND 3,", $0A, "THEN CROSS THE DOTTED LINE", 0
 eb5: .byte "3 SPOTS. DON'T DENT A BMW.", $0A, "NONSTOP +300: KEEP ROLLING", 0
 eb6: .byte "SURF LINE 1 TO UNION.", $0A, "GRAB A POLE, GET GERMS.", 0
 ec0: .byte "D-PAD STEER    A PEDAL", $0A, "B HOP RAILS AND POTHOLES", $0A, "TOKENS 50, WIPEOUT DROPS 2", 0
-ec1: .byte "ALTERNATE ", TXT_ARROW_L+32, " ", TXT_ARROW_R+32, " ON BIG DOTS", $0A, "SMALL DOTS = DOUBLE TIME", $0A, "DODGE +20  Y GOLD = PRESTO", 0
+ec1: .byte "ALTERNATE ", TXT_ARROW_L+32, " ", TXT_ARROW_R+32, " ON BIG DOTS", $0A, TXT_ARROW_U+32, TXT_ARROW_D+32, " WHERE THE ARROW POINTS", $0A, "NO LANE? A = EXCUSE ME", 0
 ec2: .byte "D-PAD WALK   A THROW BALL", $0A, "SAFE: B ON ! = 100 PER DOG", $0A, "RED ! 200, B MID-LEAP 400+", 0
 ec3: .byte "YELLOW CHALK: TAP A", $0A, "RED CHALK: HOLD A", $0A, "HOLD B: SIPS PAY UNSEEN", 0
 ec4: .byte "LEFT/RIGHT: TURN  A: HIKE", $0A, "YELLOW ARROW: NEXT MARK", $0A, "GREEN DIAMONDS: ON COURSE", 0
@@ -4420,7 +4420,7 @@ fn_bike:   .byte "THIRD WIPEOUT. NO DELIVERY", $0A, "PAID FOR THE RIDE ONLY", 0
 fn_bike_n: .byte "OUT OF TIME. NO DELIVERY", $0A, "SAY THE 501 SHORT-TURNED", 0
 fn_bike_q: .byte "NO DELIVERY, NO TOKENS", $0A, "PAID FOR THE RIDE ONLY", 0
 fn_bike_s: .byte "STOPPED 8 S. NO DELIVERY", $0A, "PAID FOR THE RIDE ONLY", 0
-fn_bay:    .byte "THE 5:42 LEFT WITHOUT YOU", $0A, "WALK PAID BY DISTANCE", 0
+fn_bay:    .byte "THE 5:42 LEFT WITHOUT YOU", $0A, "ON THE DOTS = FASTER WALK", 0
 fn_park:   .byte "HEARTS GONE: HALF THE DOGS", $0A, "DUNDAS PAYS THEM ALL", 0
 fn_park_q: .byte "GAVE UP: HALF THE DOGS", $0A, "DUNDAS PAYS THEM ALL", 0
 fn_park_t: .byte "NO DUNDAS: HALF THE DOGS", $0A, "DUNDAS PAYS THEM ALL", 0
