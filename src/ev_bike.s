@@ -15,12 +15,17 @@
 ;                pays 120 x the chain its TRACK HOP set (never raises it),
 ;                and is good for one ride: the next needs another kind of
 ;                trick first (CLOSE CALL, POTHOLE HOP, DRAFT): no zig-zag farm
-; Mix them inside 2.5 s of each other and they chain, x2 .. x8. Cross a rail
-; on the ground and the groove grabs your wheel: RAIL WOBBLE, a quarter of
-; your speed and the chain. Sit in one line too long and Queen St comes for
-; you: a fresh pothole in your lane, or the 501 up the tracks behind you.
-; Everyone crosses the streetcar tracks that cut across Queen (XING_AT): the
-; first is ~7 s in, with HOP THE RAILS: B! until you've scored a TRACK HOP.
+; Mix different ones inside 2.5 s of each other and they chain, x2 .. x8
+; (the same one again pays at the chain but doesn't keep it going). Cross a
+; rail on the ground and the groove grabs your wheel: RAIL WOBBLE, a quarter
+; of your speed and the chain; a rail along Queen is safe if you steer over
+; it hard. Sit in one line too long and Queen St comes for you: a fresh
+; pothole in your lane, or the 501 up the tracks behind you.
+; Everyone crosses the streetcar tracks that cut across Queen (XING_AT), the
+; first ~7 s in. Orders come when a human can act on them: HOP THE RAILS: B!
+; and POTHOLE! HOP IT: B ~32 frames out (B in the next ~28 frames clears
+; it), 501 BEHIND! STEER > beside you while you're in its way, and the car
+; in the bike lane says which way round.
 ; A wipeout drops 2 of your TTC tokens (no points fee on the card).
 .p816
 .smart -
@@ -48,13 +53,16 @@ HOP_T       = 20            ; frames in the air
 HOP_CD      = 10            ; frames on the ground before the next hop
 HOP_GAP     = 240           ; road between two scoring track hops
 WOB_T       = 24
+LAND_T      = 10            ; rails crossed this soon after a hop lands still count as hopped
+SHARP_VX    = $0100         ; steering over a rail along Queen at least this fast: no wobble
 BIKE_LANE   = 186           ; start / respawn here (clear of the 501 and the doors)
 INV_GETUP   = 120           ; blink frames after getting back on
 DROP_TOK    = 2             ; tokens a wipeout drops
-XING_HINT   = 340           ; HOP THE RAILS: B! this far before a crossing
+XING_HINT   = 340           ; the tracks across Queen are spawned this far ahead
 CHAIN_WIN   = 150           ; 2.5 s to land the next style move
 CHAIN_MAX   = 8
-STYLE_CAP   = 50000
+STYLE_CAP   = 50000         ; (out of reach: keeps RIDE + TOKENS+STYLE in 16 bits)
+DELIVERY_FEE = 1500         ; RIDE on delivery: this + 20 a whole second left
 CAMP_T      = 300           ; 5 s in one line...
 CAMP_T_BL   = 420           ; (7 s in the bike lane, where a careful courier rides)
 CAMP_BAND   = 12            ; ...means within this many px
@@ -62,6 +70,7 @@ CAMP_GRACE  = 30*60         ; and nobody is punished in the first 30 s
 STILL_T     = 480           ; 8 s stopped: FIRED
 DRAFT_TICK  = 36            ; frames of slipstream per DRAFT move
 POP_ROW     = 16            ; crash messages: just over the rider
+TOP_ROW     = 5             ; HOP orders: rows 5-7, under the demo's banner (row 4)
 
 ST_RIDE   = 0
 ST_CRASH  = 1
@@ -110,10 +119,8 @@ b_finish = ev_ram + 36
 b_banner = ev_ram + 38
 b_hopcd  = ev_ram + 42      ; frames until the next hop is allowed
 b_hopsc  = ev_ram + 44      ; 1 = this hop already scored a rail
-b_prow   = ev_ram + 46      ; 1 = a crash message is up on POP_ROW
 b_fired  = ev_ram + 48      ; 1 = stood still too long: YOU'RE FIRED! (ev_fail 4)
 b_stroke = ev_ram + 50      ; frames left in the last pedal stroke (a tap of A)
-b_pmid   = ev_ram + 52      ; 1 = a panel is up on rows 8-11
 b_wobn   = ev_ram + 54      ; RAIL WOBBLE panels shown (the hint goes after 2)
 b_hopok  = ev_ram + 56      ; 1 = this hop's first rail scored a TRACK HOP
 b_tracks = ev_ram + 58      ; 1 = scored a TRACK HOP (no more rail hints)
@@ -148,6 +155,15 @@ b_pbuf   = ev_ram + 432     ; popup text built here (24 bytes)
 b_line2  = ev_ram + 466     ; a popup's second line (this bank), 0 = none
 b_l2pal  = ev_ram + 468     ; ...and its palette
 b_xok    = ev_ram + 470     ; 1 = a TTC TRANSFER pays (set by the other tricks)
+b_ntim   = ev_ram + 472     ; frames left on the rider slot's panel (pop_near)
+b_land   = ev_ram + 474     ; frames since a hop landed, counting down from LAND_T
+b_pmrow  = ev_ram + 476     ; (byte) the callout panel's top row
+b_pmh    = ev_ram + 477     ; (byte) ...its height in rows, 0 = none up
+b_pnh    = ev_ram + 478     ; (byte) the rider panel's height in rows, 0 = none
+b_warn   = ev_ram + 479     ; (byte) 1 = the rider panel is the 501 warning
+b_xhint  = ev_ram + 480     ; (byte) 1 = the callout panel is a HOP order
+b_rkind  = ev_ram + 481     ; (byte) rail_cross: 0 a rail along Queen, 1 tracks across
+b_pnrow  = ev_ram + 482     ; (byte) the rider panel's top row
 
 ; entities: one word per entity per field, X = index * 2
 NUM_ENT = 16
@@ -355,9 +371,16 @@ bike_update:
     beq @noshake
     dec b_shake
 @noshake:
+    lda b_land
+    beq @noland
+    dec b_land
+@noland:
     lda b_hop
     beq @nohop
     dec b_hop
+    bne @nohop
+    lda #LAND_T                 ; just landed: the rails' grace starts
+    sta b_land
 @nohop:
     lda b_hopcd
     beq @nohopcd
@@ -378,9 +401,17 @@ bike_update:
     dec b_popup
     bne @nopop
     A8
-    jsr pop_clear
+    jsr pop_clear_m
     A16
 @nopop:
+    lda b_ntim
+    beq @nonear
+    dec b_ntim
+    bne @nonear
+    A8
+    jsr pop_clear_n
+    A16
+@nonear:
     ; delivered?
     lda b_state
     and #$00FF
@@ -725,6 +756,7 @@ move_x:
     rol a
     cmp tmp0+1
     beq @next
+    stz b_rkind
     jsr rail_cross
 @next:
     iny
@@ -732,14 +764,23 @@ move_x:
     bne @rail
     rts
 
-; crossed a rail (or the tracks across the road). In the air (a hop): the
-; first rail is a TRACK HOP (HOP_GAP of road between scoring ones), and a
-; second rail in the same hop, after one that scored, is a TTC TRANSFER. On
-; the ground the groove grabs the front wheel: RAIL WOBBLE (a quarter of
-; your speed and the chain). Keeps Y.
+; crossed a rail (b_rkind: 0 one along Queen, 1 the tracks across it). In
+; the air (a hop, or LAND_T frames after one lands with nothing crossed
+; yet: a human's B a beat early still counts): the first rail is a TRACK
+; HOP (HOP_GAP of road between scoring ones), and a second rail in the same
+; hop, after one that scored, is a TTC TRANSFER. On the ground the groove
+; grabs the front wheel: RAIL WOBBLE (a quarter of your speed and the
+; chain), unless it's a rail along Queen and you're steering over it hard
+; (at an angle the wheel jumps the groove; creep over it and it doesn't).
+; Keeps Y.
 rail_cross:
     lda b_hop
+    bne @air
+    lda b_land
     beq @ground
+    lda b_hopsc
+    bne @ground
+@air:
     lda b_hopsc
     cmp #2
     jcs @x
@@ -775,6 +816,18 @@ rail_cross:
     ply
     rts
 @ground:
+    lda b_rkind
+    bne @wobble8
+    A16
+    lda b_vx
+    bpl @vp
+    eor #$FFFF
+    inc a
+@vp:
+    cmp #SHARP_VX
+    A8
+    bcs @x
+@wobble8:
     A16
 @wobble:
     .a16
@@ -800,10 +853,18 @@ rail_cross:
     cmp #2
     bcs @quiet
     inc b_wobn
+    ldx #.loword(str_wob_x)
+    lda b_rkind
+    bne @l2
+    ldx #.loword(str_wob_l)
+@l2:
+    stx b_line2
+    lda #TP_WHITE
+    sta b_l2pal
     LDPTR0 str_wobble
     lda #TP_ORANGE
     jsr pop_mid
-    ldx #50
+    ldx #70
     stx b_popup
 @quiet:
     ply
@@ -876,7 +937,9 @@ lines: .byte 40, 66, 95, 117, 140, 163, BIKE_LANE
 lines_end:
 .a8
 
-str_wobble: .byte "RAIL WOBBLE! HOP RAILS: B", 0
+str_wobble: .byte "RAIL WOBBLE!", 0
+str_wob_l:  .byte "STEER HARD OVER RAILS", 0
+str_wob_x:  .byte "HOP THE RAILS: B", 0
 
 rails:
     .byte 83, 107, 151, 175
@@ -890,7 +953,7 @@ crash:
     cmp #ST_RIDE
     jne @no
     ldx b_inv
-    bne @no
+    jne @no
     lda #ST_CRASH
     sta b_state
     ldx #80
@@ -938,9 +1001,11 @@ crash:
     A8
     lda #^crash_msgs
     sta ptr0+2
+    jsr pop_clear_m             ; (a HOP order or callout is moot now)
+    lda #TP_YELLOW
     jsr pop_near
     ldx #80
-    stx b_popup
+    stx b_ntim
     ply
     plx
     rts
@@ -952,51 +1017,88 @@ crash:
 
 ; ------------------------------------------------------------------
 ; popups, each on a padded navy panel (as Tallboy's and Parking's) so it
-; reads over the traffic. pop_mid: ptr0 = text, A = palette, centred on
-; row 9 (panel rows 8-10). pop_near: ptr0 = text, yellow, on POP_ROW right
-; over the rider (panel POP_ROW-1 .. +1), so a wipeout's SPLAT! lands where
-; the crash is. Either takes a second line from b_line2 (a string in this
-; bank, palette b_l2pal; the panel grows a row) and clears b_line2.
-; pop_clear: whichever is up.
+; reads over the traffic. Two slots, each with its own timer:
+;  the callout slot (b_popup frames): pop_mid centres it on rows 8.. (style
+;   callouts, wobbles, the car in the bike lane); pop_top on rows 5.. (what
+;   to press for the rails or a pothole in your line: above the thing, so
+;   the panel never hides it as it comes at you);
+;  the rider slot (b_ntim frames): pop_near, right over the rider on POP_ROW
+;   (a wipeout's SPLAT! lands where the crash is; the 501 coming up behind).
+; ptr0 = text, A = palette. Either takes a second line from b_line2 (a
+; string in this bank, palette b_l2pal: the panel grows two rows, a blank
+; one between the lines for leading) and clears b_line2.
 pop_mid:
     pha
-    jsr pop_clear
+    lda #8
+    bra pop_m
+pop_top:
+    pha
+    lda #TOP_ROW
+pop_m:
+    pha
+    jsr pop_clear_m
+    pla
+    sta b_pmrow
+    stz b_xhint                 ; (a new callout replaces a rails / pothole order)
     jsr pop_size                ; tmp1 = panel w x h, tmp6 = widest line
+    lda tmp1+1
+    sta b_pmh
     lda #32
     sec
     sbc tmp1
     lsr a
+    sta tmp7
+    lda b_pmrow
+    jsr row32
     A16
-    and #$00FF
+    txa
     clc
-    adc #(8*32)
+    adc tmp7
+    and #$03FF
     tax
     A8
     lda #$20
     jsl txt_box
     lda #TXT_WIN
     sta txt_bg
+    lda b_pmrow
+    inc a
+    jsr row32
     pla
     asl a
     asl a
     ora #$20
-    ldx #(9*32)
     jsl txt_print_centre
     ldx b_line2
     beq @one
+    lda b_pmrow
+    clc
+    adc #3
+    jsr row32
     jsr line2_ptr
-    ldx #(10*32)
     jsl txt_print_centre
 @one:
     stz txt_bg
     ldx #$0000
     stx b_line2
-    lda #$01
-    sta b_pmid
     rts
 
-; tmp1 = panel width (widest line + 4) x height (3, or 4 with a second
-; line), tmp6 = the widest line's length. ptr0 = line 1. Keeps ptr0.
+; X = A * 32 (A8)
+row32:
+    A16
+    and #$00FF
+    asl a
+    asl a
+    asl a
+    asl a
+    asl a
+    tax
+    A8
+    rts
+
+; tmp1 = panel width (widest line + 4) x height (3, or 5 with a second
+; line and the blank row between), tmp6 = the widest line's length. ptr0 =
+; line 1. Keeps ptr0.
 pop_size:
     jsr ptr0_len
     sty tmp6
@@ -1004,7 +1106,8 @@ pop_size:
     sta tmp1+1
     ldx b_line2
     beq @w
-    inc tmp1+1
+    lda #5
+    sta tmp1+1
     ldy #$0000
 @l:
     lda a:$0000,x
@@ -1024,7 +1127,7 @@ pop_size:
     sta tmp1
     rts
 
-; ptr0 = b_line2 (this bank), A = its text attribute
+; ptr0 = b_line2 (this bank), A = its text attribute. Keeps X.
 line2_ptr:
     A16
     lda b_line2
@@ -1050,9 +1153,30 @@ ptr0_len:
 @x:
     rts
 
-pop_near:
-    jsr pop_clear
+; pop_side: the rider slot, but at the left edge, level with the rider
+; (rows WARN_ROW-1 ..): the 501 warning, beside them and not over the road
+; ahead (the rider it's for is right of x 140, the panel left of 136)
+WARN_ROW = 20
+pop_side:
+    pha
+    jsr pop_clear_n
     jsr pop_size
+    lda tmp1+1
+    sta b_pnh
+    lda #(WARN_ROW-1)
+    sta b_pnrow
+    lda #4
+    sta tmp7
+    bra pop_n
+
+pop_near:
+    pha
+    jsr pop_clear_n
+    jsr pop_size
+    lda tmp1+1
+    sta b_pnh
+    lda #(POP_ROW-1)
+    sta b_pnrow
     ; panel column: rider column - width/2, kept on screen (text column
     ; 2 .. 30-widest)
     lda b_px+1
@@ -1081,32 +1205,40 @@ pop_near:
     bcs @c3
     sta tmp7
 @c3:
+pop_n:
+    lda b_pnrow
+    jsr row32
     A16
-    lda tmp7
-    and #$00FF
+    txa
     clc
-    adc #((POP_ROW-1)*32 - 2)
+    adc tmp7
+    dec a
+    dec a
+    and #$03FF
     tax
     A8
     lda #$20
     jsl txt_box
     lda #TXT_WIN
     sta txt_bg
-    lda #POP_ROW
+    lda b_pnrow
+    inc a
     sta tmp6+1
-    lda #($20 | (TP_YELLOW << 2))
+    pla
+    asl a
+    asl a
+    ora #$20
     jsr @line
     ldx b_line2
     beq @one
     jsr line2_ptr
+    inc tmp6+1
     inc tmp6+1
     jsr @line
 @one:
     stz txt_bg
     ldx #$0000
     stx b_line2
-    lda #$01
-    sta b_prow
     rts
 ; ptr0 centred in the panel on row tmp6+1, attribute A
 @line:
@@ -1121,49 +1253,44 @@ pop_near:
     adc tmp7
     sta tmp2
     lda tmp6+1
+    jsr row32
     A16
-    and #$00FF
-    asl a
-    asl a
-    asl a
-    asl a
-    asl a
-    sta tmp3
-    lda tmp2
-    and #$00FF
+    txa
     clc
-    adc tmp3
+    adc tmp2
+    and #$03FF
     tax
     A8
     pla
     jsl txt_print
     rts
 
+; clear the callout slot / the rider slot (whatever rows they took)
 pop_clear:
-    lda b_pmid
-    beq @near
-    stz b_pmid
-    ldx #(8*32)
-    A16
-    lda #$0420
+    jsr pop_clear_m
+pop_clear_n:
+    lda b_pnh
+    beq pc_x
+    sta tmp1+1
+    stz b_pnh
+    stz b_warn
+    lda b_pnrow
+    bra pc_fill
+pop_clear_m:
+    lda b_pmh
+    beq pc_x
+    sta tmp1+1
+    stz b_pmh
+    stz b_xhint
+    lda b_pmrow
+pc_fill:
+    jsr row32
+    lda #$20
     sta tmp1
-    A8
     stz tmp2
     lda #$20
     jsl txt_fill
-@near:
-    lda b_prow
-    beq @x
-    stz b_prow
-    ldx #((POP_ROW-1)*32)
-    A16
-    lda #$0420
-    sta tmp1
-    A8
-    stz tmp2
-    lda #$20
-    jsl txt_fill
-@x:
+pc_x:
     rts
 
 crash_msgs: .addr cm0, cm1, cm2, cm3, cm4, cm5, cm6, cm7, cm8, cm9
@@ -1183,8 +1310,9 @@ str_drop1: .byte "DROPPED 1 TOKEN", 0
 
 ; ------------------------------------------------------------------
 ; style_award: A = SM_ move. A different move inside CHAIN_WIN frames
-; raises the chain (x2..x8), the same move again just keeps it alive;
-; points = base * chain. Banner "TRACK HOP! X3 +45".
+; raises the chain (x2..x8) and restarts its clock; the same move again
+; pays at the chain but leaves the clock running (one trick repeated
+; doesn't hold a chain up); points = base * chain. Banner "TRACK HOP! X3 +45".
 style_award:
     sta b_kind
     cmp #SM_HOP                 ; any trick but a hop re-arms the TRANSFER
@@ -1201,9 +1329,9 @@ style_award:
     beq @xf                     ; HOP: it keeps that chain, never raises it
     lda b_chaint
     beq @first
-    lda b_kind                  ; the same move again keeps the chain going;
-    cmp b_lastk                 ; a different one raises it
-    beq @keep
+    lda b_kind                  ; the same move again pays at the chain but
+    cmp b_lastk                 ; doesn't keep it going (the clock runs on: a
+    beq @same                   ; different one raises it and restarts it)
     lda b_chain
     cmp #CHAIN_MAX
     bcs @keep
@@ -1219,6 +1347,7 @@ style_award:
 @xf:
     lda #CHAIN_WIN
     sta b_chaint
+@same:
     ; points = base * chain
     lda b_kind
     and #$00FF
@@ -1355,7 +1484,7 @@ smn1: .byte "CLOSE CALL!", 0
 smn2: .byte "DRAFTING THE 501", 0
 smn3: .byte "POTHOLE HOP!", 0
 smn4: .byte "TTC TRANSFER!", 0
-str_coach: .byte "NEW TRICK IN 2 S: X2", 0
+str_coach: .byte "ANOTHER TRICK IN 2 S = X2", 0
 
 ; ------------------------------------------------------------------
 bike_draw:
@@ -1849,7 +1978,7 @@ str_start:  .byte "QUEEN", 0
 str_end:    .byte "SPADINA", 0
 
 ; ------------------------------------------------------------------
-; Delivered:  RIDE         1000 + distance/16 (562) + 20 a whole second left
+; Delivered:  RIDE         DELIVERY_FEE (1500) + 20 a whole second left
 ;              TOKENS+STYLE 50 a TTC token + STYLE
 ;              no penalty: a wipeout costs a heart, time, the chain and the
 ;              DROP_TOK tokens it dropped (on screen as it happens)
@@ -1857,7 +1986,7 @@ str_end:    .byte "SPADINA", 0
 ; delivery fee, no tips. RIDE = distance/24 (1 per 4 metres, up to 375) is
 ; the score; TIPS & STYLE still goes in ev_break+2 and the card shows it in
 ; grey as FORFEIT (card_forfeit), so a first-timer who wipes out sees what
-; their tokens and hops would have paid. A delivery (>= 1562) always beats
+; their tokens and hops would have paid. A delivery (>= 1500) always beats
 ; a failed run.
 ; ev_break = base, bonus, penalty; ev_score = base + bonus - penalty.
 ; Stats: METRES (distance / 6), TOKENS, WIPEOUTS, STYLE.
@@ -1906,8 +2035,8 @@ bike_score:
     bcs @delivered
     jmp @dnf
 @delivered:
-    ; RIDE = 1000 + distance/16 + 20 a whole second left (the HUD's number,
-    ; so the card's "1562+20/S" adds up)
+    ; RIDE = 1500 + 20 a whole second left (the HUD's number, so the card's
+    ; "1500+20/S" adds up)
     lda b_time
     sta tmp0
     A8
@@ -1922,16 +2051,8 @@ bike_score:
     asl a                       ; x16
     clc
     adc tmp0
-    sta tmp0                    ; x20
-    lda tmp3
-    lsr a
-    lsr a
-    lsr a
-    lsr a
-    clc
-    adc tmp0
-    clc
-    adc #1000
+    clc                         ; x20
+    adc #DELIVERY_FEE
     sta ev_break
     clc
     adc ev_break+2

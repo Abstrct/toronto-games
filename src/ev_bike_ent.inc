@@ -1152,12 +1152,15 @@ ents_update:
 
 STOP_SEEN = 230                 ; rel: just before it comes on screen
 str_stopped: .byte "CAR IN BIKE LANE. AGAIN.", 0
+str_stopped2: .byte "STEER ", TXT_ARROW_L + $20, " ROUND IT", 0
 
 ; per-type behaviour (X = entity, tmp0 = rel)
 ent_logic:
     lda E_TYPE,x
     cmp #T_XING
     jeq xing_logic
+    cmp #T_POTHOLE
+    jeq hole_logic
     cmp #T_PARKED
     jne @tram
     lda E_X+1,x
@@ -1175,10 +1178,10 @@ ent_logic:
     lda b_state
     jne @x
     lda b_popup+1               ; a style or crash callout keeps the panel
-    bne @x                      ; (it says so as soon as that one goes)
+    jne @x                      ; (it says so as soon as that one goes)
     lda b_popup
     cmp #20
-    bcs @x
+    jcs @x
     lda E_FLAGS,x
     ora #$40
     sta E_FLAGS,x
@@ -1186,10 +1189,14 @@ ent_logic:
     lda tmp0
     pha
     A8
+    ldx #.loword(str_stopped2)
+    stx b_line2
+    lda #TP_WHITE
+    sta b_l2pal
     LDPTR0 str_stopped
     lda #TP_ORANGE
     jsr pop_mid
-    ldx #40                     ; gone before the car reaches the panel's rows
+    ldx #36                     ; gone before the car reaches the panel's rows
     stx b_popup
     A16
     pla
@@ -1239,50 +1246,78 @@ ent_logic:
     bne @x
     jsr tram_follow
     jsr tram_draft
-    ; bell + sign only while it is behind us AND catching up
+    ; behind us and catching up: the bell and the sign (rel -160 .. -70),
+    ; and over the rider, if they're in its way, 501 BEHIND YOU! (till
+    ; it's on them)
     lda tmp0+1
-    bpl @x
+    bpl @nothreat
     A16
-    lda tmp0
-    cmp #($10000 - 70)
-    bcs @x16b
-    cmp #($10000 - 160)
-    bcc @x16b
     lda E_VY,x
     cmp b_speed
-    bcc @x16b
-    beq @x16b
+    bcc @nothreat16
+    beq @nothreat16
+    lda tmp0
+    cmp #($10000 - 40)
+    bcs @nothreat16
+    cmp #($10000 - 200)
+    bcc @nothreat16
+    cmp #($10000 - 70)
+    bcs @nobell
+    cmp #($10000 - 160)
+    bcc @nobell
     A8
     lda #$01
     sta b_bell
-    rts
-@x16b:
+@nobell:
     A8
-    rts
+    jmp tram_warn
+@nothreat16:
+    A8
+@nothreat:
+    jmp tram_safe
 
-; the tracks across the road (X = it, tmp0 = rel): until you've scored a
-; TRACK HOP, HOP THE RAILS: B! as they come up; then crossing them is a
-; rail crossing like any other (TRACK HOP in the air, RAIL WOBBLE if not)
+; How far ahead (px) something is XHINT_F frames off at the speed we're
+; doing (at least XHINT_MIN): when a HOP order goes up, so that a human who
+; reads it and presses B 20-25 frames later is in the air over it (a hop is
+; 19 frames up, and rails crossed LAND_T frames after landing still count).
+; A16 in and out. Keeps X, Y.
+XHINT_F   = 32
+XHINT_MIN = 24
+.assert XHINT_F = 32, error, "hint_px multiplies by 32"
+hint_px:
+    .a16
+    lda b_speed
+    asl a
+    asl a
+    asl a
+    asl a
+    asl a
+    xba
+    and #$00FF
+    cmp #XHINT_MIN
+    bcs @x
+    lda #XHINT_MIN
+@x:
+    rts
+    .a8
+
+; the tracks across the road (X = it, tmp0 = rel): HOP THE RAILS: B! goes
+; up on rows 5-7 when they're XHINT_F frames off (on screen, below the
+; panel) and stays till you're over them; then crossing them is a rail
+; crossing like any other (TRACK HOP in the air, RAIL WOBBLE if not)
 str_xhint: .byte "HOP THE RAILS: B!", 0
 xing_logic:
     lda b_state
     jne @x
-    lda b_tracks
-    bne @cross
     lda E_FLAGS,x
     and #$40
     bne @cross
     A16
     lda tmp0
     bmi @cross16
-    cmp #XING_HINT
-    bcs @cross16
-    cmp #200                    ; late: it goes up over anything
-    bcc @hint
-    lda b_popup                 ; else a callout finishes first
-    cmp #20
-    bcs @cross16
-@hint:
+    jsr hint_px
+    cmp tmp0
+    bcc @cross16
     A8
     lda E_FLAGS,x
     ora #$40
@@ -1293,8 +1328,10 @@ xing_logic:
     A8
     LDPTR0 str_xhint
     lda #TP_ORANGE
-    jsr pop_mid
-    ldx #50
+    jsr pop_top
+    lda #$01
+    sta b_xhint
+    ldx #120
     stx b_popup
     A16
     pla
@@ -1315,6 +1352,14 @@ xing_logic:
     pha
     A8
     phy
+    lda b_xhint                 ; the order's done: off it goes
+    beq @nh
+    jsr pop_clear_m
+    ldx #$0000
+    stx b_popup
+@nh:
+    lda #$01
+    sta b_rkind
     jsr rail_cross
     ply
     A16
@@ -1325,6 +1370,130 @@ xing_logic:
     rts
 @x16:
     A8
+@x:
+    rts
+
+; a pothole in your line, coming up at hop speed: POTHOLE! HOP IT: B on
+; rows 5-7 when it's XHINT_F frames off (not if you only steer into its
+; line with half that left: too late to read). X = it, tmp0 = rel.
+str_hhint: .byte "POTHOLE! HOP IT: B", 0
+hole_logic:
+    lda b_state
+    bne @x
+    lda E_FLAGS,x
+    and #$44                    ; (said so, or already hit)
+    bne @x
+    lda E_X+1,x
+    sec
+    sbc b_px+1
+    bcs @dp
+    eor #$FF
+    inc a
+@dp:
+    cmp #13
+    bcs @x
+    A16
+    lda b_speed
+    cmp #HOP_SPD
+    bcc @x16
+    lda tmp0
+    sec
+    sbc #14                     ; frames to the first touch, in px
+    bmi @x16
+    sta tmp1
+    jsr hint_px
+    cmp tmp1
+    bcc @x16                    ; not yet
+    lsr a
+    cmp tmp1
+    bcs @x16                    ; too late to be any use
+    A8
+    lda E_FLAGS,x
+    ora #$40
+    sta E_FLAGS,x
+    A16
+    lda tmp0
+    pha
+    A8
+    LDPTR0 str_hhint
+    lda #TP_ORANGE
+    jsr pop_top
+    lda #$01
+    sta b_xhint
+    ldx #44
+    stx b_popup
+    A16
+    pla
+    sta tmp0
+    A8
+    ldx b_cur
+    rts
+@x16:
+    A8
+@x:
+    rts
+
+; The 501 is behind and catching up (X = it, tmp0 = rel): if the rider is
+; in its way (within 22 px of its middle: the bike lane isn't), 501 BEHIND
+; YOU! over the rider in red, with the way out, kept up while they're in
+; its way. tram_safe: not a threat (any more): the warning goes. Keeps X.
+TRAM_X = 164
+str_501:  .byte "501 BEHIND!", 0
+str_501r: .byte "STEER ", TXT_ARROW_R + $20, 0
+str_501l: .byte "STEER ", TXT_ARROW_L + $20, 0
+tram_warn:
+    lda b_state
+    bne tram_safe
+    lda b_px+1
+    sec
+    sbc #TRAM_X
+    bcs @dp
+    eor #$FF
+    inc a
+@dp:
+    cmp #22
+    bcs tram_safe
+    lda b_warn
+    bne @keep
+    lda b_pnh                   ; a crash line is up: it can wait
+    bne @x
+    A16
+    lda tmp0
+    pha
+    A8
+    ldy #.loword(str_501r)
+    lda b_px+1
+    cmp #TRAM_X
+    bcs @r
+    ldy #.loword(str_501l)
+@r:
+    sty b_line2
+    lda #TP_WHITE
+    sta b_l2pal
+    LDPTR0 str_501
+    lda #TP_RED
+    jsr pop_side
+    lda #$01
+    sta b_warn
+    SFX SFX_BELL
+    A16
+    pla
+    sta tmp0
+    A8
+    ldx b_cur
+@keep:
+    ldy #20
+    sty b_ntim
+@x:
+    rts
+tram_safe:
+    lda b_warn
+    beq @x
+    ldy b_ntim
+    cpy #8
+    bcc @x
+    ldy #8
+    sty b_ntim
 @x:
     rts
 
@@ -1612,7 +1781,13 @@ ent_collide:
     ldx b_cur
     rts
 @ground:
+    ; (landed a hop just short of it: the wheel's light, it only bumps)
     A16
+    lda b_land
+    beq @hard
+    lda b_speed
+    bra @bump
+@hard:
     lda b_speed
     cmp #$0180
     bcc @bump
