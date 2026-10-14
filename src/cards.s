@@ -544,7 +544,7 @@ score_card:
     asl a
     tax
     lda f:card_stat_labels,x
-    beq @nostat
+    jeq @nostat
     sta ptr0
     A8
     lda #^card_stat_labels
@@ -560,9 +560,40 @@ score_card:
     lda ev_stat,y
     sta tmp1
     A8
+    lda event_idx               ; "2 OF 6": a count out of ev_stat 3 (card_stat_of)
+    asl a
+    asl a
+    clc
+    adc c_si
+    TAXB
+    A8
+    lda f:card_stat_of,x
+    bne @of
     lda #COL_V
     jsr cy_cell
     ldy #5
+    lda #($20 | (TP_CYAN << 2))
+    jsl txt_num
+    jsr next_row
+    jmp @nostat
+@of:
+    lda #(COL_V - 4)
+    jsr cy_cell
+    ldy #3
+    lda #($20 | (TP_CYAN << 2))
+    jsl txt_num
+    LDPTR0 str_of3
+    lda #(COL_V - 1)
+    jsr cy_cell
+    lda #($20 | (TP_WHITE << 2))
+    jsl txt_print
+    A16
+    lda ev_stat+6
+    sta tmp1
+    A8
+    lda #(COL_V + 3)
+    jsr cy_cell
+    ldy #2
     lda #($20 | (TP_CYAN << 2))
     jsl txt_num
     jsr next_row
@@ -1214,7 +1245,7 @@ card_stat_pick:
     .byte 0, 2                  ; cops: SIP 'N' HOPS, HURDLES
     .byte 0, 2                  ; sail: TIME LEFT, BUMPS
     .byte 0, 2                  ; parking: SPOTS PARKED, TICKETS
-    .byte 1, 0                  ; subway: STATIONS, GERMS
+    .byte 2, 0                  ; subway: GOLD SURFS (OF n), GERMS
 ; the same for a failed run (ev_fail 1-4): only stats that still count
 card_stat_pick_fail:
     .byte 0, 2                  ; bike: METRES, WIPEOUTS (tokens and style are forfeit)
@@ -1223,7 +1254,7 @@ card_stat_pick_fail:
     .byte 0, 2                  ; cops: SIP 'N' HOPS, HURDLES
     .byte 1, 2                  ; sail: MARKS ROUNDED, BUMPS
     .byte 0, 2                  ; parking: SPOTS PARKED, TICKETS
-    .byte 1, 0                  ; subway: STATIONS, GERMS
+    .byte 1, 0                  ; subway: LEGS LEANED (OF n), GERMS
 
 ; the stat that stays when the card has room for only one: 0 = the first
 ; pick, 1 = the second, for a finish then a failed run. Keep the one the sum
@@ -1238,6 +1269,21 @@ card_stat_keep:
     .byte 0, 0                  ; subway
 card_stat_keep_end:
 .assert card_stat_keep_end - card_stat_keep = NUM_EVENTS * 2, error, "card_stat_keep: two bytes per event"
+
+; card_stat_of: 4 bytes per event, by ev_stat index; 1 = print the stat as
+; "N OF M" with M = ev_stat 3 (TTC: legs leaned / gold surfs out of the
+; stops reached), so a count never reads like a fault tally
+card_stat_of:
+    .byte 0, 0, 0, 0            ; bike
+    .byte 0, 0, 0, 0            ; bay
+    .byte 0, 0, 0, 0            ; park
+    .byte 0, 0, 0, 0            ; cops
+    .byte 0, 0, 0, 0            ; sail
+    .byte 0, 0, 0, 0            ; parking
+    .byte 0, 1, 1, 0            ; subway: LEGS LEANED, GOLD SURFS
+card_stat_of_end:
+.assert card_stat_of_end - card_stat_of = NUM_EVENTS * 4, error, "card_stat_of: four bytes per event"
+str_of3: .byte " OF", 0
 
 ; ITEMISED STYLE. An event may say where its + STYLE came from, as up to
 ; STYLE_N sources: ev_style (vars.s) is STYLE_N words of points, slot n
@@ -4447,17 +4493,17 @@ card_stat_labels:
     .addr sl_sipnhop, sl_lucky, sl_hurdles, sl_spill
     .addr sl_time, sl_buoys, sl_bump, sl_style
     .addr sl_parked, sl_kisses, sl_tickets, sl_towed
-    .addr sl_germs, sl_stations, sl_chain, sl_style
+    .addr sl_germs, sl_stations, sl_golds, sl_stations
 sl_parked:   .byte "SPOTS PARKED", 0
 sl_kisses:   .byte "CURB KISSES", 0
 sl_tickets:  .byte "TICKETS", 0
 sl_towed:    .byte "TOWED", 0
 sl_germs:    .byte "GERMS", 0
 sl_stations: .byte "LEGS LEANED", 0
+sl_golds:    .byte "GOLD SURFS", 0
 sl_streak:   .byte "BEST STREAK", 0
 sl_metres: .byte "METRES", 0
 sl_sipnhop: .byte "SIP 'N' HOPS", 0
-sl_chain:  .byte "SURF CHAIN", 0
 sl_tokens: .byte "TOKENS (50 EACH)", 0
 sl_style:  .byte "STYLE", 0
 sl_pat:    .byte "DODGE 'N' PAT", 0
