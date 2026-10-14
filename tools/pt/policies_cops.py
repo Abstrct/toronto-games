@@ -23,6 +23,15 @@ the event's physics (src/ev_cops.s):
               the hand's latency on top.
   cops_pro    the expert: cops_eyes with perfect anticipation, cutting it
               fine with the cop and the BUZZ budget
+  cops_noob   an honest first-timer: +-5 frames off the chalk, freezes on one
+              hurdle in four, sips without minding the BUZZ (run it through
+              `pt curve -p cops_noob -l 15,24`: it should outlast the 30 s
+              warm-up and bank a few hundred points when it's busted)
+
+Taking off ON THE CHALK (-12..+6 px of the mark) triples that hop's SIP 'N'
+HOP, so the curve's top end is anticipation: at 0 frames cops_eyes is on the
+chalk every time, by ~9 frames of hand latency it hardly ever is. A late hand
+that runs into a hurdle stops against it and its A scrambles over (no spill).
 
 The no-skill exploit detectors (idle, hold_a, hold_b, mash_a) come from
 policies.py; `hold_b_mash_a` (sip + bunny-hop forever) and `tap_a` (a short
@@ -38,7 +47,7 @@ COP_SEEN = 110
 GAP_MAX = 176
 OB_HW = [0, 10, 10, 8, 8]
 OB_H = [0, 12, 10, 30, 9]
-MK_D = [0, 60, 62, 82, 85]      # chalk take-off marks (src/ev_cops.s mk_d)
+MK_D = [0, 54, 56, 76, 79]      # chalk take-off marks (src/ev_cops.s mk_d)
 PLAYER_SX = 104
 T_BIN, T_COON = 3, 4
 ST_RUN = 0
@@ -365,6 +374,8 @@ class cops_eyes(Policy):
     ground_buzz = 7             # HUD buzz meter (16 steps) at or below this: room for a ground gulp
     air_buzz = 13               # ...for a sip over a hurdle
     careless = 0.1
+    miss = 0.0                  # chance to freeze on a hurdle and not jump at all
+    sips = True
 
     def __init__(self):
         self.g = None
@@ -416,10 +427,12 @@ class cops_eyes(Policy):
             if to_mark <= self.err[e['i']] * closing:
                 del self.err[e['i']]
                 self.done[e['i']] = e['wx']
+                if rng.random() < self.miss:
+                    return m        # froze: runs straight into it
                 hold = self.HOLD if e['t'] == T_BIN else self.TAP
                 self.a_until = t + hold + rng.randint(-2, 2)
                 m |= A
-                if q <= self.air_q and not cop_on_screen and s.buzz >> 4 <= self.air_buzz:
+                if self.sips and q <= self.air_q and not cop_on_screen and s.buzz >> 4 <= self.air_buzz:
                     # let go of both together for a big jump, well after A for a hop: two
                     # releases a frame or two apart can land in either order on a late hand
                     self.b_until = self.a_until if e['t'] == T_BIN else t + self.GULP
@@ -433,11 +446,22 @@ class cops_eyes(Policy):
         if t >= self.b_until:
             nxt = min((a[0] for a in ahead if a[2]['i'] not in self.done), default=999)
             bin_close = any(e['t'] == T_BIN and -30 < rel < 90 for _, rel, e in ahead)
-            if (nxt > 90 and q <= self.ground_q and not cop_on_screen and s.buzz >> 4 <= self.ground_buzz
+            if (self.sips and nxt > 90 and q <= self.ground_q and not cop_on_screen and s.buzz >> 4 <= self.ground_buzz
                     and (not bin_close or rng.random() < self.careless / 20)):
                 self.b_until = t + self.GULP
                 m |= B
         return m
+
+
+class cops_noob(cops_eyes):
+    """An honest first-timer (run it with a 15-24 frame hand): jumps a few
+    frames off the chalk either way, freezes on one hurdle in four, sips
+    now and then and doesn't watch the BUZZ."""
+    ERR = 5
+    miss = 0.25
+    careless = 0.5
+    ground_q, air_q = 2, 4
+    ground_buzz, air_buzz = 15, 15
 
 
 class cops_pro(cops_eyes):
@@ -448,7 +472,7 @@ class cops_pro(cops_eyes):
     ground_buzz, air_buzz = 9, 14
 
 
-POLICIES = {c.__name__: c for c in [cops_safe, cops_pro, cops_pro_rt, cops_human, cops_rookie, cops_human15, cops_eyes,
+POLICIES = {c.__name__: c for c in [cops_safe, cops_pro, cops_pro_rt, cops_human, cops_rookie, cops_human15, cops_eyes, cops_noob,
                                     hold_b_mash_a, tap_a]}
 DEFAULTS = {'cops': ['idle', 'hold_b', 'hold_a', 'mash_a', 'hold_b_mash_a', 'tap_a', 'cops_jump', 'cops_safe',
                      'cops_pro', 'cops_human', 'cops_human15', 'cops_eyes', 'cops_rookie', 'random_input']}

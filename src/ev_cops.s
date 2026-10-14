@@ -2,20 +2,25 @@
 ; Auto-run; A jumps (tap: hop the low stuff, hold: big jump for green bins),
 ; hold B to sip the tallboy. Sipping on the ground slows you down, so every
 ; sip spends some of your lead on the bike cop; in the air you keep your
-; momentum. Sips only score while the cop can't see you (he's off-screen).
+; momentum, and a sip goes down twice as fast: one press of B mid-air
+; commits to it. Sips only score while the cop can't see you (off-screen).
 ; A sip finished mid-air over a hurdle is a SIP 'N' HOP; SIP 'N' HOP the next
 ; hurdle too and the chain grows (x2 .. x5), do one over a raccoon for a
 ; RACCOON RUN. Hop a hurdle without a sip (or spill, or get seen) and the
 ; chain's over. Sip on the ground next to a green bin and a raccoon nicks
 ; your can. Every hurdle has a chalk take-off mark on the pavement ahead of
 ; it: a yellow chevron (tap A) or red ones (hold A); jump when you reach it.
-; The first 20 s are a warm-up: the cop hangs back, can't bust you, and the
-; game tells you what each obstacle needs.
+; Take off ON THE CHALK and that hop's SIP 'N' HOP pays triple: the finesse
+; line that an expert lives on. Run into a hurdle and you stop dead against
+; it for a moment: A then scrambles you over (no spill, no points), else you
+; go down. The first 30 s are a warm-up: the cop hangs back, can't bust you,
+; and the game tells you what each obstacle needs.
 ; BUZZ is the sip budget: each sip adds to it and it wears off slowly; a sip
 ; on a full meter scores nothing, so ground sips spend what SIP 'N' HOPs need.
-; Score (ev_break): RUN (35 a hurdle cleared, + 600 for making Spadina)
-; + STYLE (sips, SIP 'N' HOPs, raccoon runs, no-spill bonus) - SPILLS (25
-; each) and, when busted, the COP'S FINE: half what's left (you keep at most
+; Score (ev_break): RUN (20 a hurdle cleared, and each one banks a point for
+; every 16 px of road behind it; + 300 for making Spadina) + STYLE (sips, SIP 'N' HOPs, raccoon runs, no-spill bonus).
+; A spill costs no points: it costs ground on the cop, your chain and the
+; no-spill bonus. Busted: the COP'S FINE takes a quarter (you keep at most
 ; BUST_CAP), so any finish beats any bust. The HUD's PTS is that sum so far.
 .p816
 .smart -
@@ -38,26 +43,32 @@ JUMP_LOCK  = 12              ; frames on your feet after a landing before A jump
 COP_WARM   = $0180           ; cop speed in the warm-up
 COP_START  = $01C0           ; ...and after it
 COP_RAMP   = $3F             ; then 1/256 px/frame faster every 64 frames
-WARM_T     = 1200            ; 20 s warm-up: the cop can't bust you yet
+WARM_T     = 1800            ; 30 s warm-up: the cop can't bust you yet
 GAP_START  = 176
 GAP_MAX    = 176
 GAP_BUST   = 22
-GAP_WARM   = 44              ; closest the cop gets in the warm-up
+GAP_WARM   = 64              ; closest the cop gets in the warm-up
 COP_SEEN   = 110             ; gap below this = the cop is on screen (a third of his bike shows)
 TRIP_TIME  = 33
-TRIP_LUNGE = 30              ; px the cop gains on top of the stumble
+TRIP_LUNGE = 16              ; px the cop gains on top of the stumble
 SEEN_LUNGE = 10              ; px the cop gains when he catches you sipping
-SIP_PTS    = 15              ; a lucky sip (style)
-HURDLE_PTS = 35              ; a hurdle cleared (run)
-COMBO_PTS  = 12              ; SIP 'N' HOP: x the chain multiplier (style)
-COON_PTS   = 75              ; RACCOON RUN: on top of the SIP 'N' HOP
-SPILL_PTS  = 25
+BUMP_T     = 8               ; frames up against a hurdle: A scrambles over, else a spill
+WASTE_MAX  = 3               ; jumps in a row over nothing and you're winded...
+WIND_T     = 150             ; ...for this long: sipping pace, and no jumping
+SIP_PTS    = 8               ; a lucky sip (style)
+HURDLE_PTS = 20              ; a hurdle cleared (run)
+DIST_SH    = 4               ; run: a point every 16 px
+COMBO_PTS  = 8               ; SIP 'N' HOP: x the chain multiplier (style)
+COON_PTS   = 40              ; RACCOON RUN: on top of the SIP 'N' HOP
+CHALK_X    = 3               ; a SIP 'N' HOP that took off on the chalk pays x3
+CHALK_EARLY = 6              ; px before the mark that still counts as on it
+CHALK_LATE = 12              ; ...and after it
 BUZZ_FULL  = 240             ; a sip on a full BUZZ meter scores nothing
-SIP_BUZZ   = 16              ; each sip; it wears off 1 every 8 frames
+SIP_BUZZ   = 32              ; each sip; it wears off 1 every 4 frames
 CHAIN_MAX  = 5
-FINISH_PTS = 600             ; reaching Spadina (run)
-CLEAN_PTS  = 300             ; ...without a single spill (style)
-BUST_CAP   = 800             ; a busted run keeps half its points, at most this
+FINISH_PTS = 300             ; reaching Spadina (run)
+CLEAN_PTS  = 200             ; ...without a single spill (style)
+BUST_CAP   = 1000            ; a busted run keeps 3/4 of its points, at most this
 
 ST_RUN     = 0
 ST_TRIP    = 1
@@ -113,6 +124,16 @@ c_lock   = ev_ram + 266      ; frames after a landing before you can jump again
 c_style  = ev_ram + 258      ; style points so far
 c_spill  = ev_ram + 260      ; spill points lost
 c_base   = ev_ram + 262      ; run points (cops_score)
+c_bump   = ev_ram + 268      ; frames left up against a hurdle (0 = not)
+c_bumpe  = ev_ram + 270      ; ...which one (entity offset)
+c_jchalk = ev_ram + 272      ; this jump took off on the chalk
+c_chalks = ev_ram + 274      ; chalk SIP 'N' HOPs
+c_asip   = ev_ram + 276      ; B went down mid-air: this sip is committed
+c_scram  = ev_ram + 278      ; scrambles
+c_bank   = ev_ram + 280      ; run: the road behind your last cleared hurdle (px/16)
+c_jscr   = ev_ram + 282      ; this jump is a scramble
+c_waste  = ev_ram + 284      ; jumps in a row that cleared nothing
+c_wind   = ev_ram + 286      ; frames left winded (bunny-hopping)
 EV_SEED  = ev_ram + 510
 
 NUM_ENT = 10
@@ -120,7 +141,7 @@ E_TYPE  = ev_ram + 64
 E_WX    = ev_ram + 84
 E_WXF   = ev_ram + 104
 E_V     = ev_ram + 124
-E_FLAGS = ev_ram + 144       ; 1 hit, 2 counted, 4 fresh, 8 raccoon has your can
+E_FLAGS = ev_ram + 144       ; 1 hit, 2 counted, 4 fresh, 8 raccoon has your can, $10 bumped
 E_REL   = ev_ram + 164
 
 T_CRATES  = 1
@@ -300,6 +321,13 @@ cops_update:
     bra @tgt
 @run:
     jsr cops_input
+    lda c_bump
+    beq @nbm
+    dec c_bump
+@nbm:
+    lda c_wind
+    beq @tgt
+    dec c_wind
 @tgt:
     jsr approach_speed
     jsr running_clock
@@ -326,7 +354,7 @@ cops_update:
     jsr ents_update
     ; buzz wears off slowly
     lda frame
-    and #$07
+    and #$03
     bne @nb
     lda c_buzz
     beq @nb
@@ -357,6 +385,8 @@ cops_update:
     lda #ST_ESCAPE
     sta c_state
     stz c_sipping
+    stz c_asip
+    stz c_bump
     ldx #170
     stx c_timer
     SFX SFX_CHEER
@@ -426,6 +456,20 @@ cops_input:
     stz c_sipping
     lda c_air
     bne @air
+    ; winded: no legs left to jump with
+    lda c_wind
+    bne @sip
+    ; up against a hurdle: A scrambles you over it
+    lda c_bump
+    beq @nb
+    A16
+    lda pad_new
+    and #PAD_A
+    A8
+    beq @sip
+    jsr scramble
+    bra @sip
+@nb:
     ; on the ground: A jumps (once you've found your feet after a landing)
     lda c_lock
     beq @free
@@ -437,16 +481,8 @@ cops_input:
     and #PAD_A
     A8
     beq @sip
-    lda #$01
-    sta c_air
-    ldx #JUMP_V
-    stx c_vy
-    ldx #$0000
-    stx c_hold
-    stx c_jclr
-    stx c_jsip
-    stx c_jcoon
-    SFX SFX_JUMP
+    jsr take_off
+    jsr chalk_check
     bra @sip
 @air:
     ; let go of A early (after a minimum hop) for a short hop
@@ -467,22 +503,150 @@ cops_input:
 @hold:
     A8
 @sip:
-    ; hold B: sip (on the ground or mid-air), which slows you down
+    ; hold B: sip (on the ground or mid-air), which slows you down on the
+    ; ground. Mid-air one press commits you to one sip: it goes down twice as
+    ; fast and finishes even if you let go (at the latest as you land).
+    lda c_asip
+    cmp #2
+    beq @x                      ; had this jump's sip
     A16
     lda pad
     and #PAD_B
     A8
+    beq @nob
+    lda c_air
+    beq @go
+    lda #$01
+    sta c_asip
+    bra @go
+@nob:
+    lda c_asip
     beq @x
+@go:
     lda #$01
     sta c_sipping
-    lda c_prog
+    lda #3
+    ldx c_air
+    beq @rate
+    lda #6
+@rate:
     clc
-    adc #3
+    adc c_prog
     sta c_prog
     cmp #60
     bcc @x
     stz c_prog
+    lda c_air
+    beq @gs
+    lda #2                      ; that's the one for this jump
+@gs:
+    sta c_asip
     jsr sip_done
+@x:
+    rts
+
+; A on your feet: up you go
+take_off:
+    lda #$01
+    sta c_air
+    ldx #JUMP_V
+    stx c_vy
+    ldx #$0000
+    stx c_hold
+    stx c_jclr
+    stx c_jsip
+    stx c_jcoon
+    stx c_jchalk
+    stx c_bump
+    stz c_asip
+    stz c_jscr
+    SFX SFX_JUMP
+    rts
+
+; A while you're up against a hurdle: over it you go, the hard way. No spill,
+; no points for it, no chalk, and the chain's gone.
+scramble:
+    ldx c_bumpe
+    lda E_FLAGS,x
+    ora #$13                    ; out of play: never hits, never scores
+    sta E_FLAGS,x
+    lda E_TYPE,x
+    cmp #T_COON
+    bne @nc
+    A16
+    lda #($10000 - $00A0)       ; the raccoon carries on his way
+    sta E_V,x
+    A8
+@nc:
+    jsr take_off
+    lda #$01
+    sta c_jscr
+    stz c_chain
+    A16
+    inc c_scram
+    A8
+    LDPTR0 str_scram
+    lda #TP_ORANGE
+    ldx #70
+    jmp popup_t
+
+; just took off: is the next hurdle's chalk mark under your feet?
+chalk_check:
+    A16
+    lda #$7FFF
+    sta tmp0                    ; nearest hurdle ahead (px)
+    stz tmp1                    ; ...its kind
+    A8
+    ldx #$0000
+@e:
+    lda E_TYPE,x
+    beq @n
+    lda E_FLAGS,x
+    and #$1B
+    bne @n
+    A16
+    lda E_WX,x
+    sec
+    sbc c_dist
+    bmi @n16
+    cmp tmp0
+    bcs @n16
+    sta tmp0
+    A8
+    lda E_TYPE,x
+    sta tmp1
+    bra @n
+@n16:
+    A8
+@n:
+    inx
+    inx
+    cpx #(NUM_ENT*2)
+    bne @e
+    A16
+    lda tmp0
+    cmp #$7FFF
+    A8
+    beq @x
+    ; px past the mark (+ = early): on it if -CHALK_LATE .. +CHALK_EARLY
+    ldy tmp1
+    lda mk_d,y
+    A16
+    and #$00FF
+    eor #$FFFF
+    sec
+    adc tmp0
+    clc
+    adc #CHALK_LATE
+    cmp #(CHALK_LATE + CHALK_EARLY + 1)
+    A8
+    bcs @x
+    lda #$01
+    sta c_jchalk
+    LDPTR0 str_chalk
+    lda #TP_GREEN
+    ldx #40
+    jmp popup_t
 @x:
     rts
 
@@ -617,10 +781,20 @@ coon_steal:
 
 
 approach_speed:
+    ; up against a hurdle: stopped dead
+    lda c_bump
+    beq @go
+    ldx #$0000
+    stx c_speed
+    rts
+@go:
     A16
     lda #RUN_SPD
+    ldx c_wind                  ; winded: sipping pace
+    bne @w
     ldx c_sipping
     beq @t
+@w:
     ldx c_air                   ; mid-air you keep your momentum
     bne @t
     lda #SIP_SPD
@@ -655,7 +829,7 @@ approach_speed:
 
 jump_physics:
     lda c_air
-    beq @x
+    jeq @x
     A16
     lda c_vy
     sec
@@ -664,10 +838,23 @@ jump_physics:
     clc
     adc c_h
     sta c_h
-    bpl @up
+    jpl @up
     stz c_h
     stz c_vy
     A8
+    ; a sip you committed to mid-air goes down as you land (still an air sip)
+    lda c_asip
+    stz c_asip
+    cmp #1
+    bne @land
+    lda c_state
+    cmp #ST_RUN
+    bne @land
+    lda c_prog
+    beq @land
+    stz c_prog
+    jsr sip_done
+@land:
     stz c_air
     lda #JUMP_LOCK
     sta c_lock
@@ -676,6 +863,23 @@ jump_physics:
     lda c_state
     cmp #ST_RUN
     bne @x
+    lda c_jclr
+    ora c_jscr
+    bne @used
+    ; a jump over nothing: a few of those in a row and you're out of puff
+    inc c_waste
+    lda c_waste
+    cmp #WASTE_MAX
+    bcc @x
+    stz c_waste
+    lda #WIND_T
+    sta c_wind
+    LDPTR0 str_wind
+    lda #TP_ORANGE
+    ldx #90
+    jmp popup_t
+@used:
+    stz c_waste
     lda c_jclr
     beq @x
     lda c_jsip
@@ -686,7 +890,15 @@ jump_physics:
     lda c_chain
     stz c_chain
     cmp #2
-    bcc @x
+    bcs @broke
+    ; ...off the chalk, too: say what a sip would have done
+    lda c_jchalk
+    beq @x
+    LDPTR0 str_c_dry
+    lda #TP_YELLOW
+    ldx #70
+    jmp popup_t
+@broke:
     LDPTR0 str_c_chain
     lda #TP_ORANGE
     ldx #70
@@ -711,8 +923,20 @@ sip_n_hop:
     A16
     inc c_combos
     A8
-    ; COMBO_PTS x chain (+ COON_PTS over a raccoon)
+    ; COMBO_PTS x chain (+ COON_PTS over a raccoon), all x3 off the chalk
     lda c_chain
+    sta tmp4                    ; the multiplier the banner shows
+    lda c_jchalk
+    beq @m1
+    lda c_chain
+    asl a
+    adc c_chain                 ; x3 (chain <= 5: no carry)
+    sta tmp4
+    A16
+    inc c_chalks
+    A8
+@m1:
+    lda tmp4
     sta WRMPYA
     lda #COMBO_PTS
     sta WRMPYB
@@ -728,9 +952,13 @@ sip_n_hop:
     beq @nc
     A16
     inc c_coons
-    lda tmp3
+    lda #COON_PTS
+    ldx c_jchalk
+    beq @c1
+    lda #(COON_PTS * CHALK_X)
+@c1:
     clc
-    adc #COON_PTS
+    adc tmp3
     sta tmp3
     A8
 @nc:
@@ -751,17 +979,23 @@ sip_n_hop:
     LDPTR0 str_snh
 @pre:
     jsr buf_str
-    lda c_chain
+    lda tmp4
     cmp #2
     bcc @nox
     lda #' '
     jsr buf_ch
     lda #'X'
     jsr buf_ch
-    lda c_chain
-    clc
-    adc #'0'
-    jsr buf_ch
+    A16
+    lda tmp4
+    and #$00FF
+    pha
+    A8
+    jsr buf_num
+    A16
+    pla
+    sta tmp4
+    A8
 @nox:
     LDPTR0 str_plus
     jsr buf_str
@@ -1147,6 +1381,11 @@ ents_update:
     clc
     adc #HURDLE_PTS
     sta c_hpts
+    lda c_dist                  ; ...and banks the road you've run
+    .repeat DIST_SH
+    lsr a
+    .endrepeat
+    sta c_bank
     A8
     lda c_air
     beq @nopass
@@ -1159,7 +1398,7 @@ ents_update:
     ; hit?
     lda E_FLAGS,x
     and #$01
-    bne @store
+    jne @store
     ; a late take-off still makes it while you're rising and not yet past its
     ; middle: a press that lands a few frames late is a close one, not a spill
     lda c_air
@@ -1188,6 +1427,35 @@ ents_update:
     lda c_h+1
     cmp ob_h,y
     bcs @store
+    lda c_air
+    bne @hit
+    ; on your feet: you stop dead against it, and A gets you over (scramble).
+    ; Not straight off a landing, though: bunny-hopping into it is a spill
+    lda c_lock
+    bne @hit
+    lda E_FLAGS,x
+    and #$10
+    bne @against
+    lda E_FLAGS,x
+    ora #$10
+    sta E_FLAGS,x
+    stx c_bumpe
+    lda #BUMP_T
+    sta c_bump
+    lda E_TYPE,x
+    cmp #T_COON
+    bne @bs
+    A16
+    stz E_V,x                   ; a raccoon stops too: nose to nose
+    A8
+@bs:
+    SFX SFX_STEP
+    ldx c_cur
+    bra @store
+@against:
+    lda c_bump
+    bne @store
+@hit:
     lda E_FLAGS,x
     ora #$01
     sta E_FLAGS,x
@@ -1221,14 +1489,13 @@ trip:
     stz c_jclr
     stz c_jsip
     stz c_jcoon
+    stz c_jchalk
+    stz c_asip
+    stz c_bump
     stz c_chain
-    ; spilled some: points, and the cop gains on you
+    ; spilled some: the cop gains on you (and the no-spill bonus is gone)
     A16
     inc c_spills
-    lda c_spill
-    clc
-    adc #SPILL_PTS
-    sta c_spill
     lda c_gap
     sec
     sbc #(TRIP_LUNGE*256)
@@ -1408,23 +1675,11 @@ tally_text:
     ldy #(10*32 + 21)
     lda #TP_GREEN
     jsr tnum
-    PRINT 6, 11, TP_WHITE, str_t_spill
-    lda #'-'
-    sta tmp7
-    A16
-    lda ev_break+4
-    sec
-    sbc c_fine
-    tax
-    A8
-    ldy #(11*32 + 21)
-    lda #TP_RED
-    jsr tnum
-    PRINT 6, 12, TP_WHITE, str_t_fine
+    PRINT 6, 11, TP_WHITE, str_t_fine
     lda #'-'
     sta tmp7
     ldx c_fine
-    ldy #(12*32 + 21)
+    ldy #(11*32 + 21)
     lda #TP_RED
     jsr tnum
     A16
@@ -1480,13 +1735,7 @@ tally_text:
     jsr tnum
     bra @score
 @spilt:
-    PRINT 6, 12, TP_WHITE, str_t_spill
-    lda #'-'
-    sta tmp7
-    ldx ev_break+4
-    ldy #(12*32 + 21)
-    lda #TP_RED
-    jsr tnum
+    PRINT 6, 12, TP_GREY, str_t_spilt
 @score:
     PRINT 6, 15, TP_WHITE, str_t_score
     stz tmp7
@@ -1597,6 +1846,12 @@ draw_runner:
     lda #F_FALLEN
     bra @go
 @nb:
+    ldx c_bump
+    beq @nbump
+    lda #F_TRIP0                ; up against it: pitched forward
+    bra @go
+@nbump:
+    lda c_state
     cmp #ST_TRIP
     bne @nt
     ; the tumble: pitch, dive, back up (with a splash of tallboy)
@@ -1882,7 +2137,7 @@ draw_marks:
     lda E_TYPE,x
     beq @n
     lda E_FLAGS,x
-    and #$0B                    ; hit, counted or a thief: no mark
+    and #$1B                    ; hit, counted, a thief or bumped: no mark
     bne @n
     stx c_cur
     lda E_TYPE,x
@@ -1933,7 +2188,7 @@ draw_marks:
 
 ; take-off distance (px between you and it) for each kind: tap marks for the
 ; low stuff, a big-jump mark for the bin, further out for an oncoming raccoon
-mk_d: .byte 0, 60, 62, 82, 85
+mk_d: .byte 0, 54, 56, 76, 79
 
 ob_ptrs:  .addr 0, ms_crates, ms_bench, ms_bin, ms_coon0, ms_coon1
 ob_bases: .word 0, MS_CRATES_BASE, MS_BENCH_BASE, MS_BIN_BASE, MS_COON0_BASE, MS_COON1_BASE
@@ -2130,25 +2385,26 @@ cops_hud:
 @in:
     sta tmp0
     A8
-    lda #150                    ; COURSE_LEN / 48 quarters
+    lda #164                    ; COURSE_LEN / 44 quarters
     jsl div16
     lda tmp0
     sta tmp3
-    ldx #(26*32 + 11)
+    ldx #(26*32 + 12)
     lda #($20 | (TP_GREEN << 2))
     ldy #TXT_WIN
     sty tmp7
-    jmp meter12
+    jmp meter11
 
-; the HUD's labels, once: row 1, and row 26 on a solid bar so the road's
-; yellow dashes can't scroll through KENSINGTON .. SPADINA
+; the HUD's labels, once: row 1, and rows 26-27 on a solid panel (as Bike's)
+; so the road's yellow dashes can't scroll through KENSINGTON .. SPADINA;
+; a cell clear of each side for the CRT's horizontal overscan
 hud_static:
     PRINT 1, 1, TP_WHITE, str_pts
     PRINT 13, 1, TP_WHITE, str_buzz
     PRINT 22, 1, TP_WHITE, str_cops
     ldx #(26*32)
     A16
-    lda #$0120
+    lda #$0220
     sta tmp1
     A8
     lda #TXT_WIN
@@ -2157,7 +2413,7 @@ hud_static:
     jsl txt_fill
     lda #TXT_WIN
     sta txt_bg
-    PRINT 0, 26, TP_GREY, str_km
+    PRINT 1, 26, TP_GREY, str_km
     PRINT 24, 26, TP_YELLOW, str_spa
     stz txt_bg
     rts
@@ -2166,8 +2422,8 @@ hud_static:
 meter4:
     ldy #4
     bra meter_n
-meter12:
-    ldy #12
+meter11:
+    ldy #11
 meter_n:
     sty tmp6
     sta tmp4
@@ -2198,13 +2454,23 @@ meter_n:
 
 
 ; ------------------------------------------------------------------
-; run points so far (35 a hurdle) -> c_base
+; run points so far -> c_base: 20 a hurdle cleared, and a point every 16 px
+; of road up to the last hurdle you cleared (all of it once you make Spadina)
 calc_base:
-    ldx c_hpts
-    stx c_base
+    A16
+    lda c_bank
+    ldx c_dist
+    cpx #COURSE_LEN
+    bcc @d
+    lda #(COURSE_LEN >> DIST_SH)
+@d:
+    clc
+    adc c_hpts
+    sta c_base
+    A8
     rts
 
-; the HUD's PTS: run + style - spills so far (never below 0)
+; the HUD's PTS: run + style so far
 calc_pts:
     lda c_state
     cmp #ST_ESCAPE
@@ -2218,19 +2484,15 @@ calc_pts:
     lda c_base
     clc
     adc c_style
-    sec
-    sbc c_spill
-    bpl @p
-    lda #$0000
-@p:
     sta c_pts
     A8
     rts
 
 ; ev_stat: SIP 'N' HOPs, lucky sips, hurdles, spills
-; ev_break: run, style, spills (+ the cop's fine); base + bonus - penalty = ev_score
-; finish: run + 600 Spadina, style + 300 if no spills
-; busted / gave up: what's left after spills, halved (BUST_CAP max): the rest is the fine
+; ev_break: run, style, the cop's fine; base + bonus - penalty = ev_score
+; finish: run + 300 Spadina, style + 200 if no spills, no fine
+; busted / gave up: the fine is a quarter of run + style (and anything over
+; BUST_CAP), so any finish beats any bust
 cops_score:
     A16
     lda c_combos
@@ -2244,6 +2506,7 @@ cops_score:
     stz c_fine
     stz c_bonus
     stz c_clean
+    stz ev_break+4
     A8
     jsr calc_base
     stz ev_fail
@@ -2267,13 +2530,8 @@ cops_score:
     clc
     adc c_clean
     sta ev_break+2
-    lda c_spill
-    sta ev_break+4
-    lda ev_break
     clc
-    adc ev_break+2
-    sec
-    sbc ev_break+4
+    adc ev_break
     sta ev_score
     A8
     rts
@@ -2286,18 +2544,12 @@ cops_score:
     sta ev_break+2
     clc
     adc c_base
-    sta tmp0                    ; run + style
-    sec
-    sbc c_spill
-    bcs @left
-    ; spilled more than you made: the spills take it all
-    lda tmp0
-    sta ev_break+4
-    stz ev_score
-    bra @fail
-@left:
-    sta tmp1                    ; what's left
+    sta tmp1                    ; run + style
     lsr a
+    lsr a
+    eor #$FFFF
+    sec
+    adc tmp1                    ; keep 3/4
     cmp #BUST_CAP
     bcc @k
     lda #BUST_CAP
@@ -2306,11 +2558,8 @@ cops_score:
     eor #$FFFF
     sec
     adc tmp1
-    sta c_fine                  ; left - kept
-    clc
-    adc c_spill
+    sta c_fine                  ; the rest
     sta ev_break+4
-@fail:
     A8
     lda #$01
     ldx c_quit
@@ -2333,7 +2582,11 @@ str_k_coon:   .byte "RACCOON! TAP A AT THE CHALK", 0
 str_c_chain:  .byte "NO SIP, NO CHAIN!", 0
 str_buzzed:   .byte "BUZZ FULL! EASE OFF THE B", 0
 str_c_sip: .byte "COP CAN'T SEE YOU: HOLD B!", 0
-str_c_air: .byte "SIP MID-JUMP = SIP 'N' HOP!", 0
+str_c_air: .byte "B MID-JUMP = SIP 'N' HOP!", 0
+str_c_dry: .byte "CHALK + B MID-AIR = X3!", 0
+str_chalk: .byte "ON THE CHALK!", 0
+str_scram: .byte "SCRAMBLE! A AT THE CHALK", 0
+str_wind:  .byte "WINDED! STOP BUNNY-HOPPING", 0
 str_c_cop: .byte "COP'S WATCHING! DON'T SIP!", 0
 str_crack: .byte "*CRACK* FRESH TALLBOY", 0
 str_seen:  .byte "OI! THE COP SAW THAT!", 0
@@ -2341,16 +2594,16 @@ str_binc: .byte "RACCOON! HE NICKED YOUR CAN", 0
 str_snh:  .byte "SIP 'N' HOP", 0
 str_rrun: .byte "RACCOON RUN", 0
 str_plus: .byte "! +", 0
-str_oof:  .byte "OOF! SPILLED SOME! -25", 0
-str_coon: .byte "A RACCOON STOLE YOUR CAN!", 0
+str_oof:  .byte "OOF! SPILLED! HE'S GAINING", 0
+str_coon: .byte "OOF! RACCOON STOLE THE CAN", 0
 str_t_bust:  .byte "BUSTED BY THE BIKE COP!", 0
 str_t_won:   .byte "SPADINA! YOU LOST HIM!", 0
 str_t_run:   .byte "RUN", 0
 str_t_style: .byte "STYLE", 0
-str_t_spill: .byte "SPILLS", 0
+str_t_spilt: .byte "SPILLED: NO BONUS", 0
 str_t_fine:  .byte "COP'S FINE", 0
-str_t_half:  .byte "YOU KEEP HALF", 0
-str_t_cap:   .byte "YOU KEEP 800 MAX", 0
+str_t_half:  .byte "YOU KEEP 3/4", 0
+str_t_cap:   .byte "YOU KEEP 1000 MAX", 0
 str_t_spa:   .byte "MADE SPADINA", 0
 str_t_clean: .byte "NO SPILLS", 0
 str_t_score: .byte "SCORE", 0
