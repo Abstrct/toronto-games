@@ -5,7 +5,9 @@
 ; red "!", shaking) and LUNGES. B on the white "!" gets you set and you step
 ; aside as he lunges (DODGE); B by hand while he crouches or as he springs =
 ; NICE TIMING; B late in the lunge = CLOSE SHAVE (double NICE: the bold play
-; pays, x2 and x3 in a row pay more). Or throw a tennis ball (A). A dodged
+; pays, x2 and x3 in a row pay more). A lunge always takes LUNGE_F frames,
+; and he flashes white (his tags jingle) as he springs: the late half of
+; the leap is the shave. Or throw a tennis ball (A). A dodged
 ; dog skids, sits and waits: walk up and pat him for DODGE 'N' PAT (10 x the
 ; chain, up to x5; a tackle breaks it). Callouts sit in a rounded panel at
 ; the top of the lawn (park_pend, bank $80), never over the dogs.
@@ -40,12 +42,15 @@ DASH       = $0300
 ALERT_T    = 32              ; "!" tell before a dog charges (+0..19): time for a 25 f human to press B
 DODGE_R    = 40              ; he crouches this close (red "!"): B by hand while he does = NICE TIMING
 CROUCH_GAP = 30              ; walk at a crouched dog and he scoots back to keep this gap (the red "!" keeps its time)
-SHAVE_R    = 28              ; ... and lunging this close = CLOSE SHAVE (18 px to the tackle: ~7 frames)
-LUNGE_V    = $0280           ; lunge speed (px/frame 8.8, along his line to you): 22 -> 10 px is 5 frames
-LUNGE_T    = 64              ; a lunge that hasn't landed by now gives up (walking on never outruns one)
+LUNGE_F    = 16              ; a lunge lands this many frames after the spring, however far and
+                             ; whatever you do (he homes in): the leap is a beat you can count
+SHAVE_F    = 8               ; B in the last SHAVE_F frames of the leap = CLOSE SHAVE (a tell
+                             ; at the spring, then 8 frames on: a 10-15 f hand lands in it)
+FLASH_F    = 6               ; the tell: he flashes white (sprite palette 7) this long as he springs
+LUNGE_V    = $0280           ; a trip's pile-on: this speed (px/frame 8.8), not the timed leap
 HAND_BONUS = 100             ; on top of DODGE_PTS: a dodge timed by hand (B with him in range)
 SHAVE_PTS  = 300             ; on top of DODGE_PTS: a CLOSE SHAVE (400 = 2x NICE TIMING: worth a tackle's risk)
-SHAVE_STEP = 50              ; ... and this more for each one in a row before it (x2 450, x3 500)
+SHAVE_STEP = 100             ; ... and this more for each one in a row before it (x2 500, x3 600)
 SHAVE_RUN  = 3               ; CLOSE SHAVEs in a row pay x2, x3 (any other dodge or a tackle resets)
 MATADOR_PTS = 150            ; a CLOSE SHAVE stepping into his side: OLE! (not on the card)
 TACKLE_PTS = 150             ; what a tackle costs on the card (TACKLES X150), every run
@@ -69,6 +74,7 @@ PAST_T     = 22              ; a dodged dog skids on this long ...
 SIT_T      = 160             ; ... then sits, tail going, waiting for a pat
 PAT_R      = 16              ; walk this close to a sitting dog = GOOD BOY!
 CHAIN_MAX  = 5
+PATCUE_N   = 2               ; the "walk up and pat" line: the first two dogs that sit
 
 ST_WALK   = 0
 ST_DOWN   = 1
@@ -148,6 +154,8 @@ k_pptr   = ev_ram + 618      ; ... its line (3 bytes)
 k_ordlo  = ev_ram + 622      ; 9 bytes: draw order's world y, low bytes (parallel to k_order)
 k_ordhi  = ev_ram + 631      ; 9 bytes: ... high bytes
 k_cbuf   = ev_ram + 640      ; 64 bytes: one BG2 canopy row, unpacked for DMA
+k_patcue = ev_ram + 704      ; 1 = a dodged dog just sat: say walk up and pat (once the panel's free)
+k_patn   = ev_ram + 706      ; pat lines said this walk (PATCUE_N at most, none once you've patted)
 EV_SEED  = ev_ram + 510
 
 ; thrown ball
@@ -190,6 +198,7 @@ DS_LICK   = 8                ; tackled you: on top of you, licking
 DS_CROUCH = 9                ; in range: crouched, shaking, red "!" (the B window opens)
 DS_LUNGE  = 10               ; ... and the lunge (homing, LUNGE_V)
 DF_SPENT  = $04              ; D_FLAGS: this dog has had his go at you (one each)
+DF_RSIDE  = $08              ; D_FLAGS: he sprang from your right (he faces left as he flies)
 
 ; dog table (16) and ground balls (8)
 NUM_DOGS = 16
@@ -253,7 +262,7 @@ park_init:
     PLOAD 32, park_pal, 96
     VLOAD VRAM_OBJTILES, park_spr, (park_spr_pal - park_spr)
     VLOAD (VRAM_OBJTILES + 128*16), park_spr2, (park_spr2_end - park_spr2)
-    PLOAD 144, park_spr_pal, 96    ; sprite palettes 1-6 (6: the red "!")
+    PLOAD 144, park_spr_pal, 112   ; sprite palettes 1-7 (6: the red "!", 7: a dog's spring flash)
     lda cur_player
     ldy #$0000
     jsl player_palette
@@ -741,12 +750,30 @@ park_update:
     ldx #70
     stx k_popup
 @xh:
+    lda k_patcue                ; a dodged dog sat: walk up and pat him
+    beq @xp
+    lda k_state
+    cmp #ST_WALK
+    bne @xp
+    lda k_live
+    ora k_popup
+    ora k_popup+1
+    bne @xp
+    stz k_patcue
+    inc k_patn
+    LDPTR0 str_patcue
+    lda #TP_CYAN                ; (his owner says so)
+    jsr popup
+    ldx #80
+    stx k_popup
+@xp:
     rts
 
 str_made: .byte "MADE IT TO DUNDAS!", 0
 str_heal: .byte "3 IN A ROW: HEART BACK!", 0
 str_nap:  .byte "ZZZ... A NAP ON THE GRASS", 0
 str_hurry: .byte "HURRY! 20 SECONDS LEFT!", 0
+str_patcue: .byte "FRIENDLY! WALK TO HIM: PAT", 0
 
 ; ptr0 = message, A = text palette: a callout in the rounded panel at the
 ; top of the lawn, clear of the dogs' approach. Queued: park_pend draws it
@@ -940,7 +967,11 @@ walk_input:
     sta k_dvx
     A8
     stz k_armed
-    lda #1
+    lda #1                      ; by hand (2: steered with the d-pad)
+    ldy k_wx
+    beq @sh1
+    inc a
+@sh1:
     sta k_shok
     SFX SFX_JUMP
     jsr dodge_check
@@ -2356,25 +2387,49 @@ think_crouch:
     A8
     dec D_TIMER,x
     bne @x
+    ; he springs: LUNGE_F frames to land on you, from the side he's on now
+    ; (you - him < 0: your right; dead level counts as your left, the way
+    ; he's drawn facing). The tell: a white flash and his tags jingle
     lda #DS_LUNGE
     sta D_STATE,x
-    lda #LUNGE_T
+    lda #LUNGE_F
     sta D_TIMER,x
-    jmp lunge_v
+    lda D_FLAGS,x
+    and #<~DF_RSIDE
+    bit tmp2+1
+    bpl @ls
+    ora #DF_RSIDE
+@ls:
+    sta D_FLAGS,x
+    SFX SFX_TICK
+    jsl lunge_vt
 @x:
     rts
 
-; lunging: homes in at LUNGE_V; late B = CLOSE SHAVE, no B = tackled
+; lunging: lands on you LUNGE_F frames after the spring; B before he lands
+; dodges him (the last SHAVE_F frames = CLOSE SHAVE), no B = tackled. A
+; trip's pile-on (D_TIMER past LUNGE_F) runs you down at LUNGE_V instead
 think_lunge:
     jsr dog_dist
+    lda D_TIMER,x
+    cmp #(LUNGE_F + 1)
+    bcs @trip
+    dec D_TIMER,x
+    beq @land
+    jsl lunge_vt
+    rts
+@land:
+    jsr tackle_chk              ; (he's on you: you'd stepped, or you're clear)
+    bcc @miss
+    jmp tackle
+@miss:
+    jmp give_up
+@trip:
     jsr tackle_chk
     bcc @t
     jmp tackle
 @t:
     dec D_TIMER,x
-    bne @go
-    jmp give_up
-@go:
     jmp lunge_v
 
 ; tmp1 = his distance -> carry set if that's a tackle (keeps X)
@@ -2603,14 +2658,23 @@ dodged:
     sty k_calm
     SFX SFX_COIN
     ; got set early (armed): a plain DODGE. Timed by hand with him in range:
-    ; +HAND_BONUS, and right on you: CLOSE SHAVE, +SHAVE_PTS + SHAVE_STEP x the run before it
+    ; +HAND_BONUS, and in the last SHAVE_F frames of his leap: CLOSE SHAVE,
+    ; +SHAVE_PTS + SHAVE_STEP x the run before it
     lda k_shok
     jeq @plain
     A16
     inc k_hand
-    lda tmp1
-    cmp #SHAVE_R
-    bcc @shave
+    A8
+    lda D_STATE,x
+    cmp #DS_LUNGE
+    bne @nice
+    lda D_TIMER,x
+    cmp #(SHAVE_F + 1)
+    bcs @nice
+    A16
+    bra @shave
+@nice:
+    A16
     lda k_style
     clc
     adc #HAND_BONUS
@@ -2640,20 +2704,20 @@ dodged:
     clc
     adc k_style
     sta k_style
-    ; stepped INTO his side (d-pad toward him, he wasn't dead ahead): OLE!
-    lda tmp2                    ; you - him: > 0 = he's on your left
-    bmi @ml
-    cmp #4
-    bcc @nm
-    lda k_dvx
-    bpl @nm
+    ; stepped INTO his side (d-pad toward the side he sprang from): OLE!
+    lda k_shok
+    and #$00FF
+    cmp #2                      ; (a step you steered, not the auto one)
+    bne @nm
+    lda D_FLAGS,x
+    and #DF_RSIDE
+    beq @ml
+    lda k_dvx                   ; from your right: a step right
+    bmi @nm
     bra @mat
 @ml:
-    cmp #($10000 - 3)
-    bcs @nm
-    lda k_dvx
-    bmi @nm
-    beq @nm
+    lda k_dvx                   ; from your left: a step left
+    bpl @nm
 @mat:
     inc k_matad
     jsl trick_seen
@@ -2719,12 +2783,12 @@ shave_msgs: .addr str_shave, str_shave2, str_shave3
 shave_pts:  .word SHAVE_PTS, SHAVE_PTS+SHAVE_STEP, SHAVE_PTS+SHAVE_STEP*2
 matador_msgs: .addr str_mat, str_mat2, str_mat3
 str_shave:  .byte "CLOSE SHAVE! +400", 0
-str_shave2: .byte "CLOSE SHAVE X2! +450", 0
-str_shave3: .byte "CLOSE SHAVE X3!! +500", 0
+str_shave2: .byte "CLOSE SHAVE X2! +500", 0
+str_shave3: .byte "CLOSE SHAVE X3!! +600", 0
 str_mat:    .byte "OLE! MATADOR! +550", 0
-str_mat2:   .byte "OLE! MATADOR X2! +600", 0
-str_mat3:   .byte "OLE! MATADOR X3!! +650", 0
-.assert DODGE_PTS = 100 && HAND_BONUS = 100 && SHAVE_PTS = 300 && SHAVE_STEP = 50 && MATADOR_PTS = 150, error, "dodge popups print these"
+str_mat2:   .byte "OLE! MATADOR X2! +650", 0
+str_mat3:   .byte "OLE! MATADOR X3!! +750", 0
+.assert DODGE_PTS = 100 && HAND_BONUS = 100 && SHAVE_PTS = 300 && SHAVE_STEP = 100 && MATADOR_PTS = 150, error, "dodge popups print these"
 .assert SHAVE_RUN = 3, error, "shave_msgs / shave_pts / matador_msgs: one per run step"
 
 ; skidding past: slow down, then sit
@@ -2746,6 +2810,16 @@ think_past:
     A16
     stz D_VX,x
     stz D_VY,x
+    lda k_pats                  ; never patted one yet: say how (the first two)
+    bne @x16
+    lda k_patn
+    cmp #PATCUE_N
+    bcs @x16
+    A8
+    lda #1
+    sta k_patcue
+    A16
+@x16:
     A8
 @x:
     rts
@@ -2781,12 +2855,14 @@ think_sit:
 @wait:
     dec D_TIMER,x
     bne @x
+    stz k_patcue                ; he's up and off: no pat now
     jmp go_home
 @x:
     rts
 
-; GOOD BOY! The chain grows; each pat is worth 20 x the chain
+; GOOD BOY! The chain grows; each pat is worth 10 x the chain
 pat_dog:
+    stz k_patcue
     ldy #24
     sty k_patf
     ldy #3                      ; face him
@@ -3603,6 +3679,22 @@ draw_dog:
     sta tmp5
     stz tmp5+1
     lda D_STATE,x
+    cmp #DS_LUNGE
+    bne @nlf
+    lda D_TIMER,x
+    cmp #(LUNGE_F + 1)
+    bcs @fv                     ; a trip's pile-on: the way he runs
+    cmp #(LUNGE_F - FLASH_F + 1)
+    bcc @nfl
+    lda k_prio                  ; the tell: a white flash as he springs
+    ora #$0E                    ; (sprite palette 7)
+    sta tmp5
+@nfl:
+    lda D_FLAGS,x               ; in the air: facing the way he sprang
+    and #DF_RSIDE
+    beq @r
+    bra @fl
+@nlf:
     cmp #DS_ALERT
     bne @fv
     lda k_x+1                   ; barking (even backing off): he faces you
@@ -4173,7 +4265,7 @@ park_score:
     ;   TACKLES   TACKLE_PTS a tackle, the whole cost, every run
     ; and a sum under 0 scores 0 (the card says NEVER BELOW 0). Sixteen dogs,
     ; one go each: taking longer never brings more of them. Short of Dundas
-    ; (tackled out, out of time, a nap, gave up) the DOGS are forfeit
+    ; (tackled out, out of time, a nap, gave up) the walk keeps HALF its DOGS
     lda k_fin                   ; through the gate: a finish, even if GIVE UP
     and #$00FF                  ; came during the walk-in
     beq @failed
@@ -4208,18 +4300,19 @@ park_score:
     .a16
     lda tmp4
     sta ev_break                ; base
-    lda k_fin                   ; short of Dundas: the DOGS are forfeit (the card
-    and #$00FF                  ; shows them grey: cards.s card_forfeit)
-    beq @forf0
+    lda k_fin                   ; short of Dundas: HALF the DOGS (a sloppy turn
+    and #$00FF                  ; keeps what it earned, on a slope; Dundas pays
+    beq @half                   ; them all, so finishing always wins)
     lda k_style
+    bra @all
+@half:
+    lda k_style
+    lsr a
+@all:
     sta ev_break+2              ; bonus
     clc
     adc tmp4
     sta tmp4                    ; base + bonus
-    bra @pen
-@forf0:
-    lda k_style
-    sta ev_break+2
 @pen:
     lda #$0000
     ldy k_tackle
@@ -4296,9 +4389,12 @@ PAN_ROW = 3
 .a8
 .i16
 ; once a frame: the queued callout (k_pend), one step a frame and never on
-; the HUD's frame: 1 blank the panel rows, 2 the box, 3 the line (26
-; characters at most); 4 just blanks them (the callout's time is up)
+; the HUD's frame: 1 blank the panel rows, 2 the box and its line (26
+; characters at most) in the same frame, so a box never shows empty; 4
+; just blanks them (the callout's time is up)
 park_pend:
+    .a8
+    .i16
     lda k_pend
     beq @x
     lda frame
@@ -4307,18 +4403,19 @@ park_pend:
     lda k_pend
     cmp #2
     beq @box
-    cmp #3
-    beq @text
     cmp #1
     bne @clr
     inc k_pend
-    bra park_panel_clear
+    jmp park_panel_clear
 @clr:
     stz k_pend
-    bra park_panel_clear
-@text:
+    jmp park_panel_clear
+@x:
+    rtl
+@box:
     stz k_pend
-    jsr pend_ptr
+    jsr @frame
+    jsr pend_ptr                ; (txt_box clobbers ptr0)
     lda #TXT_WIN
     sta txt_bg
     lda k_ppal
@@ -4328,10 +4425,8 @@ park_pend:
     ldx #((PAN_ROW + 1)*32)
     jsl txt_print_centre
     stz txt_bg
-@x:
     rtl
-@box:
-    inc k_pend
+@frame:
     jsr pend_ptr
     ldy #$0000
 @len:
@@ -4358,7 +4453,7 @@ park_pend:
     A8
     lda #$20
     jsl txt_box
-    rtl
+    rts
 
 pend_ptr:
     ldx k_pptr
@@ -4366,6 +4461,59 @@ pend_ptr:
     lda k_pptr+2
     sta ptr0+2
     rts
+
+; X = a dog in the air, tmp2/tmp3 = you - him (dog_dist), D_TIMER = frames
+; till he lands (1..LUNGE_F): the velocity that covers the gap in that many
+; frames. Called every frame of the leap, so he homes in and lands on time
+; whatever you do. Keeps X. (Bank $80: EVENTS2 is shared and nearly full.)
+lunge_vt:
+    .a8
+    .i16
+    stx k_tmpx
+    lda D_TIMER,x
+    sta k_tmpy                  ; the divisor
+    A16
+    lda tmp2
+    jsr @axis
+    ldx k_tmpx
+    sta D_VX,x
+    lda tmp3
+    jsr @axis
+    ldx k_tmpx
+    sta D_VY,x
+    A8
+    rtl
+; A16 = signed gap (px) -> gap * 256 / k_tmpy (8.8, signed, under 64 px a frame)
+@axis:
+    .a16
+    php                         ; N = the sign
+    bpl @ab
+    eor #$FFFF
+    inc a
+@ab:
+    cmp #$0100
+    bcc @ok
+    lda #$00FF
+@ok:
+    xba                         ; x256
+    sta tmp0
+    A8
+    lda k_tmpy
+    jsl div16
+    A16
+    lda tmp0
+    cmp #$4000
+    bcc @lim
+    lda #$4000
+@lim:
+    plp
+    .a16
+    bpl @pos
+    eor #$FFFF
+    inc a
+@pos:
+    rts
+.a8
 
 ; blank the callout panel's rows
 park_panel_clear:
