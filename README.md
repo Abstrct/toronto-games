@@ -105,8 +105,8 @@ and TOWTRUCK in the Annex, and so on.
 
 On the board screen, ◀ ▶ turn the pages, one event per page.
 
-**Title screen.** Leave the title alone and it plays an attract loop: a
-HOW TO PLAY panel, the records, then a real gameplay demo of the next event
+**Title screen.** Leave the title alone and it plays an attract loop: the
+records, then a real gameplay demo of the next event
 in the rotation. The demos are recorded play, showing off the named tricks.
 When a named trick lands, the demo banner reads WATCH THAT MOVE! while its
 callout is up. Any button

@@ -16,10 +16,10 @@ t_sfx:      .res 1      ; sound test: the effect on the SOUND line
 t_strow:    .res 1      ; sound test: 0 MUSIC line, 1 SOUND line
 t_st:       .res 1      ; sound test panel open (no attract while it is)
 t_idle:     .res 2      ; frames without a button press (attract mode)
-t_att:      .res 1      ; attract panel on screen: 0 none, 1 how to, 2 records
+t_att:      .res 1      ; attract panel on screen: 0 none, 2 records
 t_demo:     .res 1      ; set when we asked for a demo: the next title starts settled
 
-; Attract loop: title, HOW TO PLAY, RECORDS, then title_screen returns
+; Attract loop: title, RECORDS, then title_screen returns
 ; A = $FF and game_main plays a gameplay demo and comes back here.
 ; START returns A = 0 (on to the main menu).
 ATT_WAIT  = 1200        ; 20 s of title before the first panel
@@ -247,8 +247,8 @@ title_ticker:
 @x:
     rts
 
-; attract mode: after 20 s idle, HOW TO PLAY, then the records, then a
-; demo. Carry set = time for the demo.
+; attract mode: after 20 s idle, the records, then a demo.
+; Carry set = time for the demo.
 attract_tick:
     lda t_ready
     beq @x
@@ -258,18 +258,11 @@ attract_tick:
     inc t_idle
     lda t_idle
     cmp #ATT_WAIT
-    beq @howto
-    cmp #(ATT_WAIT + ATT_SHOW)
     beq @records
-    cmp #(ATT_WAIT + 2*ATT_SHOW)
+    cmp #(ATT_WAIT + ATT_SHOW)
     beq @demo
     A8
 @x:
-    clc
-    rts
-@howto:
-    A8
-    jsr attract_howto
     clc
     rts
 @records:
@@ -313,21 +306,6 @@ attract_box:
     lda tm_sh
     and #$FE                    ; logo off: no sliver of it above the frame
     sta tm_sh
-    rts
-
-attract_howto:
-    lda #$01
-    sta t_att
-    jsr attract_box
-    PRINTC 4, TP_YELLOW, str_how
-    PRINTC 6, TP_WHITE, str_how1
-    PRINTC 8, TP_WHITE, str_how2
-    PRINTC 10, TP_WHITE, str_how3
-    PRINTC 12, TP_WHITE, str_how4
-    PRINTC 14, TP_WHITE, str_how5
-    PRINTC 16, TP_WHITE, str_how6
-    PRINTC 18, TP_WHITE, str_how7
-    stz txt_bg
     rts
 
 attract_records:
@@ -886,14 +864,6 @@ str_blank:   .byte "             ", 0
 str_wipe:    .byte "                              ", 0
 str_players: .byte "1-8 PLAYERS  ", TXT_DOT + 32, "  TAKE TURNS", 0
 str_sel_hint: .byte "SELECT: SOUND TEST", 0
-str_how:     .byte "HOW TO PLAY", 0
-str_how1:    .byte "1-8 PLAYERS TAKE TURNS", 0
-str_how2:    .byte "AT SEVEN TORONTO EVENTS.", 0
-str_how3:    .byte "EACH EVENT'S CARD SHOWS", 0
-str_how4:    .byte "ITS CONTROLS: READ IT!", 0
-str_how5:    .byte "START PAUSES THE EVENT.", 0
-str_how6:    .byte "MEDALS DECIDE WHO TOPS", 0
-str_how7:    .byte "THE PODIUM AT CITY HALL.", 0
 str_att_rec: .byte "TORONTO RECORDS", 0
 str_att_rec2: .byte "THINK YOU CAN BEAT 'EM?", 0
 str_copy:    .byte 91+32, " 2026 TORONTO GAMES", 0     ; font.py tile 91 = (C)
