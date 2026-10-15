@@ -132,6 +132,15 @@ MISC_GOLD = list(MISC)
 MISC_GOLD[2] = '#f8e040'
 MISC_GOLD[12] = '#c89820'
 MISC_GOLD[15] = '#f8b828'
+MISC_GOLD[13] = '#b07818'          # the danger rim too: the whole ring reads gold
+# sprite palette 7: the gold leg. While the leg can still be a GOLD SURF the
+# ring's sweet spot glows gold (outline and rim as usual), and the solid
+# arrow flashes white on the beat (tap on the flash)
+MISC_GLOW = list(MISC)
+MISC_GLOW[12] = '#c89820'
+MISC_GLOW[15] = '#f8d040'
+MISC_GLOW[6] = '#ffffff'
+MISC_GLOW[8] = '#e0e0e0'
 
 RW, RH = 32, 40
 
@@ -333,7 +342,8 @@ def build_sprites():
         data += pal_bytes(p, 16)
     data += pal_bytes([hexrgb(c) for c in MISC], 16)
     data += pal_bytes([hexrgb(c) for c in MISC_GOLD], 16)
-    out('subway_spr_pal.bin', data)      # sprite palettes 1..6
+    data += pal_bytes([hexrgb(c) for c in MISC_GLOW], 16)
+    out('subway_spr_pal.bin', data)      # sprite palettes 1..7
     return sh
 
 
