@@ -1460,8 +1460,9 @@ card_stat_keep_end:
 
 ; card_stat_must: bit n = on ev_fail n the stat card_stat_keep names never
 ; gives way, because the reason line talks about it (Off-Leash: HALF THE
-; DOGS needs DOGS DODGED on the card)
-card_stat_must: .byte 0, 0, $0E, 0, 0, 0, 0    ; bike bay park cops sail parking subway
+; DOGS needs DOGS DODGED on the card), or nothing else says it (Off-Leash's
+; TACKLES on a finish: a tackle costs a heart, never points)
+card_stat_must: .byte 0, 0, $0F, 0, 0, 0, 0    ; bike bay park cops sail parking subway
 
 ; card_pcount / card_prate: the penalty row says its count, "TACKLES 3 AT
 ; 150", when ev_stat (card_pcount - 1) x card_prate is the penalty exactly
