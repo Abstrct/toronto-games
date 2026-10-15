@@ -1521,7 +1521,7 @@ card_style_labels:
     .addr sty_co_take, sty_co_luck, sty_co_snh, sty_co_chain, sty_co_gold ; cops
     .addr sty_tight, sty_ctack, sty_fsurf, sty_lhon, sty_ostyle  ; sail
     .addr sty_pk_time, sty_pk_roll, sty_pk_kiss, sty_pk_tidy, sty_pk_bike ; parking
-    .addr 0, 0, 0, 0, 0                                     ; subway
+    .addr sty_sb_chain, sty_sb_gold, sty_sb_dead, sty_sb_gags, sty_sb_hands ; subway
 card_style_labels_end:
 .assert card_style_labels_end - card_style_labels = NUM_EVENTS * STYLE_N * 2, error, "card_style_labels: STYLE_N .addr per event, nothing else"
 ; card_style_other: the row that takes the smallest sources when they don't
@@ -1560,6 +1560,11 @@ sty_pk_roll:  .byte "KEPT ROLLING", 0
 sty_pk_kiss:  .byte "CURB KISSES", 0
 sty_pk_tidy:  .byte "TIDY PARKING", 0
 sty_pk_bike:  .byte "BIKE SHAVE", 0
+sty_sb_chain: .byte "SURF CHAIN", 0
+sty_sb_gold:  .byte "GOLD SURF X3", 0
+sty_sb_dead:  .byte "DEAD CENTRE", 0
+sty_sb_gags:  .byte "GAGS RIDDEN", 0
+sty_sb_hands: .byte "NO HANDS", 0
 
 ; card_forfeit: bit n = a run ending with ev_fail n forfeits the bonus: the
 ; event leaves it in ev_break+2 (and its sources in ev_style), keeps it out
@@ -4964,7 +4969,7 @@ ec2: .byte "D-PAD WALK   A THROW BALL", $0A, "B ON ANY ! = SAFE DODGE", $0A, "LA
 ec3: .byte "YELLOW CHALK: TAP A", $0A, "RED CHALK: HOLD A", $0A, "HOLD B: SIPS PAY UNSEEN", 0
 ec4: .byte "LEFT/RIGHT: TURN  A: HIKE", $0A, "YELLOW ARROW: NEXT MARK", $0A, "GREEN DIAMONDS: ON COURSE", 0
 ec5: .byte TXT_ARROW_U+32, " TO THE LINE, ", TXT_ARROW_D+32, "+", TXT_ARROW_R+32, " BACK IN", $0A, "NOW! IN THE PANEL: ", TXT_ARROW_D+32, "+", TXT_ARROW_L+32, $0A, "STOPPED IN THE SPOT? A", 0
-ec6: .byte "HOLLOW ARROW: GET READY", $0A, "SOLID: HOLD D-PAD THAT WAY", $0A, "TAP TO STAY GOLD: SURF X3", 0
+ec6: .byte "HOLLOW ARROW: GET READY", $0A, "SOLID: HOLD D-PAD THAT WAY", $0A, "TAP ON THE FLASH: GOLD X3", 0
 ef0: .byte "WIPED OUT!", 0
 ef1: .byte "MISSED THE TRAIN!", 0
 ef2: .byte "TACKLED!", 0
@@ -5043,14 +5048,14 @@ fn_pk:     .byte "HALF IN OR TOWED, ALL 3", 0
 fn_pk_i:   .byte "10 S WITHOUT DRIVING", 0
 fn_pk_q:   .byte "ONLY SPOTS YOU PARKED PAY", 0
 fn_sub:    .byte "20 GERMS: STYLE IS VOID", $0A, "ONLY LEGS YOU LEANED PAY", 0
-fn_sub_q:  .byte "NO UNION: STYLE IS VOID", $0A, "ONLY LEGS YOU LEANED PAY", 0
+fn_sub_q:  .byte "GOT OFF EARLY: NO STYLE", $0A, "ONLY LEGS YOU LEANED PAY", 0
 
 ; a failed run that earned nothing (base and bonus 0) says the event's card_still_ln instead of its
 ; reason line, for the ev_fail codes in card_still (bit n = ev_fail n: $16
 ; all but gave up, $02 the event's own fail only, 0 never). For events where
 ; only not playing earns a base of 0. A give-up always gets its own reason
 ; line (card_fail_note), never the standing-still joke.
-card_still:    .byte $10, $02, $10, $02, $10, 0, $16   ; bike bay park cops sail parking subway (never bit 3: gave up)
+card_still:    .byte $10, $02, $10, $02, $10, 0, $02   ; bike bay park cops sail parking subway (never bit 3: gave up)
 card_still_ln: .addr sti0, sti1, sti2, sti3, sti4, 0, sti6
 sti0: .byte "STANDING STILL PAYS 0", 0
 sti1: .byte "STANDING STILL PAYS 0", 0
