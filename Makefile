@@ -27,10 +27,15 @@ $(ROM): $(OBJ) snes.cfg tools/fixsum.py
 	ld65 -C snes.cfg -o $@ -m build/map.txt --dbgfile build/toronto.dbg $(OBJ)
 	python3 tools/fixsum.py $@
 
+# keeps build/emu (the snes9x core) and build/pt (harness sessions, frozen panels, findings)
 clean:
+	find build -mindepth 1 -maxdepth 1 ! -name emu ! -name pt -exec rm -rf {} +
+	rm -f $(ROM)
+
+distclean:
 	rm -rf build $(ROM)
 
-.PHONY: all clean
+.PHONY: all clean distclean
 
 # play it: native window around the locally built snes9x libretro core
 CORE := build/emu/snes9x/libretro/snes9x_libretro.dylib
