@@ -4,97 +4,315 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Toronto Games</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Pixelify+Sans:wght@400;600&family=Silkscreen:wght@400;700&display=swap">
 <meta name="description" content="A Super Nintendo game in the spirit of California Games: seven events across Toronto. Play it in your browser.">
 <style>
-  :root {
-    --bg: #14161b;
-    --panel: #1d2027;
-    --ink: #eceae4;
-    --muted: #9a9ca3;
-    --red: #da251d;
-    --line: #2c3039;
-    --key: #2a2e37;
-  }
-  * { box-sizing: border-box; }
-  html, body { margin: 0; background: var(--bg); color: var(--ink); }
-  body {
-    font: 16px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-    padding: 24px 16px 48px;
-  }
-  main { max-width: 820px; margin: 0 auto; }
-  header { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin-bottom: 16px; }
-  h1 { margin: 0; font-size: 28px; letter-spacing: 0.02em; }
-  h1 span { color: var(--red); }
-  header p { margin: 0; color: var(--muted); font-size: 14px; }
-  #screen {
-    width: 100%;
-    aspect-ratio: 4 / 3;
-    background: #000;
-    border: 1px solid var(--line);
-    border-radius: 6px;
-    overflow: hidden;
-  }
-  .download { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin: 16px 0 0; }
-  .download span { color: var(--muted); font-size: 14px; }
-  .button {
-    display: inline-block; padding: 8px 16px; border-radius: 6px;
-    background: var(--red); color: #fff; font-weight: 600; text-decoration: none;
-  }
-  .button:hover { filter: brightness(1.1); }
-  section { margin-top: 24px; }
-  h2 { font-size: 15px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); margin: 0 0 8px; }
-  table { width: 100%; border-collapse: collapse; background: var(--panel); border-radius: 6px; overflow: hidden; }
-  td { padding: 8px 12px; border-top: 1px solid var(--line); vertical-align: top; }
-  tr:first-child td { border-top: 0; }
-  td:first-child { width: 34%; color: var(--muted); }
-  kbd {
-    display: inline-block; min-width: 1.6em; padding: 1px 6px; margin: 1px 2px 1px 0;
-    font: 13px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; text-align: center;
-    background: var(--key); border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 4px; color: var(--ink);
-  }
-  .note { color: var(--muted); font-size: 14px; margin: 8px 0 0; }
-  a { color: var(--ink); }
-  footer { margin-top: 32px; color: var(--muted); font-size: 14px; }
+body{margin:0;background:#0b0d1a}
+.dome a{color:#f8c828}.dome a:hover{color:#fff3a0}
+.dome{position:relative;width:100%;overflow:hidden;background:#0b0d1a;color:#eceae4;font-family:'Pixelify Sans',ui-monospace,monospace}
+.px{font-family:'Silkscreen',ui-monospace,monospace}
+.led{color:#ffb733;text-shadow:0 0 6px rgba(255,150,40,.55)}
+.dots{position:relative}
+.dots::after{content:"";position:absolute;inset:0;pointer-events:none;background:radial-gradient(circle,transparent 48%,rgba(0,0,0,.42) 78%) 0 0/3px 3px}
+
+/* ---------- sky through the open roof ---------- */
+.sky{position:relative;height:410px;background:linear-gradient(#0a0924 0 16%,#120f3a 16% 30%,#1d1650 30% 43%,#2f1d5e 43% 55%,#4c2463 55% 65%,#742e63 65% 74%,#a63c58 74% 82%,#d45a45 82% 90%,#f08a3c 90% 96%,#f7ad52 96%)}
+.stars{position:absolute;left:0;right:0;top:0;height:62%;z-index:0}
+.stars-a{background-image:radial-gradient(1px 1px at 14px 22px,#fff 99%,transparent),radial-gradient(1px 1px at 96px 70px,#fff 99%,transparent),radial-gradient(1.5px 1.5px at 168px 34px,#ffe9b0 99%,transparent),radial-gradient(1px 1px at 214px 118px,#cfd8ff 99%,transparent);background-size:241px 151px}
+.stars-b{background-image:radial-gradient(1.5px 1.5px at 40px 90px,#fff 99%,transparent),radial-gradient(1px 1px at 120px 16px,#cfd8ff 99%,transparent),radial-gradient(2px 2px at 150px 60px,#fff8dc 99%,transparent);background-size:173px 127px;animation:twinkle 5.5s ease-in-out infinite alternate}
+@keyframes twinkle{to{opacity:.25}}
+.tower{position:absolute;right:12%;bottom:0;width:60px;height:252px;z-index:1}
+.tower i{position:absolute;display:block}
+.beacon{animation:beacon 2.4s steps(1) infinite}
+@keyframes beacon{0%{opacity:1}55%{opacity:.12}}
+.plane{position:absolute;top:150px;left:-30%;z-index:2;display:flex;align-items:center;animation:fly 84s linear infinite}
+@keyframes fly{0%{left:-30%}62%{left:112%}100%{left:112%}}
+.roof{position:absolute;inset:0;z-index:3;background:repeating-linear-gradient(60deg,transparent 0 22px,#1c2347 22px 25px),repeating-linear-gradient(-60deg,transparent 0 22px,#1c2347 22px 25px),#12162e;-webkit-mask:radial-gradient(70% 480px at 50% 516px,transparent 99.6%,#000 99.9%);mask:radial-gradient(70% 480px at 50% 516px,transparent 99.6%,#000 99.9%)}
+.ring{position:absolute;left:-20%;width:140%;top:16px;height:960px;border-radius:50%;border:20px solid #232a52;z-index:3;pointer-events:none}
+.ring::before{content:"";position:absolute;inset:-13px;border-radius:50%;border:3px dashed #3b4682}
+.flood{position:absolute;z-index:4;width:48px;height:18px;background:#2a2f4a radial-gradient(circle,#fffbe6 0 2.5px,transparent 3.5px) 3px 1px/11px 8px;border:2px solid #3a4060;box-shadow:0 0 26px 8px rgba(255,245,200,.28)}
+.logo{position:relative;z-index:5;padding-top:78px;text-align:center;line-height:.92}
+.logo-red,.logo-gold{display:block;font-family:'Silkscreen',ui-monospace,monospace;font-weight:700;font-size:clamp(46px,7.4vw,104px);letter-spacing:.03em;-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent}
+.logo-red{background-image:linear-gradient(#ff7357 0 32%,#e8302a 32% 64%,#b3161c 64%);filter:drop-shadow(0 4px 0 #5a0b1e) drop-shadow(0 4px 0 #1a0a26)}
+.logo-gold{background-image:linear-gradient(#fff3a0 0 30%,#f8c828 30% 64%,#d98a12 64%);filter:drop-shadow(0 4px 0 #6a3a08) drop-shadow(0 4px 0 #1a0a26)}
+
+/* ---------- 500 level, hotel, JumboTron ---------- */
+.crowd{background:radial-gradient(circle at 3px 3px,#e6c3a0 2px,transparent 2.2px) 0 0/9px 10px,radial-gradient(circle at 3px 3px,#1f5bb0 2px,transparent 2.2px) 4px 5px/13px 10px,radial-gradient(circle at 3px 3px,#f2f2f2 2px,transparent 2.2px) 7px 2px/17px 10px,radial-gradient(circle at 3px 3px,#d2392b 2px,transparent 2.2px) 2px 7px/23px 10px,radial-gradient(circle at 3px 3px,#8a5a3c 2px,transparent 2.2px) 11px 4px/19px 10px,repeating-linear-gradient(#161c3e 0 7px,#0a0e22 7px 10px)}
+.stadium{position:relative;padding:0 16px 34px}
+.lip{position:absolute;left:0;right:0;top:0;height:10px;background:#3a3f58;border-bottom:3px solid #0a0c18;z-index:1}
+.hotel{position:absolute;top:30px;width:calc((100% - 1240px) / 2 - 30px);height:176px;background:linear-gradient(90deg,#20263f 0 3px,transparent 3px) 0 0/14px 12px,linear-gradient(#20263f 0 3px,transparent 3px) 0 0/14px 12px,#e7c46a;border:4px solid #20263f;box-shadow:0 0 30px rgba(231,196,106,.18)}
+.hotel i{position:absolute;display:block;width:11px;height:9px;background:#0d1124}
+.hotel i.blink{animation:room 13s steps(1) infinite}
+@keyframes room{0%{background:#0d1124}40%{background:#e7c46a}78%{background:#0d1124}}
+.jt-wrap{position:relative;z-index:6;max-width:1240px;margin:-76px auto 0}
+.marquee{display:flex;align-items:center;justify-content:center;gap:18px;width:fit-content;max-width:100%;box-sizing:border-box;margin:0 auto;background:#0e1018;border:4px solid #23283c;border-bottom:0;padding:10px 22px 8px}
+.bulbs{display:flex;gap:8px}
+.bulb{width:8px;height:8px;background:#ffd98a;box-shadow:0 0 8px #ffb733;animation:bulb 3.2s steps(1) infinite}
+.bulb:nth-child(even){animation-delay:1.6s}
+@keyframes bulb{50%{opacity:.3}}
+.live{display:inline-block;width:8px;height:8px;background:#ff4a2e;box-shadow:0 0 8px #ff4a2e;animation:bulb 2.6s steps(1) infinite;margin-right:6px;vertical-align:1px}
+.jt{background:#08090d;border:10px solid #23283c;box-shadow:inset 0 0 0 2px #3a4060,0 0 0 4px #0b0d16,0 30px 80px rgba(0,0,0,.6),0 0 160px rgba(110,140,255,.17)}
+.jt-grid{display:grid;grid-template-columns:200px minmax(0,1fr) 200px;grid-template-areas:"left screen right";gap:16px;padding:18px}
+.fl-left{grid-area:left}.fl-right{grid-area:right}.fl-screen{grid-area:screen}
+.flank{background:#0c0d12;border:2px solid #1d2030;padding:12px 12px 14px;display:flex;flex-direction:column;gap:10px}
+.fl-h{font-family:'Silkscreen',ui-monospace,monospace;font-size:12px;letter-spacing:.14em;color:#7ad8f0;text-shadow:0 0 6px rgba(122,216,240,.5);padding-bottom:8px;border-bottom:2px dotted rgba(255,183,51,.35)}
+.ev{display:grid;grid-template-columns:22px minmax(0,1fr);column-gap:8px;align-items:start}
+.ev b{font-family:'Silkscreen',ui-monospace,monospace;font-size:14px;color:#ff4a2e;text-shadow:0 0 6px rgba(255,74,46,.6);line-height:1.1}
+.ev span{font-family:'Silkscreen',ui-monospace,monospace;font-size:11px;line-height:1.25;color:#ffb733;text-shadow:0 0 6px rgba(255,150,40,.5)}
+.ev small{display:block;font-family:'Silkscreen',ui-monospace,monospace;font-size:9px;color:#b9853a;letter-spacing:.04em}
+.ctl{display:flex;justify-content:space-between;align-items:center;gap:6px}
+.ctl span{font-family:'Silkscreen',ui-monospace,monospace;font-size:10px;color:#b9853a}
+.key{display:inline-block;min-width:16px;padding:2px 5px;margin-left:3px;border:2px solid #ffb733;color:#ffb733;font:11px/1.2 'Silkscreen',ui-monospace,monospace;text-align:center;text-shadow:0 0 6px rgba(255,150,40,.5)}
+.fl-note{font-family:'Silkscreen',ui-monospace,monospace;font-size:9px;line-height:1.5;color:#7ad8f0;margin-top:auto}
+.screen-frame{background:#000;border:6px solid #050507;box-shadow:0 0 0 2px #2a2f45,0 0 50px rgba(120,150,255,.28)}
+.screen{position:relative;aspect-ratio:4/3;background:#000;overflow:hidden}
+#game{width:100%;height:100%}
+.ledmask{position:absolute;inset:0;pointer-events:none;background:radial-gradient(circle,transparent 58%,rgba(0,0,0,.22) 82%) 0 0/3px 3px}
+.jt-foot{display:flex;justify-content:space-between;align-items:center;gap:14px 20px;flex-wrap:wrap;padding:14px 18px 16px;border-top:4px solid #1d2030;background:#0b0c12}
+.jt-foot p{margin:0;font-family:'Silkscreen',ui-monospace,monospace;font-size:11px;letter-spacing:.06em}
+.rom-btn{display:inline-flex;align-items:center;gap:10px;min-height:44px;box-sizing:border-box;padding:12px 22px;background:#e8302a;color:#fff;border:3px solid #1a0610;box-shadow:inset -4px -4px 0 #9a1218,inset 4px 4px 0 #ff7a5c,0 4px 0 #2a0610;font:700 15px/1 'Silkscreen',ui-monospace,monospace;letter-spacing:.06em;text-decoration:none}
+.rom-btn:hover{color:#fff;background:#f2413a;transform:translateY(1px);box-shadow:inset -4px -4px 0 #9a1218,inset 4px 4px 0 #ff7a5c,0 3px 0 #2a0610}
+.rom-btn:focus-visible,.dome a:focus-visible{outline:3px solid #7ad8f0;outline-offset:3px}
+
+/* ---------- ribbon board, lower deck, wall, field ---------- */
+.ribbon{position:relative;z-index:2;background:#050507;border-top:4px solid #2a2f45;border-bottom:4px solid #2a2f45;overflow:hidden;height:44px;display:flex;align-items:center}
+.ticker{display:flex;width:max-content;animation:tick 150s linear infinite;white-space:nowrap}
+.ticker span{font-family:'Silkscreen',ui-monospace,monospace;font-size:18px;letter-spacing:.12em;color:#ffb733;text-shadow:0 0 8px rgba(255,150,40,.6);padding-right:48px}
+.ticker em{font-style:normal;color:#ff4a2e;text-shadow:0 0 8px rgba(255,74,46,.6)}
+@keyframes tick{to{transform:translateX(-50%)}}
+.lowdeck{position:relative;height:70px;overflow:hidden}
+.wave{position:absolute;top:0;bottom:0;left:-15%;width:110px;background:rgba(230,236,255,.09);animation:wave 46s linear infinite}
+@keyframes wave{0%{left:-15%}22%{left:110%}100%{left:110%}}
+.flash{position:absolute;width:3px;height:3px;background:#fff;opacity:0;animation:flash 9s steps(1) infinite}
+@keyframes flash{0%{opacity:0;box-shadow:none}96%{opacity:1;box-shadow:0 0 8px 3px rgba(255,255,255,.8)}98%{opacity:0;box-shadow:none}}
+.wall-zone{position:relative}
+.raccoon{position:absolute;left:21%;top:-24px;width:30px;height:26px;z-index:0;transform:translateY(28px);animation:peek 31s ease-in-out infinite}
+.raccoon i{position:absolute;display:block}
+@keyframes peek{0%,58%{transform:translateY(28px)}62%,74%{transform:translateY(0)}78%,100%{transform:translateY(28px)}}
+.wall{position:relative;z-index:1;display:flex;flex-wrap:wrap;gap:14px;justify-content:center;align-items:center;padding:20px 16px 24px;background:repeating-linear-gradient(90deg,#1b3f8c 0 118px,#14316e 118px 120px);border-top:8px solid #f8c828;box-shadow:inset 0 -6px 0 #0f2656}
+.dist{font-family:'Silkscreen',ui-monospace,monospace;font-weight:700;font-size:34px;color:#f4f1e8;text-shadow:0 3px 0 #0f2656;min-width:72px;text-align:center}
+.ad{flex:1 1 190px;max-width:230px;box-sizing:border-box;border:3px solid #eceae4;background:#163679;padding:10px 12px 12px;text-align:center}
+.ad strong{display:block;font-family:'Silkscreen',ui-monospace,monospace;font-size:15px;color:#f8c828;letter-spacing:.04em}
+.ad span{display:block;margin-top:4px;font-family:'Silkscreen',ui-monospace,monospace;font-size:11px;color:#eceae4;line-height:1.35}
+.track{height:28px;background:radial-gradient(circle at 2px 2px,#a4643e 1.5px,transparent 2px) 0 0/7px 6px,#8b5130;border-top:3px solid #5f3820}
+.field{position:relative;overflow:hidden;padding:48px 16px 150px;background:repeating-linear-gradient(#2d7b3a 0 46px,#277134 46px 92px);text-align:center}
+.infield{position:absolute;left:50%;bottom:-380px;width:min(960px,96%);height:480px;transform:translateX(-50%);border-radius:50%;background:radial-gradient(circle at 2px 2px,#b9764a 1.5px,transparent 2px) 0 0/8px 7px,#a8643a;box-shadow:0 0 0 10px #2a7436,0 0 0 13px #d9d2c0}
+.base{position:absolute;left:50%;bottom:58px;width:18px;height:18px;margin-left:-9px;background:#f4f1e8;transform:rotate(45deg);box-shadow:2px 2px 0 #6e4026}
+.field p{position:relative;z-index:1;margin:0 auto;max-width:720px}
+.field .chalk{font-family:'Silkscreen',ui-monospace,monospace;color:#f4f1e8;text-shadow:0 2px 0 #1d5428}
+
+@media (prefers-reduced-motion:reduce){.dome *,.dome *::before,.dome *::after{animation:none !important}}
+@media (max-width:1359px){.hotel{display:none}}
+@media (max-width:980px){
+  .jt-grid{grid-template-columns:minmax(0,1fr) minmax(0,1fr);grid-template-areas:"screen screen" "left right";padding:12px;gap:12px}
+  .jt-wrap{margin-top:-70px}
+  .sky{height:320px}
+  .tower{right:4%}
+  .dist.side{display:none}
+}
+@media (max-width:600px){
+  .jt-grid{grid-template-columns:minmax(0,1fr);grid-template-areas:"screen" "left" "right";padding:8px}
+  .jt{border-width:6px}
+  .sky{height:260px}
+  .logo{padding-top:64px}
+  .jt-wrap{margin-top:-40px}
+  .tower{transform:scale(.7);transform-origin:bottom right;right:3%}
+  .marquee{padding:8px 12px 6px;gap:10px}
+  .bulbs{display:none}
+  .ad{max-width:none}
+}
 </style>
 </head>
 <body>
-<main>
-  <header>
-    <h1>Toronto <span>Games</span></h1>
-    <p>Seven events across Toronto · 1–8 players taking turns</p>
+
+<div class="dome">
+
+  <!-- ===== the roof is open ===== -->
+  <header class="sky">
+    
+      <div class="stars stars-a" aria-hidden="true"></div>
+      <div class="stars stars-b" aria-hidden="true"></div>
+
+      <div class="tower" aria-hidden="true">
+        <i class="beacon" style="left: 27px; top: -4px; width: 6px; height: 6px; background: #ff3b2f; box-shadow: 0 0 10px 3px rgba(255,59,47,.7)"></i>
+        <i style="left: 29px; top: 2px; width: 2px; height: 66px; background: #c9cbd6"></i>
+        <i style="left: 22px; top: 66px; width: 16px; height: 10px; background: #d8d9e2; box-shadow: inset 0 -3px 0 #9a9db0"></i>
+        <i style="left: 26px; top: 76px; width: 8px; height: 56px; background: linear-gradient(90deg,#e2e3ea 0 60%,#9a9db0 60%)"></i>
+        <i style="left: 8px; top: 128px; width: 44px; height: 6px; background: #ecebf2"></i>
+        <i style="left: 8px; top: 134px; width: 44px; height: 6px; background: repeating-linear-gradient(90deg,#f7d36b 0 4px,#3b2a52 4px 6px)"></i>
+        <i style="left: 11px; top: 140px; width: 38px; height: 10px; background: #a7a9bd; border-radius: 0 0 14px 14px"></i>
+        <i style="left: 24px; top: 150px; width: 12px; height: 102px; background: linear-gradient(90deg,#d6d7e2 0 58%,#9396ab 58%)"></i>
+        <i style="left: 16px; top: 222px; width: 28px; height: 30px; background: linear-gradient(90deg,#c6c8d6 0 58%,#868aa0 58%); clip-path: polygon(30% 0, 70% 0, 100% 100%, 0 100%)"></i>
+      </div>
+
+      <div class="plane" aria-hidden="true">
+        <span class="px" style="font-size: 11px; color: #b3161c; background: #f2ece0; border: 2px solid #c9c0ad; padding: 3px 8px; letter-spacing: .06em">BEAT THE TORONTO RECORD</span>
+        <span style="display: block; width: 22px; height: 1px; background: #c9c0ad"></span>
+        <svg width="34" height="14" viewBox="0 0 34 14" shape-rendering="crispEdges">
+          <rect x="2" y="5" width="26" height="5" fill="#e6e6ee"></rect>
+          <rect x="28" y="6" width="4" height="3" fill="#c9cbd6"></rect>
+          <rect x="0" y="1" width="4" height="8" fill="#e8302a"></rect>
+          <rect x="12" y="0" width="5" height="14" fill="#a7a9bd"></rect>
+          <rect x="20" y="6" width="5" height="2" fill="#3b4682"></rect>
+        </svg>
+      </div>
+
+      <div class="roof" aria-hidden="true"></div>
+      <div class="ring" aria-hidden="true"></div>
+    
+    <div class="flood" aria-hidden="true" style="left: 5%; top: 66px"></div>
+    <div class="flood" aria-hidden="true" style="left: 17%; top: 34px"></div>
+    <div class="flood" aria-hidden="true" style="right: 17%; top: 34px"></div>
+    <div class="flood" aria-hidden="true" style="right: 5%; top: 66px"></div>
+
+    <h1 class="logo" style="margin: 0">
+      <span class="logo-red">TORONTO</span>
+      <span class="logo-gold">GAMES</span>
+    </h1>
   </header>
 
-  <div id="screen"><div id="game"></div></div>
+  <!-- ===== 500 level, the hotel, and the big TV ===== -->
+  <main class="stadium crowd">
+    <div class="lip" aria-hidden="true"></div>
 
-  <p class="download">
-    <a class="button" href="toronto_games.sfc" download>Download the ROM</a>
-    <span>toronto_games.sfc · 512 KB · for any SNES emulator or a flash cart</span>
-  </p>
+    <div class="hotel" aria-hidden="true" style="left: 14px">
+      <i style="left: 3px; top: 3px"></i>
+      <i style="left: 31px; top: 15px"></i>
+      <i class="blink" style="left: 45px; top: 51px"></i>
+      <i style="left: 3px; top: 87px"></i>
+      <i style="left: 17px; top: 123px"></i>
+      <i style="left: 45px; top: 147px"></i>
+    </div>
+    <div class="hotel" aria-hidden="true" style="right: 14px">
+      <i style="left: 17px; top: 27px"></i>
+      <i class="blink" style="left: 3px; top: 63px; animation-delay: 6s"></i>
+      <i style="left: 31px; top: 99px"></i>
+      <i style="left: 45px; top: 15px"></i>
+      <i style="left: 3px; top: 135px"></i>
+    </div>
 
-  <section>
-    <h2>Keyboard</h2>
-    <table>
-      <tr><td>D-pad</td><td><kbd>←</kbd><kbd>↑</kbd><kbd>↓</kbd><kbd>→</kbd></td></tr>
-      <tr><td>A / B</td><td><kbd>A</kbd> / <kbd>B</kbd></td></tr>
-      <tr><td>X / Y</td><td><kbd>S</kbd> / <kbd>Y</kbd></td></tr>
-      <tr><td>L / R</td><td><kbd>Q</kbd> / <kbd>W</kbd></td></tr>
-      <tr><td>Start / Select</td><td><kbd>Enter</kbd> / <kbd>Tab</kbd></td></tr>
-    </table>
-    <p class="note">A game controller works too, with the SNES layout: right face button is A, bottom is B.
-      Every event opens with a card showing the buttons it uses. Keys can be remapped from the gamepad icon under the screen.</p>
-  </section>
+    <i class="flash" aria-hidden="true" style="left: 2%; top: 210px; animation-delay: 1s"></i>
+    <i class="flash" aria-hidden="true" style="left: 5%; top: 300px; animation-delay: 5.5s; animation-duration: 11s"></i>
+    <i class="flash" aria-hidden="true" style="right: 3%; top: 250px; animation-delay: 3.2s"></i>
+    <i class="flash" aria-hidden="true" style="right: 6%; top: 420px; animation-delay: 7.7s; animation-duration: 12s"></i>
 
-  <section>
-    <h2>Records</h2>
-    <p class="note" style="margin-top:0">The Toronto Records are kept in this browser, saved every 30 seconds and when you leave the page.</p>
-  </section>
+    <div class="jt-wrap">
+      <div class="marquee">
+        <div class="bulbs" aria-hidden="true"><i class="bulb"></i><i class="bulb"></i><i class="bulb"></i><i class="bulb"></i><i class="bulb"></i></div>
+        <div style="text-align: center">
+          <div class="px led" style="font-weight: 700; font-size: 28px; letter-spacing: .18em; line-height: 1">DOMEVISION</div>
+          <div class="px" style="font-size: 10px; letter-spacing: .14em; color: #7ad8f0; margin-top: 6px"><span class="live" aria-hidden="true"></span>LIVE FROM THE DOME · EST. 1989</div>
+        </div>
+        <div class="bulbs" aria-hidden="true"><i class="bulb"></i><i class="bulb"></i><i class="bulb"></i><i class="bulb"></i><i class="bulb"></i></div>
+      </div>
 
-  <footer>
-    A Super Nintendo ROM written in 65816 assembly. Runs here in snes9x via
-    <a href="https://emulatorjs.org">EmulatorJS</a> ·
-    <a href="https://github.com/Abstrct/toronto-games">Source</a>
+      <div class="jt">
+        <div class="jt-grid">
+
+          <section class="flank fl-left dots" aria-labelledby="card-h">
+            <div class="fl-h" id="card-h">TODAY'S CARD</div>
+            <div class="ev"><b>1</b><span>BIKE COURIER<small>QUEEN ST W</small></span></div>
+            <div class="ev"><b>2</b><span>BAY ST POWER WALK<small>BAY AT KING</small></span></div>
+            <div class="ev"><b>3</b><span>OFF-LEASH ALERT<small>TRINITY BELLWOODS</small></span></div>
+            <div class="ev"><b>4</b><span>TALLBOY TROT<small>KENSINGTON MARKET</small></span></div>
+            <div class="ev"><b>5</b><span>HARBOUR REGATTA<small>TORONTO HARBOUR</small></span></div>
+            <div class="ev"><b>6</b><span>PARALLEL PARKING<small>THE ANNEX</small></span></div>
+            <div class="ev"><b>7</b><span>TTC SURFING<small>LINE 1 TO UNION</small></span></div>
+            <p class="fl-note" style="margin-bottom: 0">1–8 PLAYERS · TAKE TURNS</p>
+          </section>
+
+          <div class="fl-screen">
+            <div class="screen-frame">
+              <div class="screen" id="screen">
+                <div id="game"></div>
+                <div class="ledmask" aria-hidden="true"></div>
+              </div>
+            </div>
+          </div>
+
+          <section class="flank fl-right dots" aria-labelledby="keys-h">
+            <div class="fl-h" id="keys-h">CONTROLS</div>
+            <div class="ctl"><span>D-PAD</span><span><kbd class="key">←</kbd><kbd class="key">↑</kbd><kbd class="key">↓</kbd><kbd class="key">→</kbd></span></div>
+            <div class="ctl"><span>A · B</span><span><kbd class="key">A</kbd><kbd class="key">B</kbd></span></div>
+            <div class="ctl"><span>X · Y</span><span><kbd class="key">S</kbd><kbd class="key">Y</kbd></span></div>
+            <div class="ctl"><span>L · R</span><span><kbd class="key">Q</kbd><kbd class="key">W</kbd></span></div>
+            <div class="ctl"><span>START</span><span><kbd class="key">ENTER</kbd></span></div>
+            <div class="ctl"><span>SELECT</span><span><kbd class="key">TAB</kbd></span></div>
+            <p class="fl-note" style="margin-bottom: 0">GAMEPAD WORKS, SNES LAYOUT. REMAP FROM THE PAD ICON UNDER THE SCREEN.</p>
+          </section>
+
+        </div>
+
+        <div class="jt-foot">
+          <p class="led">RECORDS KEPT IN THIS BROWSER · SAVED EVERY 30 S</p>
+          <a class="rom-btn" href="toronto_games.sfc" download="">
+            <svg width="16" height="16" viewBox="0 0 16 16" shape-rendering="crispEdges" aria-hidden="true"><rect x="6" y="1" width="4" height="8" fill="#fff"></rect><rect x="3" y="7" width="10" height="2" fill="#fff"></rect><rect x="5" y="9" width="6" height="2" fill="#fff"></rect><rect x="7" y="11" width="2" height="1" fill="#fff"></rect><rect x="1" y="13" width="14" height="2" fill="#fff"></rect></svg>
+            DOWNLOAD THE ROM
+          </a>
+          <p style="color: #7ad8f0">TORONTO_GAMES.SFC · 512 KB · ANY SNES EMULATOR</p>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <!-- ===== ribbon board ===== -->
+  <div class="ribbon dots" role="marquee" aria-label="Ribbon board">
+    <div class="ticker">
+      <span>WELCOME TO THE DOME <em>◆</em> TONIGHT'S ATTENDANCE: 1 TO 8 PLAYERS, TAKING TURNS <em>◆</em> ROOF OPEN. IF IT RAINS IT TAKES 20 MINUTES TO CLOSE. PLEASE REMAIN CALM <em>◆</em> LINE 1: DELAYS AT ST GEORGE. SIGNAL PROBLEMS. YOU KNOW THE DRILL <em>◆</em> DVP SOUTHBOUND: PARKING LOT <em>◆</em> SECTION 518: PLEASE STOP FEEDING THE RACCOON <em>◆</em> THE 5:42 GO TO UNION IS ON TIME. THIS ONCE <em>◆</em> BIKE COURIERS: HOP THE STREETCAR TRACKS <em>◆</em> NO TALLBOYS ON THE FIELD <em>◆</em> THE '92 AND '93 BANNERS ARE STILL UP. WE CHECKED <em>◆</em> CN TOWER: 553.3 M. STILL TALLER THAN YOUR CONDO <em>◆</em> PARALLEL PARKING ON BRUNSWICK: GOOD LUCK <em>◆</em></span>
+      <span aria-hidden="true">WELCOME TO THE DOME <em>◆</em> TONIGHT'S ATTENDANCE: 1 TO 8 PLAYERS, TAKING TURNS <em>◆</em> ROOF OPEN. IF IT RAINS IT TAKES 20 MINUTES TO CLOSE. PLEASE REMAIN CALM <em>◆</em> LINE 1: DELAYS AT ST GEORGE. SIGNAL PROBLEMS. YOU KNOW THE DRILL <em>◆</em> DVP SOUTHBOUND: PARKING LOT <em>◆</em> SECTION 518: PLEASE STOP FEEDING THE RACCOON <em>◆</em> THE 5:42 GO TO UNION IS ON TIME. THIS ONCE <em>◆</em> BIKE COURIERS: HOP THE STREETCAR TRACKS <em>◆</em> NO TALLBOYS ON THE FIELD <em>◆</em> THE '92 AND '93 BANNERS ARE STILL UP. WE CHECKED <em>◆</em> CN TOWER: 553.3 M. STILL TALLER THAN YOUR CONDO <em>◆</em> PARALLEL PARKING ON BRUNSWICK: GOOD LUCK <em>◆</em></span>
+    </div>
+  </div>
+
+  <!-- ===== 100 level ===== -->
+  <div class="lowdeck crowd" aria-hidden="true">
+    <div class="wave"></div>
+    <i class="flash" style="left: 9%; top: 22px; animation-delay: 2s"></i>
+    <i class="flash" style="left: 31%; top: 46px; animation-delay: 6.4s; animation-duration: 10s"></i>
+    <i class="flash" style="left: 52%; top: 14px; animation-delay: 4.1s; animation-duration: 13s"></i>
+    <i class="flash" style="left: 70%; top: 38px; animation-delay: 8.3s"></i>
+    <i class="flash" style="left: 90%; top: 26px; animation-delay: .6s; animation-duration: 11s"></i>
+  </div>
+
+  <!-- ===== outfield wall ===== -->
+  <div class="wall-zone">
+    <div class="raccoon" aria-hidden="true">
+      <i style="left: 1px; top: 0; width: 7px; height: 7px; background: #5b5b66"></i>
+      <i style="left: 22px; top: 0; width: 7px; height: 7px; background: #5b5b66"></i>
+      <i style="left: 0; top: 5px; width: 30px; height: 17px; background: #8a8a96"></i>
+      <i style="left: 0; top: 10px; width: 30px; height: 6px; background: #1a1a22"></i>
+      <i style="left: 7px; top: 11px; width: 3px; height: 3px; background: #fff"></i>
+      <i style="left: 20px; top: 11px; width: 3px; height: 3px; background: #fff"></i>
+      <i style="left: 11px; top: 17px; width: 8px; height: 5px; background: #d6d6de"></i>
+      <i style="left: 13px; top: 17px; width: 4px; height: 2px; background: #1a1a22"></i>
+      <i style="left: 2px; top: 21px; width: 7px; height: 5px; background: #5b5b66"></i>
+      <i style="left: 21px; top: 21px; width: 7px; height: 5px; background: #5b5b66"></i>
+    </div>
+    <div class="wall">
+      <div class="dist side">328</div>
+      <div class="ad"><strong>DVP TOWING</strong><span>STUCK? SO ARE WE.</span></div>
+      <div class="dist side">375</div>
+      <div class="ad"><strong>5:42 GO TO UNION</strong><span>WALK FAST. SAY "EXCUSE ME."</span></div>
+      <div class="dist">400</div>
+      <div class="ad"><strong>TRINITY BELLWOODS</strong><span>DOGS MUST BE ON LEASH.* <br>*THEY ARE NOT.</span></div>
+      <div class="dist side">375</div>
+      <div class="ad"><strong>HARBOUR SAILING</strong><span>YOU CAN'T SAIL INTO THE WIND. ZIG-ZAG.</span></div>
+      <div class="dist side">328</div>
+    </div>
+  </div>
+
+  <!-- ===== the field ===== -->
+  <div class="track" aria-hidden="true"></div>
+  <footer class="field">
+    <div class="infield" aria-hidden="true"></div>
+    <div class="base" aria-hidden="true"></div>
+    <p class="chalk" style="font-size: 13px; letter-spacing: .2em; color: #f8c828">THE OLYMPICS WE CAN AFFORD</p>
+    <p class="chalk" style="font-size: 15px; line-height: 1.6; margin-top: 14px">A SUPER NINTENDO ROM WRITTEN IN 65816 ASSEMBLY. RUNS HERE IN SNES9X VIA <a href="https://emulatorjs.org">EMULATORJS</a> · <a href="https://github.com/Abstrct/toronto-games">SOURCE</a></p>
+    <p class="chalk" style="font-size: 10px; letter-spacing: .1em; margin-top: 18px; color: #cfe9cf">© 2026 TORONTO GAMES · NO RACCOONS WERE HARMED. ONE WAS FED. SECTION 518 KNOWS WHAT IT DID.</p>
   </footer>
-</main>
+
+</div>
 
 <script>
   // SNES retropad ids: 0 B, 1 Y, 2 Select, 3 Start, 4-7 Up/Down/Left/Right, 8 A, 9 X, 10 L, 11 R.
