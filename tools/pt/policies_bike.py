@@ -216,8 +216,51 @@ class _Planner(_Reader):
 
     hop_rails = False   # B as it's about to cross a rail (a TRACK HOP, not a wobble)
     hop_xing = True     # B for the tracks across the road (HOP THE RAILS: B!)
+    sparks = False      # a 501's pole sparks: get beside a track, cross it, hop a beat in
+
+    def spark_move(self, t, me, ents):
+        """-> a pad mask while it's crossing a track for the undocumented trick, else None.
+        It sees the spark (b_live, what the screen shows), goes to the line beside
+        the nearest track, and once the rails are about to go live holds the pad
+        across them with B HOP_BEAT frames in (the hop starts while they're live)."""
+        lv = self.g.core.peek(self.ev + 470, 1)[0]
+        tr = getattr(self, 'xfer', None)
+        if tr:
+            dirn, end, b_at = tr
+            if t >= max(end, b_at + 3) or me['state'] != 0:
+                self.xfer = None
+                return None
+            m = (dirn if t < end else 0) | A
+            if b_at <= t < b_at + 3:
+                m |= B
+            return m
+        if me['state'] != 0 or not 20 < lv <= 18 + 60 or me['speed'] < 1.6:
+            return None
+        x = me['x']
+        L0 = min((186, 140, 117, 66), key=lambda L: abs(L - x))
+        if abs(L0 - x) >= 4:
+            self.target = L0            # get beside it first
+            return None
+        if lv > 60 + 18 - 10:
+            return None                 # (B would come in the warning)
+        L1 = {186: 140, 140: 186, 117: 66, 66: 117}[L0]
+        seen = [e for e in ents if -60 <= e['rel'] <= 200]
+        blocks = [b for e in seen for b in self.blocks(me, e)]
+        if self.lane_cost(me, seen, blocks, L1) >= 1000:
+            return None
+        d = L1 - x
+        n = min(range(1, 199), key=lambda k: abs(DISP[k] - abs(d)))
+        self.xfer = (RIGHT if d > 0 else LEFT, t + n, t + HOP_BEAT)
+        self.target = L1
+        self.next_look = t + n + 20
+        return self.spark_move(t, me, ents)
 
     def act(self, t, tel, rng):
+        if self.sparks:
+            me, ents = self.read()
+            m = self.spark_move(t, me, ents)
+            if m is not None:
+                return m
         m = self.act1(t, tel, rng)
         if self.hop_rails and not m & DOWN:
             me = self.me
@@ -308,6 +351,7 @@ class bike_pro(_Planner):
     react = (2, 6)
     drafts = True
     hop_rails = True
+    sparks = True
 
 
 class bike_human(_Planner):
@@ -602,7 +646,7 @@ class bike_ace(bike_courier):
 CLOSE_D = 40                   # src/ev_bike_ent.inc
 CLOSE_T = (1, 2, 3, 4, 5, 6)   # parked cars, cars and the 501 (near_tab)
 B_HOPD, B_CHAIN, B_CHAINT = 402, 406, 408
-B_XOK = 470                    # 1 = a TTC TRANSFER would pay
+B_LIVE_AT = 470                # (byte) a 501's spark: SPARK_T warning + LIVE_T live frames left
 
 
 class bike_stylist(bike_courier):
@@ -627,7 +671,13 @@ class bike_stylist(bike_courier):
         me['hop_ready'] = ((me['dist'] - w(B_HOPD)) & 0xFFFF) >= HOP_GAP
         me['chain'] = w(B_CHAIN) if w(B_CHAINT) else 0
         me['hop'] = w(B_HOP)
-        me['xok'] = self.g.core.peek(self.ev + B_XOK, 1)[0]
+        # a transfer pays only while the rails are live after a 501's spark
+        # (what the screen shows: the pole's spark, then the rails crackling);
+        # a quick hand plans the crossing from the spark on
+        lv = self.g.core.peek(self.ev + B_LIVE_AT, 1)[0]
+        # (B ~9 frames after a decision, plus its hand: that B in the window)
+        me['xok'] = 1 if 0 < lv - (self.lag or 0) - 9 <= 60 else 0
+        me['live'] = lv
         self.last_read = (me, ents)
         return me, ents
 
@@ -720,6 +770,8 @@ class bike_stylist(bike_courier):
                     break
             if me['xok'] and self.xfer_frame(x0, L) is not None:
                 c -= self.xfer_bonus * mult
+            elif me.get('live', 0) > 30 and L in (186, 140, 117, 66) and abs(L - x0) < 30:
+                c -= self.xfer_bonus * 0.4 * mult     # a spark: to a line beside a track
         for e in ents:
             if e['t'] == T_HOLE and 40 < e['rel'] < 168 and abs(e['x'] - L) < HW[T_HOLE] and self.hole_hoppable(me, e):
                 c -= self.hole_bonus * mult
@@ -1131,7 +1183,7 @@ def screen_text(g):
         line = ''
         for x in range(32):
             t = tm[(y * 32 + x) * 2] & 0x7F
-            line += chr(t + 32) if 1 <= t <= 63 else ('>' if t == 78 else '<' if t == 79 else ' ')
+            line += chr(t + 32) if 1 <= t <= 63 else {78: '>', 79: '<', 85: '^', 86: 'v'}.get(t, ' ')
         rows.append(line)
     return rows
 
@@ -1180,7 +1232,13 @@ class bike_obey(_Reader):
             self.seen = text
             if 'HOP' in text and ': B' in text:
                 self.b_until = t + 3
-            if 'STEER <' in text or 'STEER >' in text:
+            if 'SLOW CAR' in text:
+                self.quiet_at = t
+                if 'STEER' in text:
+                    self.go(HOME if 'STEER >' in text else 140, x, t)
+                else:
+                    self.brake_until = t + 30
+            elif 'STEER <' in text or 'STEER >' in text:
                 self.quiet_at = t
                 self.warn = '501' in text
                 if '501' in text:
@@ -1210,7 +1268,7 @@ class bike_obey(_Reader):
         if self.target != home and t - self.quiet_at > 60 and t >= look and not beside:
             self.go(home, x, t)
             dirn, end, look = self.move
-        m = A | (dirn if t < end else 0)
+        m = (DOWN if t < getattr(self, 'brake_until', -1) else A) | (dirn if t < end else 0)
         if t < self.b_until:
             m |= B
         return m
@@ -1230,7 +1288,7 @@ DEFAULTS['bike'].append('bike_obey')
 #  * after the rider obeys, they don't wipe out on something else (advice
 #    that steers you into a worse hazard).
 #     python3 tools/pt/policies_bike.py audit [-n RUNS] [-l 20,25]
-ORDERS = (('POTHOLE! HOP IT', 'hole'), ('CAR IN BIKE LANE. AGAIN', 'stopped'),
+ORDERS = (('POTHOLE! HOP IT', 'hole'), ('CAR IN BIKE LANE. AGAIN', 'stopped'), ('SLOW CAR', 'car'),
           ('HOP THE RAILS', 'xing'), ('501 BEHIND', 'tram'))
 CRASH_WORDS = (('DOORED', 'door'), ('PARKED CAR', 'parked'), ('CAR IN BIKE LANE', 'stopped'),
                ('ONCOMING', 'oncoming'), ('RAN INTO A CAR', 'car'), ('HIT BY THE 501', 'tram'),
@@ -1337,9 +1395,9 @@ def audit_run(seed, latency, trace=None, wander=False):
                             issues.append((t, text, 'first in path: %s' % ('%s in %.0f f' % (ph[0][1], ph[0][0]) if ph else 'nothing')))
                     # where a STEER order sends you must be clear (of
                     # anything but what it names) for the next 2 s
-                    esc = {'STEER >': HOME, 'STEER <': 140 if kind == 'tram' else 163}
+                    esc = {'STEER >': HOME, 'STEER <': 140 if kind in ('tram', 'car') else 163}
                     for k2, L in esc.items():
-                        if k2 in text and kind in ('tram', 'stopped'):
+                        if k2 in text and kind in ('tram', 'stopped', 'car'):
                             # (as things will be when a 22-frame hand gets there)
                             there = dict(me, x=L)
                             later = [dict(e, rel=e['rel'] + (e['vy'] - me['speed']) * 22) for e in ents]
@@ -1422,88 +1480,116 @@ if __name__ == '__main__':
 
 
 # ---------------------------------------------------------------------------
-# The undocumented trick's tell: the rails crackle white and blue while a hop now would
-# clear both rails of the track you're steering at. bike_cue watches only for
-# that (the rails' colour on screen, never the trick's state) and taps B when
-# it sees it; it steers between the bike lane and the yellow line across the
-# northbound tracks and back when the road there is clear.
-#     python3 tools/pt/policies_bike.py cue [-n RUNS] [-l 10,11,12]
-# The check re-arms the trick after each landing (as another trick would),
-# so every crossing is a try.
-def rail_cg(name):
+# The undocumented trick's tell is a warning, not the window. As a 501 goes by
+# you its trolley pole sparks (a 32-px white/blue burst on the pole and the
+# wire's crackle); SPARK_T frames later the rails crackle too and stay live for
+# LIVE_T frames: clear both rails of a track in one hop then. bike_cue sees only
+# the screen: the spark sprite in OAM (never the trick's timer). It rides like
+# bike_obey (the bike lane, obeying the coach), and when it sees a spark it
+# reacts like a player who has learnt the move: it crosses the nearest track
+# (hold the pad over it) and hops a beat after its own steer (HOP_BEAT). Every
+# input lands L +- 3 frames late, each change jittered on its own.
+#     python3 tools/pt/policies_bike.py cue [-n RUNS] [-l 12,15,18,20,24]
+# --blind: the same rider crossing at random moments, ignoring the spark (how
+# often the move lands by accident); bike_obey (the coach-only first-timer)
+# is counted too.
+SPARK_T, LIVE_T = 18, 60       # src/ev_bike.s
+B_LIVE = 470                   # (byte) frames left of a spark (SPARK_T + LIVE_T down)
+HOP_BEAT = 9                   # frames after the steer: the hop is up over both rails
+CROSS = {186: 140, 140: 186, 117: 66, 66: 117}   # a line beside a track -> the far side
+
+
+def spark_tiles():
     import os
+    import re
     meta = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'build', 'bike_meta.inc')
-    return int(open(meta).read().split('RAIL_%s_CG = ' % name)[1].split()[0])
+    txt = open(meta).read()
+    tiles = set()
+    for name in ('bm_spark0', 'bm_spark1'):
+        body = txt.split(name + ':')[1].split('.word $8000')[0]
+        for m in re.finditer(r'\.word \$[0-9A-F]+, \$[0-9A-F]+, \$([0-9A-F]+)', body):
+            v = int(m.group(1), 16)
+            tiles.add((v & 0xFF, (v >> 8) & 1))
+    return tiles
 
 
-CUE_LIT = (0x7FFF, 0x7F30)   # src/ev_bike.s cue_rails: the rail head, white or blue
+def spark_on_screen(g, tiles):
+    oam = g.core.peek(g.sym['oam_buf'], 512)
+    for i in range(0, 512, 4):
+        if oam[i + 1] < 224 and (oam[i + 2], oam[i + 3] & 1) in tiles:
+            return True
+    return False
 
 
-class bike_cue(_Reader):
+class bike_cue(bike_obey):
     trivial = False
+    blind = False
 
     def __init__(self):
-        self.g = None
-        self.next_at = 120
-        self.dirn = 0
-        self.b_until = -1
+        bike_obey.__init__(self)
+        self.tiles = None
         self.lit = False
         self.cues = 0
-
-    def rails_lit(self):
-        if not hasattr(self, 'cg'):
-            self.cg = self.g.sym['pal_buf'] + 2 * rail_cg('SHINE')
-        c = self.g.core.peek(self.cg, 2)
-        return (c[0] | c[1] << 8) in CUE_LIT
+        self.tries = 0
+        self.trick = None       # (direction, release at, B at)
+        self.next_blind = 900
 
     def act(self, t, tel, rng):
+        if self.tiles is None:
+            self.tiles = spark_tiles()
         me, ents = self.read()
-        x = me['x']
-        lit = self.rails_lit()
-        if lit and not self.lit:
-            self.cues += 1
-            self.b_until = t + 3            # seen it: B
+        lit = spark_on_screen(self.g, self.tiles)
+        onset = lit and not self.lit
         self.lit = lit
-        if me['state'] != 0:
-            self.dirn = 0
-            return A
-        # a crossing: hold the pad till about the far line, then let go
-        if self.dirn:
-            goal = 140 if self.dirn == LEFT else HOME
-            if (self.dirn == LEFT and x <= goal + 14) or (self.dirn == RIGHT and x >= goal - 14):
-                self.dirn = 0
-                self.next_at = t + rng.randint(50, 90)
-        elif t >= self.next_at and me['speed'] > 2.0:
-            clear = not any(e['t'] not in (T_TOKEN,) and 130 < e['x'] < 215 and -80 < e['rel'] < 200 for e in ents)
-            if clear:
-                self.dirn = LEFT if x > 163 else RIGHT
-            else:
-                self.next_at = t + 10
-        m = A | self.dirn
-        if t < self.b_until:
-            m |= B
+        if onset:
+            self.cues += 1
+        go = onset and not self.blind
+        if self.blind and t >= self.next_blind and me['state'] == 0 and me['speed'] > 2.0:
+            self.next_blind = t + rng.randint(150, 400)
+            go = True
+        if go and self.trick is None and me['state'] == 0:
+            x = me['x']
+            L0 = min(CROSS, key=lambda L: abs(L - x))
+            if abs(L0 - x) < 8:
+                L1 = CROSS[L0]
+                d = L1 - x
+                n = min(range(1, 199), key=lambda k: abs(DISP[k] - abs(d)))
+                self.trick = (RIGHT if d > 0 else LEFT, t + n, t + HOP_BEAT)
+                self.tries += 1
+                self.target = L1
+                self.move = (0, -1, t + n + 12 + self.lag)
+                self.quiet_at = t
+        m = bike_obey.act(self, t, tel, rng)
+        if self.trick:
+            dirn, end, b_at = self.trick
+            if t < end:
+                m = (m & ~(LEFT | RIGHT)) | dirn
+            if b_at <= t < b_at + 3:
+                m |= B
+            if t >= max(end, b_at + 3):
+                self.trick = None
         return m
 
 
-def cue_run(seed, latency):
+def cue_run(seed, latency, blind=False, obey=False, frames=60 * 80):
     import random
     import pt
-    pol = bike_cue()
+    pol = bike_obey() if obey else bike_cue()
+    pol.blind = blind
     g = pt.Game()
     pol.game = g
     pt.goto_target(g, 'bike')
-    ev = g.sym['ev_ram']
     rng = random.Random(seed)
     hrng = random.Random(seed * 7919 + 1)
-    jitter = max(1, latency // 4)
     t, hold, want, pending = 0, 0, 0, []
-    xfers = 0
+    xfers, sparks, live_was = 0, 0, 0
     seen = ''
-    while t < 60 * 80:
+    tiles = spark_tiles()
+    while t < frames:
         m = pol.act(t, g.last, rng)
         if m != want:
             want = m
-            due = t + max(0, latency + hrng.randint(-jitter, jitter))
+            due = t + max(0, latency + hrng.randint(-3, 3))
             if pending:
                 due = max(due, pending[-1][0] + 1)
             pending.append((due, m))
@@ -1511,15 +1597,26 @@ def cue_run(seed, latency):
             hold = pending.pop(0)[1]
         g.step(1, hold)
         t += 1
-        g.core.poke(ev + B_XOK, bytes([1, 0]))       # (the check's re-arm)
+        live = g.core.peek(g.sym['ev_ram'] + B_LIVE, 1)[0]
+        if live and not live_was:
+            sparks += 1
+        live_was = live
         text = ' '.join(screen_text(g))
         if 'TTC TRANSFER' in text and 'TTC TRANSFER' not in seen:
             xfers += 1
         seen = text
         if t % 15 == 0 and not g.scene().startswith('bike.play'):
             break
+    for _ in range(240):
+        g.step(1, 0)
+        if g.scene().startswith('bike.results'):
+            break
+    g.step(20, 0)
+    st = g.state(full=False)
     g.core.close()
-    return {'seed': seed, 'latency': latency, 'cues': pol.cues, 'xfers': xfers}
+    return {'seed': seed, 'latency': latency, 'blind': blind, 'obey': obey, 'sparks': sparks,
+            'cues': getattr(pol, 'cues', 0), 'tries': getattr(pol, 'tries', 0), 'xfers': xfers,
+            'score': st['ev_score'], 'fail': st['ev_fail']}
 
 
 def _cue_job(j):
@@ -1533,19 +1630,31 @@ def cue_main(argv):
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     import pt
     ap = argparse.ArgumentParser()
-    ap.add_argument('-n', '--runs', type=int, default=6)
-    ap.add_argument('-l', '--latencies', default='10,11,12')
-    ap.add_argument('-j', '--jobs', type=int, default=4)
+    ap.add_argument('-n', '--runs', type=int, default=8)
+    ap.add_argument('-l', '--latencies', default='12,15,18,20,24')
+    ap.add_argument('-j', '--jobs', type=int, default=os.cpu_count())
     a = ap.parse_args(argv)
     pt._warm(['bike'])
     lats = [int(x) for x in a.latencies.split(',')]
-    rows = pt.parallel_map(_cue_job, [(s, L) for L in lats for s in range(1, a.runs + 1)], a.jobs)
+    jobs = [(s, L) for L in lats for s in range(1, a.runs + 1)]
+    jobs += [(s, 20, True) for s in range(1, a.runs + 1)]
+    jobs += [(s, 22, False, True) for s in range(1, a.runs + 1)]
+    rows = pt.parallel_map(_cue_job, jobs, a.jobs)
     ok = True
+    print('bike_cue: sees the 501\'s pole spark, crosses the nearest track, B %d f after its own steer' % HOP_BEAT)
+    print('  %5s %6s %6s %6s %8s %7s' % ('hand', 'sparks', 'tries', 'landed', 'per try', 'scores'))
     for L in lats:
-        rs = [r for r in rows if r['latency'] == L]
-        c, x = sum(r['cues'] for r in rs), sum(r['xfers'] for r in rs)
-        print('  %2d f hand: %3d cues, %3d landed (%d%%)' % (L, c, x, round(100 * x / max(c, 1))))
-        ok = ok and x * 2 > c
+        rs = [r for r in rows if r['latency'] == L and not r['blind'] and not r['obey']]
+        sp, tr, x = (sum(r[k] for r in rs) for k in ('sparks', 'tries', 'xfers'))
+        print('  %3d f %6d %6d %6d %7d%% %s' % (L, sp, tr, x, round(100 * x / max(tr, 1)),
+                                              sorted(r['score'] for r in rs)))
+        if 15 <= L <= 20:
+            ok = ok and x * 2 >= tr
+    rs = [r for r in rows if r['blind']]
+    tr, x = sum(r['tries'] for r in rs), sum(r['xfers'] for r in rs)
+    print('  blind (crosses when it likes, 20 f): %d crossings, %d landed (%d%%)' % (tr, x, round(100 * x / max(tr, 1))))
+    rs = [r for r in rows if r['obey']]
+    print('  bike_obey (the coach only, 22 f): %d landed in %d runs' % (sum(r['xfers'] for r in rs), len(rs)))
     return ok
 
 

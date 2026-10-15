@@ -1414,8 +1414,13 @@ ent_logic:
 @x:
     rts
 @tram:
+    cmp #T_CAR_N
+    jeq slow_car
+    cmp #T_TRAM_S
+    jeq spark_501
     cmp #T_TRAM_N
     bne @x
+    jsr spark_501
     jsr tram_follow
     jsr tram_draft
     ; behind us and catching up: the bell and the sign (rel -160 .. -70),
@@ -1447,6 +1452,215 @@ ent_logic:
     A8
 @nothreat:
     jmp tram_safe
+
+; A 501's trolley pole sparks as it goes by you: the undocumented trick's
+; warning (cue_rails, draw_spark in ev_bike.s). The northbound one once its
+; tail (the pole) is up past your row and its body clear ahead (rel >=
+; SPARK_N: cross its tracks now and you're behind it); the oncoming one once
+; its pole has come down past you. Every 501 once, never while one is live,
+; only while riding. X = it, tmp0 = rel; keeps X, tmp0.
+SPARK_N = 53
+SPARK_S = 2
+.a8
+spark_501:
+    lda b_state
+    bne @x
+    lda b_live
+    bne @x
+    lda E_FLAGS,x
+    bmi @x
+    lda E_TYPE,x
+    cmp #T_TRAM_N
+    A16
+    bne @s
+    lda tmp0
+    sec
+    sbc #SPARK_N
+    cmp #(200 - SPARK_N)        ; rel SPARK_N .. 199: its pole on screen
+    bcs @x16
+    bra @go
+@s:
+    lda tmp0
+    clc
+    adc #88
+    cmp #(88 - SPARK_S + 1)     ; rel -88 .. -SPARK_S
+    bcs @x16
+@go:
+    A8
+    lda E_FLAGS,x
+    ora #$80
+    sta E_FLAGS,x
+    lda #(SPARK_T + LIVE_T)
+    sta b_live
+    txa
+    inc a
+    inc a
+    sta b_sprk
+    SFX SFX_STEP
+    rts
+@x16:
+    A8
+@x:
+    rts
+
+; A northbound car you're catching in your own line (X = it, tmp0 = rel):
+; SLOW CAR AHEAD! over the rider while its near end is SLOW_NEAR..SLOW_FAR px
+; off (25 frames or more at the most you can close on it), with nothing else
+; in that path first, and the way out that's clear: STEER > (to the bike
+; lane) or < OR BRAKE v, else just BRAKE. Once a car (again if you leave its
+; line and come back); it stands while you're in its way and catching it,
+; and goes as soon as you're out of its line or no longer catching it.
+SLOW_NEAR = 47
+SLOW_FAR  = 103
+.assert (MAXSPD - CAR_N_VY) * 25 / 256 <= SLOW_NEAR, error, "SLOW CAR comes 25 frames ahead"
+.a8
+slow_car:
+    lda b_state
+    jne @x
+    lda E_X+1,x
+    sec
+    sbc b_px+1
+    bcs @p
+    eor #$FF
+    inc a
+@p:
+    cmp #15                     ; (hw_tab: in its path)
+    bcs @out
+    A16
+    lda b_speed
+    cmp E_VY,x
+    A8
+    beq @out
+    bcs @closing
+@out:
+    lda E_FLAGS,x               ; out of its way: it may say so again, and
+    and #$BF                    ; its line goes
+    sta E_FLAGS,x
+    lda b_slow
+    jeq @x
+    dec a
+    cmp b_cur
+    jne @x
+    stz b_slow
+    ldy b_ntim
+    jeq @x
+    ldy #$0001                  ; (cleared next frame)
+    sty b_ntim
+    rts
+@closing:
+    lda b_slow                  ; its line is up: it stands while you're in
+    beq @new                    ; its way and catching it
+    dec a
+    cmp b_cur
+    bne @new
+    ldy #$0008
+    sty b_ntim
+    rts
+@new:
+    lda E_FLAGS,x
+    and #$40
+    jne @x
+    A16                         ; (only if you're still in its line in 16
+    lda b_vx                    ; frames at the way you're sliding: not to
+    asl a                       ; someone steering across it already)
+    asl a
+    asl a
+    asl a
+    clc
+    adc b_px
+    xba
+    A8
+    sec
+    sbc E_X+1,x
+    bcs @q
+    eor #$FF
+    inc a
+@q:
+    cmp #15
+    jcs @x
+    A16
+    lda tmp0
+    sec
+    sbc #29                     ; (its near end)
+    sta tmp1
+    sec
+    sbc #SLOW_NEAR
+    cmp #(SLOW_FAR - SLOW_NEAR + 1)
+    A8
+    jcs @x
+    lda b_xhint                 ; a HOP order is up: that comes first
+    jne @x
+    lda b_pnh                   ; the rider's panel is busy
+    jne @x
+    jsr path_blocked
+    jcs @x
+    lda E_FLAGS,x
+    ora #$40
+    sta E_FLAGS,x
+    A16
+    lda tmp0
+    pha
+    A8
+    ; the way out: back to the bike lane if it's clear 120 px on, else the
+    ; other side, else just brake
+    lda b_px+1
+    pha
+    ldy #$0001                  ; Y = 1: right first
+    phy
+    lda slow_way,y
+    jsr @try
+    ply
+    bcc @way
+    tya
+    eor #$01
+    tay
+    lda slow_way,y
+    phy
+    jsr @try
+    ply
+    bcc @way
+    ldy #$0002                  ; nowhere to go: brake
+@way:
+    pla
+    sta b_px+1
+    tya
+    asl a
+    TAXB
+    lda f:slow_ln2,x
+    sta b_line2
+    lda f:slow_ln2+1,x
+    sta b_line2+1
+    lda #TP_WHITE
+    sta b_l2pal
+    LDPTR0 str_slow
+    lda #TP_ORANGE
+    jsr pop_near
+    ldx #40
+    stx b_ntim
+    lda b_cur
+    inc a
+    sta b_slow
+    A16
+    pla
+    sta tmp0
+    A8
+    ldx b_cur
+@x:
+    rts
+; carry set if line A (x) has something within 120 px ahead. Keeps X.
+@try:
+    sta b_px+1
+    A16
+    lda #120
+    sta tmp1
+    A8
+    jmp path_blocked
+slow_way: .byte 140, 186
+slow_ln2: .addr str_slow_l, str_slow_r, str_slow_b
+str_slow:   .byte "SLOW CAR AHEAD!", 0
+str_slow_l: .byte "STEER ", TXT_ARROW_L + $20, " OR BRAKE ", TXT_ARROW_D + $20, 0
+str_slow_r: .byte "STEER ", TXT_ARROW_R + $20, " OR BRAKE ", TXT_ARROW_D + $20, 0
+str_slow_b: .byte "BRAKE: HOLD ", TXT_ARROW_D + $20, 0
 
 ; How far ahead (px) something is XHINT_F frames off at the speed we're
 ; doing (at least XHINT_MIN): when a HOP order goes up, so that a human who
@@ -1531,6 +1745,8 @@ xing_logic:
     lda #$01
     sta b_xhint
     stz b_xent                  ; (the rails' order, not a pothole's)
+    lda #RAILS_Q                ; B this soon pays more (style_award)
+    sta b_rq
     ldx #120
     stx b_popup
     A16
@@ -2467,7 +2683,7 @@ dr_car:
     bne @body
     lda tmp5
     pha
-    lda #$2A
+    lda #$2E                    ; (FX palette: amber)
     sta tmp5
     A16
     lda spr_y
