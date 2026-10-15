@@ -124,7 +124,11 @@
   EJS_gameUrl = "toronto_games.sfc";
   EJS_color = "#da251d";
   EJS_backgroundColor = "#000";
-  EJS_startOnLoaded = true;
+  // with a keyboard the game starts by itself; phones and tablets get a Play button, since
+  // mobile Safari won't run sound until a tap and covers a self-started game with a resume prompt
+  const touchDevice = matchMedia("(pointer: coarse)").matches || navigator.maxTouchPoints > 1;
+  EJS_startOnLoaded = !touchDevice;
+  EJS_startButtonName = "Play";
   EJS_defaultOptions = { "save-save-interval": "30" };
   EJS_pathtodata = "https://cdn.emulatorjs.org/4.2.3/data/";
 
@@ -142,7 +146,7 @@
       if (ctx.state === "suspended") ctx.resume();
     } catch (e) {}
   };
-  for (const type of ["pointerdown", "keydown", "touchstart"])
+  for (const type of ["pointerdown", "keydown", "click", "touchend"])
     window.addEventListener(type, unmute, { capture: true });
 </script>
 <script src="https://cdn.emulatorjs.org/4.2.3/data/loader.js"></script>
