@@ -33,20 +33,29 @@
 ;           TIGHT ROUNDINGS (graded by how close you pass the buoy, +150 a
 ;           mark for a chain), CLEAN TACKS on the beat (up to 3), FERRY SURF
 ;           (two stages) and LINE HONOURS (no bumps at all). Undocumented:
-;           a ROLL TACK (hold A into a tack, let go as the bow passes head
-;           to wind: the boat flashes and the sail luffs while the window's
-;           open) pops her out at full speed and pays 250 for the tack.
+;           hike (press A) into a tack that pays and the sail starts to slat:
+;           the boat lights up, the canvas rattles (the warning, ROLL_LEAD
+;           frames before the window, up until it shuts); let go of A in the
+;           window and the crew rolls her through (the ferry's horn, full
+;           speed out of the tack) and the tack pays PTS_ROLL. The HUD's HIKE
+;           blinks while a tack that pays is on.
 ;           ev_style itemises it all for the card: tight roundings, clean
 ;           tacks, ferry surf, line honours, roll tacks.
 ;   no finish  base 250 per mark rounded + up to 249 for the part of the next
-;           leg sailed (at most 999, so any finish beats it); style only pays
-;           at the line. Never touched the helm: 0.
+;           leg sailed (at most 999, so any finish beats it); style earned on
+;           the way stays in ev_break+2 and ev_style but out of the score
+;           (the card's grey FORFEIT STYLE row). Never touched the helm: 0.
 ;   ADRIFT: ten seconds without getting any closer to the next mark starts
 ;           a countdown on the HUD (ADRIFT IN 5 .. 1); five more and the race
 ;           is over (each px closer than ever winds the clock back 8
 ;           frames). The clock never runs within two ring radii of the
-;           mark, aground or against the ferry (the crew pushes you off). Ten
-;           seconds without ever touching LEFT/RIGHT ends it too.
+;           mark, aground or against the ferry (the crew pushes you off), on
+;           the course to steer, part way through an order, or in a fresh
+;           order's first two seconds. Ten seconds without ever touching
+;           LEFT/RIGHT ends it too.
+; The coach never changes an order under her without a reason she can see:
+; the count only goes down for taps she made, praise (GOOD!, KEEP ON!) only
+; follows taps she made, and a plan that moved without her says DRIFTED!.
 .p816
 .smart -
 .include "globals.inc"
@@ -90,20 +99,24 @@ LOOK_T      = 22            ; the coach judges the course from this many frames 
 D_TACK      = 36            ; TACK NOW once the other tack's line passes the buoy this close to windward
 RING_SAY    = 80            ; on a good heading this close: RING AHEAD! HOLD YOUR COURSE
 ARW_MIN     = 32            ; close-hauled course to steer: the first notch this far off the wind
-ROLL_HTW    = 10            ; ROLL TACK: let go of A with the bow this close to head-to-wind,
-                            ; or past it until she's out of the no-go (the boat flashes and
-                            ; the sail luffs all the while: ~19 frames at the quickest)
-ROLL_HOLD   = 4             ; ... after holding it this long in the tack
-PTS_ROLL    = 250           ; a roll tack (instead of a clean tack's 100)
+ROLL_HTW    = 10            ; the undocumented trick: the tell starts when she's hiking
+                            ; into a tack that pays, before the bow is this far past
+                            ; head to wind...
+ROLL_HOLD   = 4             ; ... with A held this long (pressed for the tack: a hike
+ROLL_FRESH  = 40            ; held longer than this before it doesn't count)
+ROLL_LEAD   = 15            ; the window opens this long after the tell starts...
+ROLL_WIN    = 12            ; ... and stays open this long (the tell lasts until it shuts)
+PTS_ROLL    = 300           ; a roll tack (instead of a clean tack's 100; even, < 512)
 PTS_CHAIN   = 150           ; tight roundings in a row: +150 for each one before
 ROUND_R     = 30            ; the ring drawn round a mark: the hull over it = rounded
-ROUND_IN    = ROUND_R + 5   ; (the middle of the boat this close, or...)
-ROUND_BOW   = ROUND_R + 2   ; (... her bow this close)
+ROUND_IN    = ROUND_R + 9   ; (the middle of the boat this close: her hull over the dots, or...)
+ROUND_BOW   = ROUND_R + 4   ; (... her bow this close)
 CLEAR_X     = 10            ; the coach's lines pass the buoy this far off or more...
 ONTO_X      = 7             ; ... and closer than this a line runs onto it (a line in
                             ; between is a tight one: the coach leaves it alone)
 BFIX_D      = 90            ; this close to the mark the course to steer never runs onto it
 RG_WAIT     = 75            ; after a rounding: the turn waits for the buoy abeam at most this long
+ORDER_G     = 120           ; a fresh order: the ADRIFT clock waits this long for her to start on it
 REPLAN_T    = 60            ; an order nobody has started on is said afresh after this long
                             ; if the course to steer has moved
 TIGHT_R     = 10            ; ... and this close, clean = TIGHT ROUNDING (graded)
@@ -331,6 +344,14 @@ s_tw2    = ev_ram + 730
 s_hm     = ev_ram + 732      ; sl_hit: the mark (word offset)
 s_lpx4   = ev_ram + 734      ; sl_turn: where the swing ends, quarter px (signed words)
 s_lpy4   = ev_ram + 736
+s_ordg   = ev_ram + 738      ; a fresh order's grace: frames the ADRIFT clock waits for her to start (word)
+s_drift  = ev_ram + 740      ; the next order says DRIFTED! (frames left, $FF until it's said; 0 = no)
+s_lastd  = ev_ram + 741      ; the way LEFT/RIGHT was last pressed (+1 right, -1 left)
+s_ahold  = ev_ram + 742      ; frames A has been held (to 255)
+s_rollc  = ev_ram + 743      ; the trick's tell: frames since it started (0 not yet, $FF over)
+s_tkord  = ev_ram + 744      ; the order out is a TACK NOW! (the HUD asks for A)
+s_tkpend = ev_ram + 745      ; a tack done, judged when its tell's window shuts
+s_gauto  = ev_ram + 746      ; aground: the crew pushed off by themselves (no tap)
 s_abest  = ev_ram + 696      ; ADRIFT: closest to the mark since the leg began or she was last on course
 s_ox     = ev_ram + 280      ; spr16/spr8 scratch
 s_oy     = ev_ram + 282
@@ -408,6 +429,7 @@ ev_sail:
     stz tmp2
     lda #$20
     jsl txt_fill
+    jsl oam_clear               ; (nothing pokes over the card's border)
     jsl score_card
     ; back to the usual 64x32 BG1 / BG2 maps and backdrop for the next screens
     lda #((VRAM_BG1MAP >> 8) | 1)
@@ -1224,7 +1246,6 @@ steer:
     sta s_cur2                  ; this frame's direction bits (>PAD_LEFT, >PAD_RIGHT)
     lda #1
     sta s_steer
-    sta s_otch
     ldx #$0000
     stx s_idle
     lda s_cur2
@@ -1232,6 +1253,7 @@ steer:
     beq @same
     sta s_hdir
     stz s_hold
+    jsl press_note              ; (the way she pressed, for the coach's words)
     ; aground: a tap the way the coach says and the crew shoves her off
     lda s_gdir
     beq @same
@@ -1245,6 +1267,7 @@ steer:
     and #>PAD_LEFT
     beq @same
 @push:
+    stz s_gauto                 ; (her tap did it)
     jsr push_off
     lda #1                      ; (the shove is the turn: don't notch as well)
     sta s_hold
@@ -1258,6 +1281,8 @@ steer:
     sta s_hold
 @notch:
     jsr notch
+    lda #1                      ; (the helm turned since the order went up)
+    sta s_otch
 @count:
     inc s_hold
 @turn:
@@ -1291,9 +1316,17 @@ steer:
     and #PAD_A
     A8
     beq @nh
+    lda s_ahold                 ; (how long: the trick's tell wants a hike)
+    inc a
+    beq @ah
+    sta s_ahold
+@ah:
     lda #1
 @nh:
     sta s_hike
+    bne @hx
+    stz s_ahold
+@hx:
     rts
 
 ; one notch toward the held direction (s_hdir); an off-notch goal (after the
@@ -1366,6 +1399,7 @@ taps_to_course:
 ; the turn for the next leg waits for the buoy to be abeam (round_gate), so
 ; it can't sweep her onto it.
 coach:
+    jsl coach_tick
     jsl buoy_watch
     lda s_ord
     cmp #$FF
@@ -1466,6 +1500,8 @@ coach:
     A8
     bne @leg
     inc s_ringt
+    lda #90                     ; (an order soon after it says why: DRIFTED!)
+    sta s_drift
     LDPTR0 str_rahead
     lda s_mark
     cmp #3
@@ -1642,12 +1678,18 @@ course:
     adc #(NOTCH / 2)
     and #$F0
     sta s_cur2                  ; the notch nearest the bearing
-    ; the bow's notch into the ring (and clear of the buoy): hold it
+    ; the bow's notch into the ring (and clear of the buoy): hold it (with
+    ; a little give, so a bearing half way between two notches never flips
+    ; the course from one to the other as she turns onto it)
+    lda s_tring
+    clc
+    adc #3
+    sta tmp0
     lda s_hgoal
     sec
     sbc s_brg
     jsr abs8
-    cmp s_tring
+    cmp tmp0
     beq @h1
     bcs @look
 @h1:
@@ -2102,11 +2144,13 @@ irons:
 ; of the wind to the other in TACK_MAXT frames or less (six taps a second do
 ; it, whatever her speed). The first 3 pay. A slow one before any clean one
 ; says so: TAP FASTER FOR A CLEAN TACK (the one thing it measures).
-; ROLL TACK (the coach never mentions it): hike (hold A) into the tack and
-; let go as the bow passes head to wind: the crew rolls her through, she
-; pops out at full speed, and the tack pays PTS_ROLL instead. While a let-go
-; would land it, the boat flashes and the sail luffs (s_rollw, from the
-; frame the window opens: a thump of canvas with it).
+; The undocumented trick (the coach never mentions it): hike (hold A) into a
+; tack that pays and the sail starts to slat (it flaps side to side, the boat
+; lights up and the canvas rattles: roll_tell). That's the warning: ROLL_LEAD
+; frames later the window opens for ROLL_WIN frames, and letting go of A in it
+; rolls her through (the Island ferry's horn, full speed out of the tack, and
+; the tack pays PTS_ROLL). The tell stays up until the window closes; letting
+; go before it opens spoils this tack's.
 tack_watch:
     lda s_head
     sec
@@ -2114,8 +2158,19 @@ tack_watch:
     sta tmp0                    ; signed angle off the wind
     jsr abs8
     sta tmp1
+    lda s_tkpend
+    beq @np
+    ; a tack done with its tell still up: the window decides how it pays
+    jsl roll_tell
+    lda s_rollc
+    cmp #$FF
+    jne @x
+    stz s_tkpend
+    bra @judge
+@np:
+    lda tmp1
     cmp #NOGO
-    jcs @out
+    bcs @out
     lda s_tkin
     bne @in
     inc s_tkin
@@ -2123,65 +2178,41 @@ tack_watch:
     sta s_tkside
     ldx #$0000
     stx s_tkt
-    stz s_tka
     stz s_rolled
     stz s_rollw
-    rts
+    stz s_rollc
 @in:
-    lda s_hike
-    beq @let
-    lda s_tka                   ; A held: how long
-    cmp #$FF
-    beq @win
-    inc s_tka
-@win:
-    jsr roll_win
-@wset:
-    cmp s_rollw
-    beq @m0
-    sta s_rollw
-    cmp #0
-    beq @m0
-    SFX SFX_STEP                ; (the sail slats as she comes up)
-    bra @m0
-@let:
-    ; let go: rolled if the window was open (what the player saw)
-    lda s_rollw
-    stz s_rollw
-    beq @lx
-    lda #1
-    sta s_rolled
-    A16
-    lda s_speed                 ; she's flung through the wind
-    clc
-    adc #$0050
-    cmp #$00E8
-    bcc @sp
-    lda #$00E8
-@sp:
-    sta s_speed
-    A8
-@lx:
-    stz s_tka
-@m0:
+    jsl roll_tell
     A16
     inc s_tkt
     A8
     rts
 @out:
-    stz s_rollw
     lda s_tkin
-    jeq @x
+    beq @off
     stz s_tkin
     lda tmp0
     eor s_tkside
-    jpl @x                      ; out the side it went in: no tack
+    bpl @off                    ; out the side it went in: no tack
     lda s_mark
     cmp #1
-    jne @x
+    bne @off
     lda s_tacks
     cmp #TACK_MAX
-    jcs @x
+    bcs @off
+    lda s_rollc                 ; (the tell's up: wait for its window)
+    beq @judge
+    cmp #$FF
+    beq @judge
+    inc s_tkpend
+    rts
+@off:
+    stz s_rollw
+    stz s_rollc
+    rts
+@judge:
+    stz s_rollw
+    stz s_rollc
     lda s_rolled
     bne @roll
     A16
@@ -2223,36 +2254,8 @@ tack_watch:
 @x:
     rts
 
-;  -> A8 = 1 if the roll's window is open, as the player sees it: hiking
-; ROLL_HOLD frames or more, the bow within ROLL_HTW of head to wind or past
-; it (tmp0 = signed angle off the wind, tmp1 = its size), on a tack that pays
-roll_win:
-    lda s_rolled
-    bne @no
-    lda s_tka
-    cmp #ROLL_HOLD
-    bcc @no
-    lda s_mark
-    cmp #1
-    bne @no
-    lda s_tacks
-    cmp #TACK_MAX
-    bcs @no
-    lda tmp1
-    cmp #ROLL_HTW
-    bcc @yes
-    lda tmp0
-    eor s_tkside
-    bmi @yes
-@no:
-    lda #0
-    rts
-@yes:
-    lda #1
-    rts
-
 str_ctack: .byte "CLEAN TACK! +100", 0
-str_rtack: .byte "ROLL TACK! +250", 0
+str_rtack: .byte "ROLL TACK! +300", 0
 
 ; position += heading * speed. Land stops you: slide along it if you can,
 ; otherwise you're aground, and the crew pushes off after a moment. The
@@ -2456,12 +2459,15 @@ move_boat:
     cmp #GROUND_PUSH
     A8
     bcc @q
+    lda #1                      ; (nobody tapped: the crew did it)
+    sta s_gauto
     jsr push_off
 @q:
     rts
 
 str_aground: .byte "AGROUND! -2 S", 0
 str_pushoff: .byte "PUSHED OFF! SAIL ON!", 0
+str_crewoff: .byte "THE CREW SHOVED YOU OFF!", 0
 
 ; a bump: 2 seconds off the clock (said on every bump popup), and it
 ; spoils a rounding in progress
@@ -2530,7 +2536,20 @@ land_boat:
 push_off:
     jsr push_dir
     sta s_head
-    lda #6
+    lda #11                     ; (her bow on the new heading)
+    sta s_rad
+    lda s_head
+    jsr polar
+    A16
+    lda s_px
+    sta s_bx
+    lda s_py
+    sta s_by
+    A8
+    lda #6                      ; 6 px out, or as far as 30 to clear the shore
+    sta s_lsn                   ; (bow and all: never back onto it at once)
+@try:
+    lda s_lsn
     sta s_rad
     lda s_pang
     jsr polar
@@ -2543,8 +2562,18 @@ push_off:
     clc
     adc s_py
     sta tmp7
-    jsr land_at
-    bcs @stay
+    jsr land_boat
+    bcc @go
+    A8
+    lda s_lsn
+    clc
+    adc #6
+    sta s_lsn
+    cmp #36
+    bcc @try
+    A16
+    bra @stay
+@go:
     lda tmp6
     sta s_x
     lda tmp7
@@ -2564,6 +2593,10 @@ push_off:
     stx s_popup
 @say:
     LDPTR0 str_pushoff
+    lda s_gauto
+    beq @sy
+    LDPTR0 str_crewoff
+@sy:
     lda #TP_CYAN
     ldx #70
     jmp popup
@@ -3505,11 +3538,17 @@ marks:
     bne @cnt
 @ngr:
     A8
-    lda s_ord                   ; (an order out she's part way through)
-    cmp #$FF
+    lda s_ord                   ; (an order out she's had no time to start on, or
+    cmp #$FF                    ; is part way through)
     beq @tk8
-    lda s_otch
-    beq @tk8
+    lda s_otch                  ; (untouched yet: a fresh order's grace)
+    bne @ot
+    A16
+    lda s_ordg
+    A8
+    bne @cnt8
+    bra @tk8
+@ot:
     lda s_ord
     sec
     sbc s_hgoal
@@ -3520,6 +3559,7 @@ marks:
     lsr a
     cmp s_ordn
     bcs @tk8
+@cnt8:
     A16
     bra @cnt
 @tk8:
@@ -5115,18 +5155,26 @@ hud_draw:
     lda s_surfing
     beq @nsurf
     PRINT 19, 1, TP_GREEN, str_surfl
-    bra @meter
+    jmp @meter
 @nsurf:
+    lda s_hike                  ; A held: the crew's out on the rail
+    bne @hiking
     A16
     lda s_gust
     A8
-    beq @calm
-    lda s_hike
-    bne @hiking
+    beq @tk
     lda s_tick
     and #$10
     beq @calm
     PRINT 19, 1, TP_CYAN, str_gustl
+    bra @meter
+@tk:
+    jsl tack_on                 ; a tack that pays is on: HIKE blinks (hold A)
+    bcc @calm
+    lda s_tick
+    and #$10
+    beq @calm
+    PRINT 19, 1, TP_CYAN, str_hikel
     bra @meter
 @hiking:
     PRINT 19, 1, TP_GREEN, str_hikel
@@ -5287,21 +5335,11 @@ sail_score:
     and #$00FF
     sta ev_stat+4
     stz ev_stat+6
-    stz ev_style                ; (style by source: none unless she finishes)
-    stz ev_style+2
-    stz ev_style+4
+    ; style by source (ev_style, the card's rows; they sum to STYLE): tight
+    ; roundings, clean tacks, ferry surf, line honours, roll tacks. Earned
+    ; on the way round whether she finishes or not: a DNF leaves it in
+    ; ev_break+2 and out of the score (the card's grey FORFEIT STYLE row)
     stz ev_style+6
-    stz ev_style+8
-    A8
-    lda ev_giveup
-    ora s_adrift
-    jne @dnf
-    lda s_mark
-    cmp #4
-    jcc @dnf
-    ; style, by source (ev_style, the card's rows; they sum to STYLE):
-    ; tight roundings, clean tacks, ferry surf, line honours, roll tacks
-    A16
     lda s_tstyle
     sta ev_style
     A8
@@ -5318,25 +5356,37 @@ sail_score:
     jsr mulc
     .a16
     sta ev_style+4
-    lda s_bumps
-    and #$00FF
-    bne @dirty
-    lda #PTS_CLEAN              ; not a single bump
-    sta ev_style+6
-@dirty:
     A8
     lda s_rolls
-    ldx #PTS_ROLL
+    ldx #(PTS_ROLL / 2)         ; (mulc takes k < 256)
     jsr mulc
     .a16
+    asl a
     sta ev_style+8
     clc
     adc ev_style
     adc ev_style+2
     adc ev_style+4
-    adc ev_style+6
     sta ev_break+2
     sta ev_stat+6               ; (the style total)
+    A8
+    lda ev_giveup
+    ora s_adrift
+    jne @dnf
+    lda s_mark
+    cmp #4
+    jcc @dnf
+    A16
+    lda s_bumps
+    and #$00FF
+    bne @dirty
+    lda #PTS_CLEAN              ; line honours: across it without a single bump
+    sta ev_style+6
+    clc
+    adc ev_break+2
+    sta ev_break+2
+    sta ev_stat+6
+@dirty:
     A8
     ; base: the legs and the clock
     lda ev_stat
@@ -5478,6 +5528,125 @@ mulc:
 .a8
 .i16
 
+; a fresh press of LEFT/RIGHT (steer; s_cur2 = its direction bits): which
+; way, for KEEP ON!; and any order from now on follows her input (no DRIFTED!)
+press_note:
+    .a8
+    stz s_drift
+    lda #1
+    sta s_otch
+    lda #1
+    sta s_lastd
+    lda s_cur2
+    and #>PAD_LEFT
+    beq @x
+    lda #$FF
+    sta s_lastd
+@x:
+    rtl
+
+; The undocumented trick's tell, every frame the bow is in the no-go
+; (tack_watch; tmp0 = signed angle off the wind, tmp1 = its size). The setup:
+; hiking (A held ROLL_HOLD frames) into a tack that pays, the bow not yet
+; ROLL_HTW past head to wind. Then the tell (s_rollw: the sail slats, the boat
+; lights up, the canvas rattles every 4 frames) for ROLL_LEAD frames of
+; warning and ROLL_WIN of window; A let go in the window rolls her through
+; (s_rolled, the ferry's horn, full speed), before it spoils this tack's.
+roll_tell:
+    .a8
+    lda s_rollc
+    cmp #$FF
+    beq @x
+    cmp #0
+    bne @run
+    lda s_ahold                 ; the setup: A pressed for this tack (not a
+    cmp #ROLL_HOLD              ; hike held from long before it)
+    bcc @x
+    cmp #ROLL_FRESH
+    bcs @late
+    lda s_mark
+    cmp #1
+    bne @x
+    lda s_tacks
+    cmp #TACK_MAX
+    bcs @x
+    lda s_rolled
+    bne @x
+    lda tmp0
+    eor s_tkside
+    bpl @start
+    lda tmp1
+    cmp #ROLL_HTW
+    bcc @start
+@late:
+    lda #$FF                    ; (too late into this one)
+    sta s_rollc
+    rtl
+@start:
+    lda #1
+    sta s_rollc
+    sta s_rollw
+    SFX SFX_STEP
+@x:
+    rtl
+@run:
+    lda s_hike
+    bne @held
+    lda s_rollc                 ; let go: in the window? (it opens ROLL_LEAD
+    cmp #(ROLL_LEAD + 1)        ; frames after the tell's first frame)
+    bcc @over
+    lda #1
+    sta s_rolled
+    A16
+    lda s_speed                 ; she's flung through the wind
+    clc
+    adc #$0050
+    cmp #$00E8
+    bcc @sp
+    lda #$00E8
+@sp:
+    sta s_speed
+    A8
+    SFX SFX_FERRY
+@over:
+    lda #$FF
+    sta s_rollc
+    stz s_rollw
+    rtl
+@held:
+    inc s_rollc
+    lda s_rollc
+    cmp #(ROLL_LEAD + 1 + ROLL_WIN)
+    bcs @over                   ; (the window's shut: an ordinary tack)
+    and #$03
+    bne @x
+    SFX SFX_STEP                ; (the canvas rattles)
+    rtl
+
+; carry set if a tack that pays is on: on the beat with tacks still to pay,
+; and a TACK NOW! out or the bow in the wind (the HUD's HIKE blinks)
+tack_on:
+    .a8
+    lda s_mark
+    cmp #1
+    bne @n
+    lda s_tacks
+    cmp #TACK_MAX
+    bcs @n
+    lda s_tkin
+    bne @y
+    lda s_ord
+    cmp #$FF
+    beq @n
+    lda s_tkord
+    beq @n
+@y:
+    sec
+    rtl
+@n:
+    clc
+    rtl
+
 ; message buffer: s_buf, s_bufi = length
 buf_new:
     ldx #$0000
@@ -5569,7 +5738,10 @@ taps_text:
 @more:
     lda s_omode
     cmp #2
+    beq @m
+    cmp #4
     bne @mx
+@m:
     LDPTR1 str_more
     jsl cat
 @mx:
@@ -5662,6 +5834,12 @@ issue_order:
     jsl tt_course
     bne issue_n
     stz s_omode
+    lda s_pprio                 ; (nothing to do: an order on the panel goes)
+    cmp #2
+    bne @x
+    ldx #$0001
+    stx s_popup
+@x:
     rtl
 issue_n:
     sta s_k
@@ -5746,6 +5924,9 @@ issue_n:
     stx s_offc
     stz s_otch
     stz s_resume
+    stz s_tkord
+    ldx #ORDER_G                ; (the ADRIFT clock gives her time to start)
+    stx s_ordg
     jsl buf_new
     lda s_omode
     beq @plain
@@ -5753,6 +5934,8 @@ issue_n:
     beq @more
     cmp #3
     beq @buoy
+    cmp #4
+    beq @keep
     LDPTR1 str_mk               ; 1: MARK 2! NOW ...
     jsl cat
     lda s_mark
@@ -5767,6 +5950,11 @@ issue_n:
     jsl cat
     lda #TP_GREEN
     jmp @taps
+@keep:
+    LDPTR1 str_keep             ; 4: KEEP ON! TAP < 3 MORE TIMES (after GOOD!)
+    jsl cat
+    lda #TP_YELLOW
+    jmp @taps
 @buoy:
     LDPTR1 str_miss             ; 3: MISS THE BUOY! TAP > ONCE
     jsl cat
@@ -5775,13 +5963,24 @@ issue_n:
 @plain:
     lda s_irons
     cmp #12
-    bcc @tack
+    bcc @drift
     LDPTR1 str_irons
     jsl cat
     lda #TP_RED
     jmp @taps
+@drift:
+    ; the plan changed with no input from her (the boat drifted off the
+    ; last order, or off the course she was told to hold): say so
+    lda s_drift
+    beq @tack
+    stz s_drift
+    LDPTR1 str_drift            ; DRIFTED! NOW TAP > 2 TIMES
+    jsl cat
+    lda #TP_YELLOW
+    jmp @taps
 @tack:
-    ; the bow's notch already in the wind (part way round): the rest of it
+    ; the bow's notch already in the wind (part way round) and she's just
+    ; been tapping this way: KEEP ON! TAP < 2 MORE TIMES
     lda s_hgoal
     sec
     sbc s_wind
@@ -5789,12 +5988,24 @@ issue_n:
     jsl abs8l
     cmp #ARW_MIN
     bcs @tk
-    LDPTR1 str_keep             ; KEEP ON! TAP < 2 MORE TIMES
+    A16
+    lda s_idle
+    cmp #60
+    A8
+    bcs @tk0
+    lda s_lastd
+    eor s_k
+    bmi @tk0
+    LDPTR1 str_keep
     jsl cat
-    lda #2
+    lda #4
     sta s_omode
+    sta s_omd
     lda #TP_YELLOW
-    bra @taps
+    jmp @taps
+@tk0:
+    lda tmp1
+    jsl abs8l
 @tk:
     ; a turn from one side of the wind to the other, both upwind: a tack
     cmp #64
@@ -5810,6 +6021,8 @@ issue_n:
     cmp #64
     bcs @leg
     SFX SFX_BLIP
+    lda #1
+    sta s_tkord
     LDPTR1 str_tack
     jsl cat
     lda #TP_YELLOW
@@ -5845,7 +6058,10 @@ issue_n:
 
 ; the bow's notch reached the order (or a good course): the second half of a
 ; long turn at once, else news that waited, else GOOD! HOLD YOUR COURSE (a
-; line anything may replace): never the order left up to be done twice
+; line anything may replace): never the order left up to be done twice.
+; Praise only for taps she made: on course without touching the helm it's
+; GREEN DIAMONDS: ON COURSE!; done, but the course moved on meanwhile, it's
+; GOOD! TAP > ONCE MORE (or DRIFTED! the other way), never HOLD
 order_done:
     lda #$FF
     sta s_ord
@@ -5858,8 +6074,7 @@ order_done:
     beq @fin
     eor s_kdir
     bmi @fin                    ; (the course moved the other way: the coach starts afresh)
-    lda #2
-    sta s_omode
+    jsr more_mode
     jml issue_order
 @fin:
     lda s_pprio
@@ -5873,13 +6088,49 @@ order_done:
     stx s_popup
     rtl
 @good:
+    lda s_otch
+    beq @green
+    jsl tt_course
+    beq @hold
+    eor s_kdir
+    bmi @other
+    jsr more_mode               ; GOOD! TAP > ONCE MORE
+    jml issue_order
+@other:
+    lda #$FF
+    sta s_drift
+    stz s_omode
+    jml issue_order
+@hold:
     LDPTR0 str_good2
+    lda #90                     ; (an order soon after it says why: DRIFTED!)
+    sta s_drift
+    stz s_pnew
+    lda #TP_GREEN
+    ldx #50
+    jml popup_any_l
+@green:
+    LDPTR0 str_green
     stz s_pnew
     lda #TP_GREEN
     ldx #50
     jml popup_any_l
 @x:
     rtl
+
+; the follow-up to an order she's just tapped out: GOOD! .. MORE, or KEEP ON!
+; .. MORE after a GOOD! (a fresh line never reads the same as the last one)
+more_mode:
+    lda s_omd
+    cmp #2
+    beq @k
+    lda #2
+    bra @s
+@k:
+    lda #4
+@s:
+    sta s_omode
+    rts
 
 ; the callout's time is up: an order that news covered comes back (with the
 ; taps still to go), then news that waited
@@ -5947,6 +6198,15 @@ order_back:
     jsl buf_ptr                 ; (s_buf still holds it)
     bra @say
 @part:
+    lda s_otch                  ; (moved, but not by her: a fresh order, and why)
+    bne @kp
+    lda #$FF
+    sta s_drift
+    lda #$FF
+    sta s_ord
+    stz s_omode
+    jml issue_order
+@kp:
     jsl buf_new
     LDPTR1 str_keep             ; KEEP ON! TAP < 2 MORE TIMES
     jsl cat
@@ -5955,6 +6215,8 @@ order_back:
     lda tmp2
     jsl taps_text
     stz s_omode
+    lda #4                      ; (so the line after it is a GOOD!, never this again)
+    sta s_omd
 @say:
     ldx #$0000
     stx s_ordt
@@ -6025,6 +6287,11 @@ coach_ord:
     sta s_reiss
     rtl
 @lapse:
+    lda s_otch                  ; (untouched: the next order says why it's new)
+    bne @lp
+    lda #120
+    sta s_drift
+@lp:
     lda #$FF
     sta s_ord
     stz s_split
@@ -6048,20 +6315,37 @@ coach_ord:
     cmp #3
     beq @x
     lda s_otch
-    bne @x
+    bne @stall
     A16
     lda s_ordt
     cmp #REPLAN_T
     A8
     bcc @x
-    lda s_adir
-    cmp s_ofin
-    beq @x
+    jsr drifted
+    bcc @x
     jsl coach_free_l
     bcc @x
-    jsr same_way
+    bra @fresh
+@stall:
+    ; started on, then her thumb stopped (a tap lost, a miscount): after a
+    ; pause, the taps still to go (KEEP ON! TAP < ONCE MORE)
+    A16
+    lda s_ordt
+    cmp #REPLAN_T
+    bcc @s16
+    lda s_idle
+    cmp #40
+    A8
     bcc @x
+    jsl coach_free_l
+    bcc @x
+    jml order_back
+@s16:
+    A8
+    rtl
 @fresh:
+    lda #$FF                    ; (DRIFTED! NOW TAP > 2 TIMES: the count never
+    sta s_drift                 ; changes under her without a reason)
     lda #$FF
     sta s_ord
     stz s_omode
@@ -6074,16 +6358,47 @@ coach_ord:
     rtl
 @d1:
     jsr ord_obsolete
-    bcs @lapse
+    jcs @lapse
     lda s_omd
     cmp #3
     beq @back
-    lda s_otch
-    bne @back
-    jsr same_way
+    jsr drifted                 ; (her taps or not: it's no use now, and says so)
     bcs @fresh
 @back:
     jml order_back
+
+; carry set if the course to steer has drifted 2 notches or more from the one
+; the order out was given for, the same way it turns (one notch: the order
+; stands, and the next one after it says MORE; the other way: it stands
+; till it's obsolete, so hesitating never turns it round)
+drifted:
+    lda s_adir
+    sec
+    sbc s_ofin
+    jsl abs8l
+    cmp #(2 * NOTCH)
+    bcc @n
+    jmp same_way
+@n:
+    rts
+
+; every frame the coach thinks: a fresh order's grace for the ADRIFT clock,
+; and how long an order may still say DRIFTED!
+coach_tick:
+    .a8
+    A16
+    lda s_ordg
+    beq @g
+    dec s_ordg
+@g:
+    A8
+    lda s_drift
+    beq @x
+    cmp #$FF                    ; ($FF: the order being worked out now)
+    beq @x
+    dec s_drift
+@x:
+    rtl
 
 ; carry set if the course to steer is a turn the same way as the order out
 same_way:
@@ -7187,7 +7502,7 @@ str_irons:  .byte "IN IRONS! ", 0
 str_good:   .byte "GOOD! ", 0
 str_good2:  .byte "GOOD! HOLD YOUR COURSE", 0
 str_miss:   .byte "MISS THE BUOY! ", 0
-str_rhold:  .byte " ROUNDED! HOLD COURSE", 0
+str_rhold:  .byte " ROUNDED! WAIT...", 0
 str_tomark: .byte "TO MARK ", 0
 str_toline: .byte "TO THE LINE: ", 0
 str_tap:    .byte "TAP ", 0
@@ -7197,6 +7512,7 @@ str_times:  .byte " TIMES", 0
 str_closer: .byte "PASS CLOSER = TIGHT ROUNDING", 0
 str_faster: .byte "TAP FASTER FOR A CLEAN TACK", 0
 str_keep:   .byte "KEEP ON! ", 0
+str_drift:  .byte "DRIFTED! NOW ", 0
 
 .segment "EVENTS3"
 .a8
