@@ -1,6 +1,6 @@
 # Toronto Games
 
-A Super Nintendo game in the spirit of *California Games*: seven events
+A SNES game in the spirit of a classic: seven events
 across Toronto, 1–8 players taking turns, each with a name and a classic
 Toronto sponsor. Written in 65816 assembly; all art and music are generated
 by the Python tools in `tools/`.
@@ -112,43 +112,6 @@ When a named trick lands, the demo banner reads WATCH THAT MOVE! while its
 callout is up. Any button
 ends a demo and brings you back to the title.
 
-## Music
-
-Most tracks are 8-bit loops after Canadian bands: the chords, tempo and
-groove follow the original, and the melodies wander just far enough off.
-Parallel Parking and TTC Surfing have original tunes that only borrow
-the feel (tempo, key, groove) of the Peaches and The Band songs they nod to.
-
-To hear them all, press **SELECT** on the title screen to open the sound test:
-- **MUSIC**: the 11 songs, each with the band it's after.
-- **SOUND**: the 18 sound effects.
-
-▲ ▼ pick a line, ◀ ▶ browse (each one plays as you land on it), A plays the
-selection again, SELECT skips to the next song, B closes the panel and
-START goes to the main menu.
-
-| # | Track | After | Plays during |
-|---|-------|-------|--------------|
-| 1 | KC Incidental | Broken Social Scene, "KC Accidental" | title |
-| 2 | Bobcaygeese | The Tragically Hip, "Bobcaygeon" | menus, sign-up, records |
-| 3 | Gold Guns Gulls | Metric, "Gold Guns Girls" | Bike Courier |
-| 4 | Ahead by a Centimetre | The Tragically Hip, "Ahead by a Century" | event standings, final table |
-| 5 | Whelp, I'm Alive | Metric, "Help I'm Alive" | Bay St Power Walk |
-| 6 | Hay, Officer | Mother Mother, "Hayloft" | Tallboy Trot |
-| 7 | Brother Downwind | Sam Roberts, "Brother Down" | Harbour Regatta |
-| 8 | If I Had a Million Collars | Barenaked Ladies, "If I Had $1000000" | Off-Leash Alert |
-| 9 | Podium Reprise | the title theme behind a fanfare | podium at Nathan Phillips Square |
-| 10 | Park the Pain Away | Peaches, "Fuck the Pain Away" | Parallel Parking |
-| 11 | The Wait | The Band, "The Weight" | TTC Surfing |
-
-Every event has its own song. The standings song carries straight on into
-the final table, and the podium brings the title theme back. The mix is
-stereo: the lead is slightly left and the harmony slightly right, with a
-short SPC echo on both.
-
-Songs are written in `tools/songs.py` (one 16th note per token, NES-style
-lead / harmony / triangle bass / drums) and compiled by `tools/audio.py`.
-
 ## Building
 
 Needs `cc65` (ca65/ld65) and Python 3 with Pillow.
@@ -204,3 +167,6 @@ make run        # the ROM in the macOS player app (build/Toronto Games.app)
   notegram PNG.
 - `python3 tools/modecheck.py` flags branches into code assembled for the
   wrong accumulator/index width. `make` runs it too.
+
+# LICENSE
+I don't even know. If this thing angers any megacorp please let me know and I'll fix it. 

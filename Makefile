@@ -58,6 +58,14 @@ run: app
 
 .PHONY: run app
 
+# play it in a browser: the page GitHub Pages serves (EmulatorJS + snes9x from its CDN)
+#   make web && python3 -m http.server -d build/web
+web: $(ROM) web/index.html
+	@mkdir -p build/web
+	cp web/index.html $(ROM) build/web/
+
+.PHONY: web
+
 # playtest harness (tools/pt): golden scenes, fuzzing, bot balance, presentation lint, human curves
 qa: $(ROM)
 	python3 tools/pt/pt.py golden check
