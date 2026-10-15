@@ -3,16 +3,20 @@
 ; live along the path, and each one comes for you once (one at a time, only
 ; from on screen): a white "!" while he barks, then he runs in, CROUCHES (a
 ; red "!", shaking) and LUNGES. B on the white "!" gets you set and you step
-; aside as he lunges (DODGE); B by hand while he crouches or as he springs =
-; NICE TIMING; B late in the lunge = CLOSE SHAVE (double NICE: the bold play
-; pays, x2 and x3 in a row pay more). A lunge always takes LUNGE_F frames,
-; and he flashes white (his tags jingle) as he springs: the late half of
-; the leap is the shave. Or throw a tennis ball (A). A dodged
-; dog skids, sits and waits: walk up and pat him for DODGE 'N' PAT (10 x the
-; chain, up to x5; a tackle breaks it). Callouts sit in a rounded panel at
-; the top of the lawn (park_pend, bank $80), never over the dogs.
+; aside as he lunges (DODGE); B by hand while he crouches or early in the
+; leap = NICE TIMING; B late in the leap = CLOSE SHAVE (the bold play pays,
+; x2 and x3 in a row pay more). The tell is a warning, not the window: he
+; winds up WIND_F frames before he springs (glows white, his tags jingle) and
+; glows till he lands, and a lunge always takes LUNGE_F frames, so the shave
+; (the last SHAVE_F frames of it) opens a fixed beat after the glow. Or throw
+; a tennis ball (A). A dodged dog skids, sits and waits: walk up and pat him
+; for DODGE 'N' PAT (10 x the chain, up to x5; a tackle breaks it). A tackle
+; costs a heart, two seconds on the grass and that dog's points (never
+; points off: a few slips can't wipe a walk). Callouts sit in a rounded
+; panel at the top of the lawn (park_pend, bank $80), never over the dogs.
 ; Not on the card: a CLOSE SHAVE stepping INTO his side (d-pad toward him
-; as you press B) is a MATADOR, +MATADOR_PTS on top.
+; as you press B) is a MATADOR, +MATADOR_PTS on top (the coach hints at the
+; step after a couple of shaves, never names it).
 ; Tree canopies are on BG2 (high priority) so dogs and you go behind them.
 .p816
 .smart -
@@ -27,9 +31,10 @@ START_Y    = 2532
 FINISH_Y   = 40
 MAX_Y      = START_Y + 2     ; feet and shadow stay clear of the bottom HUD bar
 TIME_LIMIT = 120*60           ; a careful walk fits: the clock isn't the hard part
-CROSS_FIN  = 500             ; CROSSING for reaching Dundas ...
-CROSS_SEC  = 25              ; ... + this a second left on the clock (card: 500+25/S)
-CROSS_TENTH = 50             ; short of Dundas: this a whole tenth of the walk
+CROSS_FIN  = 1000            ; WALK for reaching Dundas ...
+CROSS_SEC  = 25              ; ... + this a second left on the clock (card: 1000+25/S)
+CROSS_TENTH = 100            ; short of Dundas: this a whole tenth of the walk (banked: a
+                             ; tackle never takes it back)
 HURRY_T    = 20*60           ; TIME goes red, one HURRY! line
 DOWN_T     = 120             ; frames on your back after a tackle
 WALK       = $0120           ; 1.125 px a frame: the walk is ~37 s of a turn
@@ -44,20 +49,21 @@ DODGE_R    = 40              ; he crouches this close (red "!"): B by hand while
 CROUCH_GAP = 30              ; walk at a crouched dog and he scoots back to keep this gap (the red "!" keeps its time)
 LUNGE_F    = 16              ; a lunge lands this many frames after the spring, however far and
                              ; whatever you do (he homes in): the leap is a beat you can count
-SHAVE_F    = 8               ; B in the last SHAVE_F frames of the leap = CLOSE SHAVE (a tell
-                             ; at the spring, then 8 frames on: a 10-15 f hand lands in it)
-FLASH_F    = 6               ; the tell: he flashes white (sprite palette 7) this long as he springs
+SHAVE_F    = 10              ; B in the last SHAVE_F frames of the leap = CLOSE SHAVE
+WIND_F     = 9               ; the tell: he winds up this long before he springs (glows white,
+                             ; sprite palette 7, tags jingle) and glows till he lands: the
+                             ; shave opens WIND_F + LUNGE_F - SHAVE_F frames after the glow
+                             ; (a 15-20 f hand reacting to it lands in it)
 LUNGE_V    = $0280           ; a trip's pile-on: this speed (px/frame 8.8), not the timed leap
 HAND_BONUS = 100             ; on top of DODGE_PTS: a dodge timed by hand (B with him in range)
-SHAVE_PTS  = 300             ; on top of DODGE_PTS: a CLOSE SHAVE (400 = 2x NICE TIMING: worth a tackle's risk)
-SHAVE_STEP = 100             ; ... and this more for each one in a row before it (x2 500, x3 600)
+SHAVE_PTS  = 200             ; on top of DODGE_PTS: a CLOSE SHAVE (instead of HAND_BONUS)
+SHAVE_STEP = 50              ; ... and this more for each one in a row before it (x2, x3)
 SHAVE_RUN  = 3               ; CLOSE SHAVEs in a row pay x2, x3 (any other dodge or a tackle resets)
-MATADOR_PTS = 150            ; a CLOSE SHAVE stepping into his side: OLE! (not on the card)
-TACKLE_PTS = 150             ; what a tackle costs on the card (TACKLES X150), every run
+MATADOR_PTS = 100            ; a CLOSE SHAVE stepping into his side: OLE! (not on the card)
 BACK_R     = 40              ; walk this close to a barking dog and he backs off
-DODGE_PTS  = 100             ; every dog beaten (dodged or fetched): DOGS on the card
+DODGE_PTS  = 300             ; every dog beaten (dodged or fetched): DOGS on the card
 PAT_PTS    = 10              ; DODGE 'N' PAT: this x the chain
-HEAL_RUN   = 3               ; dogs beaten in a row that win back a heart
+HEAL_RUN   = 2               ; dogs beaten in a row that win back a heart
 DASH_WHIFF = 70              ; sidestep cooldown when nothing was dodged
 DASH_HIT   = 12              ; ... and after a clean dodge
 STUMBLE    = 48              ; a sidestep with no dog about leaves you off balance ...
@@ -156,6 +162,8 @@ k_ordhi  = ev_ram + 631      ; 9 bytes: ... high bytes
 k_cbuf   = ev_ram + 640      ; 64 bytes: one BG2 canopy row, unpacked for DMA
 k_patcue = ev_ram + 704      ; 1 = a dodged dog just sat: say walk up and pat (once the panel's free)
 k_patn   = ev_ram + 706      ; pat lines said this walk (PATCUE_N at most, none once you've patted)
+k_shvpts = ev_ram + 708      ; CLOSE SHAVE points (x2 / x3 steps included): the card's SHAVES row
+k_tips   = ev_ram + 710      ; coach tips said this walk (bits: park_tips, bank $80)
 EV_SEED  = ev_ram + 510
 
 ; thrown ball
@@ -247,7 +255,7 @@ ev_park:
     bne @loop
 @end:
     jsl music_stop
-    jsr park_score
+    jsl park_score              ; (bank $80)
     jsl score_card
     plb
     rtl
@@ -767,10 +775,11 @@ park_update:
     ldx #80
     stx k_popup
 @xp:
+    jsl park_tips               ; where the bigger points are (bank $80)
     rts
 
 str_made: .byte "MADE IT TO DUNDAS!", 0
-str_heal: .byte "3 IN A ROW: HEART BACK!", 0
+str_heal: .byte .sprintf("%d IN A ROW: HEART BACK!", HEAL_RUN), 0
 str_nap:  .byte "ZZZ... A NAP ON THE GRASS", 0
 str_hurry: .byte "HURRY! 20 SECONDS LEFT!", 0
 str_patcue: .byte "FRIENDLY! WALK TO HIM: PAT", 0
@@ -1640,7 +1649,7 @@ throw_ball:
 throw_vx: .word 0, 0, $10000 - $0280, $0280
 throw_vy: .word $0280, $10000 - $0280, 0, 0
 str_fetch: .byte "FETCH!", 0
-str_fetched: .byte "FETCH! +100", 0
+str_fetched: .byte .sprintf("FETCH! +%d", DODGE_PTS), 0
 
 ball_update:
     lda b_state
@@ -2359,7 +2368,8 @@ give_up:
 ; crouch frames before the lunge, per kind (doodle, lab, husky, corgi): a
 ; dog's own rhythm, to learn (+0..7 each time: read the leap to shave)
 crouch_t: .byte 26, 23, 22, 30   ; + the lunge: >= 32 frames from the red "!" to a tackle
-str_coach_r: .byte "RED ! = B NOW FOR +200", 0
+.assert WIND_F < 22, error, "crouch_t: the wind-up starts after the red ! shows"
+str_coach_r: .byte .sprintf("RED ! = B NOW FOR +%d", DODGE_PTS + HAND_BONUS), 0
 
 ; crouched in range, shaking: the B window is open (NICE TIMING)
 think_crouch:
@@ -2386,10 +2396,10 @@ think_crouch:
 @hold:
     A8
     dec D_TIMER,x
-    bne @x
+    bne @wind
     ; he springs: LUNGE_F frames to land on you, from the side he's on now
     ; (you - him < 0: your right; dead level counts as your left, the way
-    ; he's drawn facing). The tell: a white flash and his tags jingle
+    ; he's drawn facing). He's been glowing since the wind-up
     lda #DS_LUNGE
     sta D_STATE,x
     lda #LUNGE_F
@@ -2401,8 +2411,13 @@ think_crouch:
     ora #DF_RSIDE
 @ls:
     sta D_FLAGS,x
-    SFX SFX_TICK
     jsl lunge_vt
+    rts
+@wind:
+    lda D_TIMER,x               ; the tell, WIND_F frames before he springs:
+    cmp #WIND_F                 ; he winds up, glows white (draw_dog) and his
+    bne @x                      ; tags jingle
+    SFX SFX_TICK
 @x:
     rts
 
@@ -2683,7 +2698,7 @@ dodged:
     stz k_srun
     LDPTR0 str_timed
     lda #TP_GREEN
-    bra @say
+    jmp @say
 @shave:
     .a16
     inc k_shaves
@@ -2701,9 +2716,14 @@ dodged:
     lda shave_msgs,y
     sta ptr0
     lda shave_pts,y
+    pha
     clc
     adc k_style
     sta k_style
+    pla
+    clc
+    adc k_shvpts                ; (the card's SHAVES row)
+    sta k_shvpts
     ; stepped INTO his side (d-pad toward the side he sprang from): OLE!
     lda k_shok
     and #$00FF
@@ -2777,18 +2797,17 @@ beat_dog:
     rts
 
 ; (each line is the dog's whole worth: DODGE_PTS + the timing bonus)
-str_dodge: .byte "DODGE! +100", 0
-str_timed: .byte "NICE TIMING! +200", 0
+str_dodge: .byte .sprintf("DODGE! +%d", DODGE_PTS), 0
+str_timed: .byte .sprintf("NICE TIMING! +%d", DODGE_PTS + HAND_BONUS), 0
 shave_msgs: .addr str_shave, str_shave2, str_shave3
 shave_pts:  .word SHAVE_PTS, SHAVE_PTS+SHAVE_STEP, SHAVE_PTS+SHAVE_STEP*2
 matador_msgs: .addr str_mat, str_mat2, str_mat3
-str_shave:  .byte "CLOSE SHAVE! +400", 0
-str_shave2: .byte "CLOSE SHAVE X2! +500", 0
-str_shave3: .byte "CLOSE SHAVE X3!! +600", 0
-str_mat:    .byte "OLE! MATADOR! +550", 0
-str_mat2:   .byte "OLE! MATADOR X2! +650", 0
-str_mat3:   .byte "OLE! MATADOR X3!! +750", 0
-.assert DODGE_PTS = 100 && HAND_BONUS = 100 && SHAVE_PTS = 300 && SHAVE_STEP = 100 && MATADOR_PTS = 150, error, "dodge popups print these"
+str_shave:  .byte .sprintf("CLOSE SHAVE! +%d", DODGE_PTS + SHAVE_PTS), 0
+str_shave2: .byte .sprintf("CLOSE SHAVE X2! +%d", DODGE_PTS + SHAVE_PTS + SHAVE_STEP), 0
+str_shave3: .byte .sprintf("CLOSE SHAVE X3!! +%d", DODGE_PTS + SHAVE_PTS + SHAVE_STEP*2), 0
+str_mat:    .byte .sprintf("OLE! MATADOR! +%d", DODGE_PTS + SHAVE_PTS + MATADOR_PTS), 0
+str_mat2:   .byte .sprintf("OLE! MATADOR X2! +%d", DODGE_PTS + SHAVE_PTS + SHAVE_STEP + MATADOR_PTS), 0
+str_mat3:   .byte .sprintf("OLE! MATADOR X3!! +%d", DODGE_PTS + SHAVE_PTS + SHAVE_STEP*2 + MATADOR_PTS), 0
 .assert SHAVE_RUN = 3, error, "shave_msgs / shave_pts / matador_msgs: one per run step"
 
 ; skidding past: slow down, then sit
@@ -3023,8 +3042,7 @@ squirrel_near:
     clc
     rts
 
-str_tackled: .byte "TACKLED! -150. SO FRIENDLY", 0
-.assert TACKLE_PTS = 150, error, "str_tackled prints it"
+str_tackled: .byte "TACKLED! -1 ", TXT_HEART+32, ". SO FRIENDLY", 0
 
 think_ball:
     lda b_state
@@ -3679,17 +3697,25 @@ draw_dog:
     sta tmp5
     stz tmp5+1
     lda D_STATE,x
+    cmp #DS_CROUCH
+    bne @ncr
+    lda D_TIMER,x               ; the tell: wound up to spring, he glows white
+    cmp #(WIND_F + 1)           ; (sprite palette 7) from WIND_F frames before
+    bcs @fv                     ; the spring ...
+    bra @glow
+@ncr:
     cmp #DS_LUNGE
     bne @nlf
     lda D_TIMER,x
     cmp #(LUNGE_F + 1)
     bcs @fv                     ; a trip's pile-on: the way he runs
-    cmp #(LUNGE_F - FLASH_F + 1)
-    bcc @nfl
-    lda k_prio                  ; the tell: a white flash as he springs
-    ora #$0E                    ; (sprite palette 7)
+@glow:
+    lda k_prio                  ; ... till he lands
+    ora #$0E
     sta tmp5
-@nfl:
+    lda D_STATE,x
+    cmp #DS_LUNGE
+    bne @fv
     lda D_FLAGS,x               ; in the air: facing the way he sprang
     and #DF_RSIDE
     beq @r
@@ -4238,7 +4264,30 @@ str_d:     .byte "DUNDAS", 0
 str_patx:  .byte "PAT X", 0
 
 ; ------------------------------------------------------------------
+.a8
+
+; ------------------------------------------------------------------
+; park_score (bank $80): the card. Every run reads WALK + DOGS = SCORE:
+;   WALK   finished: CROSS_FIN + CROSS_SEC a second left on the clock
+;          short of Dundas: CROSS_TENTH a whole tenth walked (0..9), banked
+;   DOGS   every popup's worth, itemised in ev_style (5 words, in
+;          card_style_labels order): DODGES (DODGE_PTS a dog beaten, fetches
+;          too), NICE TIMING (HAND_BONUS each), CLOSE SHAVES (their bonuses,
+;          x2 / x3 steps in), the undocumented trick (MATADOR_PTS each), PATS
+; A tackle costs a heart, two seconds on the grass, the chains and that
+; dog's points, never points off the card (the penalty word is 0: a few
+; slips can't wipe a walk to 0, and nothing that tries scores below idling).
+; Short of Dundas (tackled out, out of time, a nap, gave up) the walk keeps
+; HALF its DOGS, each style word halved (every source is a multiple of 10,
+; so the halves still add up to the row). Sixteen dogs, one go each: taking
+; longer never brings more of them.
+.assert (DODGE_PTS | HAND_BONUS | SHAVE_PTS | SHAVE_STEP | MATADOR_PTS | PAT_PTS) & 1 = 0, error, "park_score: halves add up"
+.segment "CODE"
+.a8
+.i16
 park_score:
+    .a8
+    .i16
     A16
     lda k_time
     sta tmp0
@@ -4247,33 +4296,53 @@ park_score:
     jsl div16
     A16
     lda tmp0
-    sta ev_stat
-    sta k_tmpx                  ; seconds left
+    sta ev_stat                 ; TIME LEFT
+    sta k_tmpx
     lda k_dodged
     clc
     adc k_fetch
     sta ev_stat+2               ; DOGS DODGED counts fetches too
+    tay
     lda k_tackle
-    sta ev_stat+4
+    sta ev_stat+4               ; TACKLES
     lda k_style
-    sta ev_stat+6               ; DODGE 'N' PAT: pats + timing bonuses
-    ; Every run reads the same way on the card, CROSSING + DOGS - TACKLES:
-    ;   CROSSING  finished: CROSS_FIN + CROSS_SEC a second left on the clock
-    ;             short of Dundas: CROSS_TENTH a whole tenth walked (0..9)
-    ;   DOGS      every popup's worth: DODGE_PTS a dog dodged or fetched, the
-    ;             timing bonuses (NICE TIMING, CLOSE SHAVE, MATADOR), the pats
-    ;   TACKLES   TACKLE_PTS a tackle, the whole cost, every run
-    ; and a sum under 0 scores 0 (the card says NEVER BELOW 0). Sixteen dogs,
-    ; one go each: taking longer never brings more of them. Short of Dundas
-    ; (tackled out, out of time, a nap, gave up) the walk keeps HALF its DOGS
+    sta ev_stat+6               ; DOGS (every dog's popups, pats in)
+    lda #DODGE_PTS
+    jsr @mul
+    sta ev_style                ; DODGES
+    lda k_hand
+    sec
+    sbc k_shaves
+    tay
+    lda #HAND_BONUS
+    jsr @mul
+    sta ev_style+2              ; NICE TIMING
+    lda k_shvpts
+    sta ev_style+4              ; CLOSE SHAVES
+    ldy k_matad
+    lda #MATADOR_PTS
+    jsr @mul
+    sta ev_style+6              ; the undocumented trick
+    lda k_style
+    sec
+    sbc ev_style
+    sec
+    sbc ev_style+2
+    sec
+    sbc ev_style+4
+    sec
+    sbc ev_style+6
+    sta ev_style+8              ; PATS: what's left is all pats
     lda k_fin                   ; through the gate: a finish, even if GIVE UP
     and #$00FF                  ; came during the walk-in
     beq @failed
-    lda #CROSS_FIN
-    sta tmp4
-    lda k_tmpx
-    ldy #CROSS_SEC
-    jsr madd
+    ldy k_tmpx
+    lda #CROSS_SEC
+    jsr @mul
+    clc
+    adc #CROSS_FIN
+    sta ev_break                ; WALK
+    lda k_style
     bra @sum
 @failed:
     .a16
@@ -4292,46 +4361,25 @@ park_score:
     lda #((START_Y - FINISH_Y + 9) / 10)
     jsl div16                   ; whole tenths walked, 0..9
     A16
-    lda tmp0
-    ldy #CROSS_TENTH
-    stz tmp4
-    jsr madd
-@sum:
-    .a16
-    lda tmp4
-    sta ev_break                ; base
-    lda k_fin                   ; short of Dundas: HALF the DOGS (a sloppy turn
-    and #$00FF                  ; keeps what it earned, on a slope; Dundas pays
-    beq @half                   ; them all, so finishing always wins)
-    lda k_style
-    bra @all
+    ldy tmp0
+    lda #CROSS_TENTH
+    jsr @mul
+    sta ev_break                ; WALK: banked, whatever came after
+    ldx #8                      ; HALF the DOGS: every style word halved
 @half:
+    lsr ev_style,x
+    dex
+    dex
+    bpl @half
     lda k_style
     lsr a
-@all:
-    sta ev_break+2              ; bonus
+@sum:
+    .a16
+    sta ev_break+2              ; DOGS
     clc
-    adc tmp4
-    sta tmp4                    ; base + bonus
-@pen:
-    lda #$0000
-    ldy k_tackle
-    beq @pz
-@pl:
-    clc
-    adc #TACKLE_PTS
-    dey
-    bne @pl
-@pz:
-    sta ev_break+4              ; penalty: the true cost
-    sta tmp0
-    lda tmp4
-    sec
-    sbc tmp0
-    bcs @pos
-    lda #$0000                  ; never below 0
-@pos:
+    adc ev_break
     sta ev_score
+    stz ev_break+4              ; tackles: hearts and time, never points
     A8
     lda k_fin
     bne @ok
@@ -4355,25 +4403,109 @@ park_score:
     lda #0
 @f:
     sta ev_fail
-    rts
+    rtl
 
-; A16: tmp4 += A * Y (Y small)
-madd:
+; A16: A = rate, Y = count (small) -> A = rate x count
+@mul:
     .a16
-    cpy #$0000
-    beq @x
     sta tmp0
-@l:
-    lda tmp4
+    lda #$0000
+    cpy #$0000
+    beq @mx
+@ml:
     clc
     adc tmp0
-    sta tmp4
     dey
-    bne @l
-@x:
+    bne @ml
+@mx:
     rts
-
 .a8
+.segment "EVENTS2"
+
+; ------------------------------------------------------------------
+; park_tips (bank $80): the coach says where the bigger points are, each
+; line once a walk, when no dog is on you and the panel is free. The
+; ladder: DODGE (B on the "!") -> NICE TIMING (B on the red "!") -> CLOSE
+; SHAVE (B a beat after he glows) -> and after a couple of shaves, the step
+; that sets up the undocumented trick (never named).
+TIP_RED  = 1                    ; 3 dogs dodged, none timed by hand yet
+TIP_GLOW = 2                    ; 3 timed by hand, no CLOSE SHAVE yet
+TIP_STEP = 4                    ; 2 CLOSE SHAVEs, none stepping into him
+.segment "CODE"
+.a8
+.i16
+park_tips:
+    .a8
+    .i16
+    lda k_state
+    cmp #ST_WALK
+    jne @x
+    lda k_live
+    ora k_popup
+    ora k_popup+1
+    ora k_pend
+    ora k_patcue
+    ora k_heal
+    bne @x
+    A16
+    lda k_tips
+    bit #TIP_RED
+    bne @t2
+    lda k_hand
+    bne @t2
+    lda k_dodged
+    cmp #3
+    bcc @t2
+    ldx #.loword(str_tip_red)
+    lda #TIP_RED
+    bra @say
+@t2:
+    lda k_tips
+    bit #TIP_GLOW
+    bne @t3
+    lda k_shaves
+    bne @t3
+    lda k_hand
+    cmp #3
+    bcc @t3
+    ldx #.loword(str_tip_glow)
+    lda #TIP_GLOW
+    bra @say
+@t3:
+    lda k_tips
+    bit #TIP_STEP
+    bne @x16
+    lda k_matad
+    bne @x16
+    lda k_shaves
+    cmp #2
+    bcc @x16
+    ldx #.loword(str_tip_step)
+    lda #TIP_STEP
+@say:
+    .a16
+    tsb k_tips
+    stx k_pptr
+    A8
+    lda #^str_tip_red
+    sta k_pptr+2
+    lda #TP_YELLOW
+    sta k_ppal
+    stz k_coachup
+    lda #1
+    sta k_pend
+    ldx #100
+    stx k_popup
+    rtl
+@x16:
+    A8
+@x:
+    rtl
+str_tip_red:  .byte "BIGGER PTS: B ON THE RED !", 0
+str_tip_glow: .byte "MORE: B A BEAT AFTER GLOW", 0
+str_tip_step: .byte "BRAVER: B + ", TXT_ARROW_L+32, " OR ", TXT_ARROW_R+32, " AT HIM", 0
+.assert ^str_tip_red = ^str_tip_step && ^str_tip_glow = ^str_tip_step, error, "park_tips: one bank"
+.segment "EVENTS2"
 
 .include "park_meta.inc"
 
