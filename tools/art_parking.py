@@ -308,23 +308,31 @@ def build_sprites():
     d.rectangle([107, 185, 108, 188], fill=14)
     d.point((107, 190), fill=14)
 
-    # the cyclist's bell ringing (officer palette): a yellow bell, white ring
-    # lines either side (her second ding, as she comes level with your nose)
-    bx, by = 96, 128
-    d.polygon([(bx + 5, by + 11), (bx + 6, by + 5), (bx + 8, by + 3), (bx + 10, by + 5),
-               (bx + 11, by + 11)], fill=7, outline=1)
-    d.rectangle([bx + 4, by + 11, bx + 12, by + 12], fill=7, outline=1)
-    d.point((bx + 8, by + 2), fill=1)
-    d.rectangle([bx + 7, by + 13, bx + 9, by + 14], fill=1)
-    d.point((bx + 8, by + 13), fill=7)
-    d.point((bx + 7, by + 6), fill=10)
-    for side in (-1, 1):
-        cx = bx + 8
-        d.line([cx + side * 6, by + 5, cx + side * 7, by + 7], fill=10)
-        d.line([cx + side * 7, by + 9, cx + side * 6, by + 11], fill=10)
-        d.line([cx + side * 7, by + 7, cx + side * 7, by + 9], fill=10)
-        d.point((cx + side * 8, by + 2), fill=10)
-        d.point((cx + side * 8, by + 14), fill=10)
+    # the cyclist's warning (officer palette): a white DING! bubble with a
+    # yellow bell, popped up beside her from her double ding until the
+    # last moment to back in right behind her (32x16, tail at bottom right)
+    bx, by = 96, 152
+    d.rounded_rectangle([bx, by, bx + 29, by + 12], radius=3, fill=10, outline=1)
+    d.polygon([(bx + 22, by + 12), (bx + 30, by + 15), (bx + 26, by + 12)], fill=10, outline=1)
+    d.line([bx + 23, by + 12, bx + 26, by + 12], fill=10)
+    # the bell
+    d.polygon([(bx + 3, by + 9), (bx + 4, by + 4), (bx + 6, by + 2), (bx + 8, by + 4),
+               (bx + 9, by + 9)], fill=7, outline=1)
+    d.rectangle([bx + 2, by + 9, bx + 10, by + 10], fill=7, outline=1)
+    d.point((bx + 6, by + 11), fill=1)
+    d.point((bx + 5, by + 4), fill=10)
+    # DING! (3x5 letters, red)
+    font = {'D': ['XX.', 'X.X', 'X.X', 'X.X', 'XX.'], 'I': ['X', 'X', 'X', 'X', 'X'],
+            'N': ['X..X', 'XX.X', 'X.XX', 'X..X', 'X..X'], 'G': ['.XX', 'X..', 'X.X', 'X.X', '.XX'],
+            '!': ['X', 'X', 'X', '.', 'X']}
+    x = bx + 12
+    for ch in 'DING!':
+        rows = font[ch]
+        for yy, r in enumerate(rows):
+            for xx, c in enumerate(r):
+                if c == 'X':
+                    d.point((x + xx, by + 4 + yy), fill=13)
+        x += len(rows[0]) + 1
     # road paint (officer palette): a Green P stencil in the empty spot, and
     # the yellow stop line in the lane where your rear bumper should stop
     d.rounded_rectangle([81, 193, 94, 206], radius=3, fill=12, outline=1)
@@ -357,7 +365,7 @@ def build_sprites():
     sh.obj('pin_ok', 104, 176, 8, 8, 4, 7)
     sh.obj('pin_bad', 112, 176, 8, 8, 4, 7)
     sh.obj('sparkle', 120, 176, 8, 8)
-    sh.obj('ding', 96, 128, 16, 16)
+    sh.obj('bubble', 96, 152, 32, 16, 30, 15)
     sh.obj('ticket', 96, 184, 8, 8)
     sh.obj('alarm', 104, 184, 8, 8)
     out('parking_spr.bin', sh.tiles())
@@ -394,7 +402,7 @@ def build():
     view.alpha_composite(render(sh, (96, 48, 32, 48), TRUCK), (150, 160))
     view.alpha_composite(render(sh, (96, 96, 16, 32), OFFICER), (232, 60))
     view.alpha_composite(render(sh, (96, 144, 8, 8), TRUCK), (240, 116))
-    view.alpha_composite(render(sh, (96, 152, 16, 16), TRUCK), (236, 104))
+    view.alpha_composite(render(sh, (96, 152, 32, 16), OFFICER), (132, 134))
     view.alpha_composite(render(sh, (48, 192, 16, 32), OFFICER), (162, 150))
     preview(view, 'parking.png')
     return '%d tiles, %d pals' % (len(ts), len(pals))

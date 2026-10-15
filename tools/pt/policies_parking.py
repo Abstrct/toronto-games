@@ -20,17 +20,19 @@ and judgement:
                   judged by eye, so each spot it misjudges the stop line, the
                   counter-steer point, the straight and the moment it stops
                   by a little (more the slower the hand), and it aims with a
-                  margin that grows with its lag. It goes for NONSTOP; only a
-                  quick hand (lag <= SHAVE_LAG) tries the trick, a slower one
-                  paces its approach so the cyclist is by when it gets there.
+                  margin that grows with its lag. It goes for NONSTOP; a
+                  quick hand (lag <= SHAVE_LAG) paces its approach and
+                  anticipates the trick; a slower one has learned the
+                  cyclist's DING! bubble: it waits on the line and backs in
+                  CUE_AIM frames after the bubble shows (less its own lag).
                   This is the bot `pt.py curve parking` slows.
     park_human    park_driver with its own 15 f hand (+- 4, 3% missed): what an
                   average practised player scores (`pt.py bot` needs no
                   latency for it).
     park_tell     the trick from its tell alone: waits on the line, and the
-                  moment the cyclist's second bell shows (*DING DING* in the
-                  panel, the bell over her) rolls to DOWN+RIGHT. Run it with
-                  `-l 10,11,12`: it reads nothing else about her.
+                  moment the cyclist's DING! bubble shows beside her (read
+                  from OAM) rolls to DOWN+RIGHT. It reads nothing else about
+                  her; the hand's latency is its reaction.
     park_coach    a first-timer who only follows the coach line in the panel
                   (reads the message the HUD shows, reacts to it in 12 f).
     park_prompt*  the same at 20-25 f (and 40 f), and a 25 f hand the coach
@@ -463,6 +465,7 @@ class park_expert(park_tas):
 
 SHAVE_LAG = 8
 PACE_LAG = 12           # a slower hand waits on the line for the cyclist
+CUE_AIM = 21            # ... and backs in about this many frames after her DING! bubble shows
 
 
 class park_driver(_Parker):
@@ -489,6 +492,27 @@ class park_driver(_Parker):
         # judging her speed and my arrival by eye: off by a few frames
         self.pace_err = rng.gauss(0, 2 + 0.25 * lag)
         self.A_ERR = 1 + lag // 6
+        # a slower hand that has learned the cyclist's DING! bubble: waits on
+        # the line and backs in a beat after it (its own lag learned)
+        self.tell = lag > SHAVE_LAG
+        if self.tell:
+            self.PACE = False       # (waits on the line for her instead)
+        self.heard_t = None
+
+    def bike_block(self, st, lead):
+        if not self.tell:
+            return super().bike_block(st, lead)
+        if st['bst'] != 2 or self.shave_go:
+            return False
+        if self.heard_t is None and bubble_up(self.game):
+            self.heard_t = self.t
+        if self.heard_t is not None and st['flags'] & F_REV == 0:
+            if self.t >= self.heard_t + max(0, CUE_AIM - self.lag()):
+                self.shave_go = True
+                return False
+            return True
+        front, left = min(st['cy']), min(st['cx'])
+        return st['by'] > front - 24 and left < BIKE_X + 16
 
     def y_margin(self):
         return 0.2 * self.lag()
@@ -522,11 +546,39 @@ class park_human(park_driver):
         return self.hhold
 
 
+def _bubble_tiles():
+    """the DING! bubble's two 16x16 tiles (build/parking_meta.inc MS_BUBBLE_BASE)"""
+    import os
+    import re
+    inc = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'build', 'parking_meta.inc')
+    try:
+        base = int(re.search(r'MS_BUBBLE_BASE = (\d+)', open(inc).read()).group(1))
+    except (OSError, AttributeError):
+        base = 316
+    return (base, base + 2)
+
+
+BUBBLE_TILES = _bubble_tiles()
+
+
+def bubble_up(game):
+    """the DING! bubble is on screen: read from OAM, as the player sees it"""
+    oam = game.core.peek(game.sym['oam_buf'], 512)
+    for i in range(128):
+        x, y, t, at = oam[4 * i:4 * i + 4]
+        if 224 <= y < 240:
+            continue            # parked off screen
+        if (t | (at & 1) << 8) in BUBBLE_TILES:
+            return True
+    return False
+
+
 class park_tell(park_driver):
-    """The undocumented trick from its tell alone: stops on the line, waits
-    (WAIT! LET THE BIKE GO BY) and rolls to DOWN+RIGHT the moment the
-    cyclist's second bell shows in the panel. Nothing else about her is
-    read. Run it with a 10-12 f hand (pt.py curve parking -p park_tell -l 10,11,12)."""
+    """The undocumented trick from its tell alone: drives up to the line as
+    usual (no pacing), waits, and the moment the cyclist's DING! bubble shows
+    beside her (read from OAM: what's on screen) rolls to DOWN+RIGHT. Nothing
+    else about her is read. The hand's latency is the reaction (pt.py curve
+    parking -p park_tell; or with a fixed +-3 jitter for the trick's table)."""
     NONSTOP = False
     PACE = False
 
@@ -534,23 +586,27 @@ class park_tell(park_driver):
         super().new_spot(st, rng)
         self.try_shave = True
         self.heard = False
-
-    def panel(self):
-        g = self.game
-        tm = g.core.peek(g.sym['txt_map'] + 3 * 64, 64)
-        return ''.join(chr((tm[2 * x] & 0x7F) + 32) if 1 <= (tm[2 * x] & 0x7F) <= 63 else ' ' for x in range(32))
+        self.PACE = False
+        self.CENTRE = False     # stop on the line and wait there
 
     def bike_block(self, st, lead):
         if st['bst'] != 2 or self.shave_go:
             return False
-        if not self.heard and '*DING DING*' in self.panel():
+        if not self.heard and bubble_up(self.game):
             self.heard = True
         if self.heard and st['flags'] & F_REV == 0:
             self.shave_go = True
             return False
-        # no bell (she was already by when I got here): wait for her as before
+        # no bubble yet: wait for it (or for her to go by)
         front, left = min(st['cy']), min(st['cx'])
         return st['by'] > front - 24 and left < BIKE_X + 16
+
+    def plan(self, st, prev, rng):
+        # stopped a little short of the line counts as on it (the coach says
+        # WAIT there too): no creeping up to it with a slow hand
+        if self.stage == 'up' and st['v'] == 0 and 0 <= st['ay'] - st['tgt'] <= 8 and st['flags'] & F_REV == 0:
+            self.stage = 'back'
+        return super().plan(st, prev, rng)
 
 
 class park_wiggle(_Parker):
@@ -579,14 +635,15 @@ class park_prompt(Policy):
     JIT = 2
     FAST_CUES = {}
 
-    # prompt prefix -> what the hand holds (None: tap A)
-    TABLE = (('GAS ', UP), ('LET GO OF ', 0), ('PAST IT!', DOWN), ('HOLD DOWN+RIGHT: BACK', DOWN | RIGHT),
-             ('HOLD DOWN+RIGHT', DOWN | RIGHT), ('KEEP HOLDING DOWN+RIGHT', DOWN | RIGHT), ('NOW!', DOWN | LEFT),
-             ('HOLD DOWN+LEFT', DOWN | LEFT), ('STRAIGHT! LET', 0), ('A: PARK', None), ('A: ON TO', None),
+    # prompt prefix -> what the hand holds (None: tap A). The arrow glyphs
+    # read back as their font codes + 32: v down, u up, o left, n right
+    TABLE = (('GAS ', UP), ('LET GO OF ', 0), ('PAST IT!', DOWN), ('HOLD v+n: BACK', DOWN | RIGHT),
+             ('HOLD v+n', DOWN | RIGHT), ('KEEP HOLDING v+n', DOWN | RIGHT), ('NOW!', DOWN | LEFT),
+             ('HOLD v+o', DOWN | LEFT), ('STRAIGHT! LET', 0), ('A: PARK', None), ('A: ON TO', None),
              ('A: SEE', None), ('TOO FAR OUT', None), ('OVER THE CURB', None), ('WAIT!', 0),
-             ('HOLD UP+LEFT', UP | LEFT), ('MIND THE BMW', DOWN), ('TOO SOON', DOWN | RIGHT), ('PINNED', DOWN),
-             ('STUCK! HOLD UP', UP), ('STUCK! HOLD DOWN', DOWN), ('TOO LATE!', 0), ('HOLD UP+RIGHT', UP | RIGHT),
-             ('ENOUGH!', 0), ('HOLD DOWN ONLY', DOWN), ('BACK STRAIGHT', DOWN))
+             ('HOLD u+o', UP | LEFT), ('MIND THE BMW', DOWN), ('TOO SOON', DOWN | RIGHT), ('PINNED', DOWN),
+             ('STUCK! HOLD u', UP), ('STUCK! HOLD v', DOWN), ('EASY, CURB!', 0), ('HOLD u+n', UP | RIGHT),
+             ('ENOUGH!', 0))
 
     def __init__(self):
         self.queue = []
