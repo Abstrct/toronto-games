@@ -521,7 +521,7 @@ FAST = [('rider_0', ''), ('rider_1', ''), ('rider_2', ''), ('rider_3', ''),
         ('pow0', ''), ('pow1', ''), ('token', ''), ('door', ''), ('pothole', ''), ('car', ''),
         ('car', 'v'), ('ped0', ''), ('ped0', 'h'), ('ped1', ''), ('ped1', 'h'), ('finish', ''),
         ('warn', ''), ('streetcar', ''), ('streetcar', 'v'), ('brake', ''), ('hazard', ''),
-        ('xing', '')]
+        ('xing', ''), ('spark0', ''), ('spark1', '')]
 
 
 def fast_meta(sh):
@@ -593,9 +593,18 @@ def build_sprites():
     for yy in range(4):
         for xx in range(4):
             d.rectangle([32 + xx * 4, 80 + yy * 4, 35 + xx * 4, 83 + yy * 4], fill=12 if (xx + yy) % 2 else 13)
-    d.polygon([(56, 81), (63, 94), (49, 94)], fill=15, outline=13)
-    d.rectangle([55, 85, 56, 90], fill=13)
-    d.rectangle([55, 92, 56, 93], fill=13)
+    # the 501 coming up behind: a bike mirror with the 501's red nose in it
+    # (STREETCAR palette: 1 outline, 2 red, 3 dark red, 7 windshield, 9
+    # headlight, 11 grey). A warning triangle read as "something ahead".
+    d.ellipse([48, 80, 63, 92], fill=1)
+    d.ellipse([49, 81, 62, 91], fill=11)
+    d.ellipse([50, 82, 61, 90], fill=8)
+    d.rounded_rectangle([52, 83, 59, 90], radius=3, fill=2)
+    d.rectangle([52, 89, 59, 90], fill=3)
+    d.rectangle([53, 84, 58, 85], fill=7)
+    d.point((53, 88), fill=9)
+    d.point((58, 88), fill=9)
+    d.rectangle([55, 92, 56, 95], fill=11)
     draw_streetcar(sh, 80, 64)
     draw_pothole(sh, 0, 112)
     # hop shadow (FX palette): a soft dark oval on the asphalt
@@ -611,20 +620,35 @@ def build_sprites():
         d.point((bx + 2, 129), fill=12)
     # hazard lights for a car stopped in the bike lane (misc palette amber),
     # drawn over a car's front and back corners
-    for bx in (54, 70):
-        d.rectangle([bx, 128, bx + 3, 130], fill=7)
-        d.rectangle([bx + 1, 129, bx + 2, 129], fill=9)
-    # streetcar tracks across the road (FX palette), one 16-px repeat: a
-    # concrete bed with seams, two steel rails, each with its dark groove
-    d.rectangle([64, 81, 79, 94], fill=8)
-    d.line([64, 81, 79, 81], fill=7)
-    d.line([64, 94, 79, 94], fill=7)
-    d.line([71, 82, 71, 93], fill=7)
-    for ry in (84, 90):
-        d.line([64, ry - 1, 79, ry - 1], fill=6)
-        d.line([64, ry, 79, ry], fill=4)
-        d.line([64, ry + 1, 79, ry + 1], fill=11)
-        d.line([64, ry + 2, 79, ry + 2], fill=6)
+    # (FX palette: amber with a hot core, big enough to blink from the couch)
+    for bx in (53, 70):
+        d.rectangle([bx, 128, bx + 4, 131], fill=3)
+        d.rectangle([bx + 1, 129, bx + 3, 130], fill=2)
+        d.point((bx + 2, 129), fill=4)
+    # a 501's trolley pole arcing on the wire (blue car palette: 11 white,
+    # 4 light blue, 2 blue, 8 pale yellow): two 32x24 frames that flicker,
+    # a hot core with jagged arcs and flying sparks, big enough for the couch
+    import math as _m
+    rnd = random.Random(501)
+    for k, x0 in enumerate((0, 32)):
+        cx, cy = x0 + 15.5, 136 + 11.5
+        for i in range(7):
+            a = 2 * _m.pi * (i + 0.5 * k + rnd.uniform(-0.2, 0.2)) / 7
+            r = rnd.uniform(10, 14)
+            pts = [(cx, cy)]
+            for j in range(1, 5):
+                rr = r * j / 4
+                jit = rnd.uniform(-2.2, 2.2) if j < 4 else 0
+                pts.append((cx + rr * _m.cos(a) - jit * _m.sin(a), cy + rr * _m.sin(a) + jit * _m.cos(a)))
+            pts = [(min(max(px_, x0 + 1), x0 + 30), min(max(py_, 137), 158)) for px_, py_ in pts]
+            d.line(pts, fill=2, width=3)
+            d.line(pts, fill=4, width=1)
+        d.ellipse([cx - 5, cy - 5, cx + 5, cy + 5], fill=4)
+        d.ellipse([cx - 3.5, cy - 3.5, cx + 3.5, cy + 3.5], fill=11)
+        for _ in range(9):
+            a = rnd.uniform(0, 2 * _m.pi)
+            r = rnd.uniform(8, 12)
+            d.point((int(cx + r * _m.cos(a)), int(min(158, max(137, cy + r * _m.sin(a))))), fill=8)
 
     sh.obj('rider_0', 0, 0, 16, 32)
     sh.obj('rider_1', 16, 0, 16, 32)
@@ -653,6 +677,8 @@ def build_sprites():
     sh.obj('brake', 0, 128, 48, 8, 24, -38)
     sh.obj('hazard', 48, 128, 32, 8, 16, 1)
     sh.obj('xing', 64, 80, 16, 16)
+    sh.obj('spark0', 0, 136, 32, 24, 16, 12)
+    sh.obj('spark1', 32, 136, 32, 24, 16, 12)
     out('bike_spr.bin', sh.tiles())
     with open('build/bike_meta.inc', 'w') as f:
         f.write(sh.meta_inc())

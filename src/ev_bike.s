@@ -8,24 +8,29 @@
 ; STYLE (all of it earned with the hop button or a risk):
 ;   TRACK HOP    hop, and be in the air as you cross a rail along Queen
 ;                (50; one per HOP_GAP of road)
-;   RAILS HOPPED the tracks across Queen (80; HOP THE RAILS: B! says when)
+;   RAILS HOPPED the tracks across Queen (HOP THE RAILS: B! says when, B any
+;                time in the next 34 frames clears them): 120 if B came in
+;                the first RAILS_Q frames of the order, 80 after
 ;   POTHOLE HOP  hop clean over a pothole
 ;   CLOSE CALL   in the way of a car or the 501, slip out just in time
 ;   DRAFTING     tuck in behind the 501: it pulls you along
-;   TTC TRANSFER clear both rails of a track in one hop (on no card: steer
-;                first, hop a beat later, so the hop lasts over both). It
-;                pays 100 x the chain its TRACK HOP set (never raises it),
-;                and is good for one ride: the next needs another kind of
-;                trick first (CLOSE CALL, POTHOLE HOP, DRAFT): no zig-zag farm.
-;                Its tell: the rails crackle white/blue while a hop now would do
-;                it (cue_rails), ~9 frames before the near rail and on till
-;                LATE_T frames after it (a rail steered over hard counts as
-;                hopped if B comes that soon after)
+;   TTC TRANSFER clear both rails of a track in one hop while the rails are
+;                live (on no card: steer first, hop a beat later, so the hop
+;                lasts over both). Its tell is a warning, not the window: as a
+;                501 goes by you its trolley pole SPARKS (a big white/blue
+;                spark on the pole and the wire's noise crackling, spark_501),
+;                and SPARK_T frames later the rails crackle white/blue too: LIVE
+;                for LIVE_T frames (cue_rails), the window. One per spark, and
+;                every 501 sparks once (the northbound one as its tail clears
+;                you, the oncoming one as it passes). It pays 100 x the chain
+;                its TRACK HOP set (never raises it). A rail steered over hard
+;                still counts as hopped if B comes LATE_T frames after.
 ; Mix different ones inside 2 s of each other and they chain, x2 .. x4
 ; (the same one again pays at the chain but doesn't keep it going). Cross a
 ; rail on the ground and the groove grabs your wheel: RAIL WOBBLE, a quarter
 ; of your speed and the chain; a rail along Queen is safe if you steer over
-; it hard. Sit in one line too long and Queen St comes for you: a fresh
+; it hard (and settle never leaves you resting within RAIL_CLR px of one,
+; where the next steer would only creep over it). Sit in one line too long and Queen St comes for you: a fresh
 ; pothole in your lane (never under a car, nor near the tracks across), or
 ; the 501 up the tracks behind you.
 ; Everyone crosses the streetcar tracks that cut across Queen (XING_AT), the
@@ -35,8 +40,12 @@
 ; HOP THE RAILS: B! RHINT_F (34) frames out (B any time till you reach
 ; them), POTHOLE! HOP IT: B ~32 frames out (B in the next ~20 clears it, a
 ; bit early only bumps), 501 BEHIND! STEER > beside you while you're in its
-; way (the way you're already sliding, else the nearer side), and CAR IN
-; BIKE LANE. AGAIN. to a rider in the bike lane with time to steer round.
+; way (the way you're already sliding, else the nearer side), CAR IN
+; BIKE LANE. AGAIN. to a rider in the bike lane with time to steer round,
+; and SLOW CAR AHEAD! STEER > OR BRAKE v (slow_car) 25+ frames before you'd
+; rear-end a northbound car in your own line.
+; The card itemises TOKENS+STYLE (ev_style): TTC TOKENS x50, rail hops,
+; pothole hops, close calls and drafts, transfers, each as called out.
 ; A wipeout drops 2 of your TTC tokens (no points fee on the card).
 .p816
 .smart -
@@ -109,6 +118,8 @@ SM_DRAFT = 2
 SM_BUNNY = 3
 SM_XFER  = 4                ; TTC TRANSFER: both rails of a track, one hop
 SM_RAILS = 5                ; RAILS HOPPED: the tracks across Queen (HOP THE RAILS: B!)
+SM_RAILSQ = 6               ; ...hopped quick (B in RAILS_Q frames of the order): pays more
+RAILS_Q  = 16
 
 ; run state (words)
 b_px     = ev_ram + 0
@@ -168,7 +179,8 @@ b_lastk  = ev_ram + 464     ; the last style move
 b_pbuf   = ev_ram + 432     ; popup text built here (24 bytes)
 b_line2  = ev_ram + 466     ; a popup's second line (this bank), 0 = none
 b_l2pal  = ev_ram + 468     ; ...and its palette
-b_xok    = ev_ram + 470     ; 1 = a TTC TRANSFER pays (set by the other tricks)
+b_live   = ev_ram + 470     ; (byte) frames left of a 501's spark: SPARK_T warning, then LIVE_T live
+b_sprk   = ev_ram + 471     ; (byte) the sparking 501 (entity index * 2 + 2), 0 = none to draw
 b_ntim   = ev_ram + 472     ; frames left on the rider slot's panel (pop_near)
 b_land   = ev_ram + 474     ; frames since a hop landed, counting down from LAND_T
 b_pmrow  = ev_ram + 476     ; (byte) the callout panel's top row
@@ -183,6 +195,12 @@ b_xent   = ev_ram + 484     ; (byte) the pothole a HOP order is for (entity inde
 b_late   = ev_ram + 485     ; (byte) frames a rail just steered over on the ground can still be hopped
 b_lrail  = ev_ram + 486     ; (byte) ...which rail (0-3)
 b_cue    = ev_ram + 487     ; (byte) 1 = the rails are lit (cue_rails)
+b_sty    = ev_ram + 488     ; style by source, 4 words (ev_style 1-4): rail hops, pothole
+                            ; hops, close calls + drafts, transfers (points as called out)
+b_rq     = ev_ram + 496     ; (byte) frames left to hop the tracks across quick (RAILS_Q)
+b_quick  = ev_ram + 497     ; (byte) 1 = this hop came quick after HOP THE RAILS: B!
+b_hlive  = ev_ram + 499     ; (byte) 1 = this hop began while the rails were live
+b_slow   = ev_ram + 498     ; (byte) the car whose SLOW CAR AHEAD! is up (index * 2 + 1), 0 = none
 
 ; entities: one word per entity per field, X = index * 2
 NUM_ENT = 16
@@ -219,8 +237,8 @@ ev_bike:
     phk
     plb
     jsr bike_init
+    jsl event_card              ; (no sprites yet: nothing pokes through the card)
     jsr bike_draw
-    jsl event_card
     jsr hud_full
     jsl event_countdown
     lda #SONG_BIKE
@@ -253,6 +271,7 @@ ev_bike:
 @over:
     jsl music_stop
     jsr cue_off
+    jsl oam_clear               ; nothing pokes through the results card
     jsr bike_score
     jsl score_card
     plb
@@ -292,8 +311,6 @@ bike_init:
     stx b_hopd
     ldx #BIKE_LANE
     stx b_campx
-    ldx #$0001
-    stx b_xok
     jsr spawn_ahead
     rts
 
@@ -459,6 +476,10 @@ bike_update:
     beq @nolate
     dec b_late
 @nolate:
+    lda b_rq
+    beq @norq
+    dec b_rq
+@norq:
     jsr spawn_ahead
     jsr ents_update
     rts
@@ -619,6 +640,18 @@ steer_and_pedal:
     sta b_hopcd
     stz b_hopsc
     A8
+    lda b_rq                    ; quick after HOP THE RAILS: B! (pays more)
+    beq @slow
+    lda #$01
+@slow:
+    sta b_quick
+    stz b_hlive                 ; B while the rails are live (cue_rails)
+    lda b_live
+    beq @dead
+    cmp #(LIVE_T + 1)
+    bcs @dead
+    inc b_hlive
+@dead:
     SFX SFX_JUMP
     lda b_late                  ; B a beat after steering hard over a rail
     beq @nolate                 ; along Queen: that rail counts as hopped
@@ -817,9 +850,9 @@ rail_cross:
     lda b_hop
     bne @air
     lda b_land
-    beq @ground
+    jeq @ground
     lda b_hopsc
-    bne @ground
+    jne @ground
 @air:
     lda b_hopsc
     cmp #2
@@ -855,15 +888,23 @@ rail_cross:
     lda #$01
     sta b_tracks
     phy
+    lda b_quick                 ; B quick after the order: a clean hop pays more
+    beq @rq0
+    lda #SM_RAILSQ
+    bra @rq
+@rq0:
     lda #SM_RAILS
+@rq:
     jsr style_award
     ply
     rts
 @second:
-    lda b_hopok
-    and b_xok
+    lda b_hlive                 ; both rails in one hop, B while they're live
     jeq @x
-    stz b_xok
+    stz b_hlive
+    stz b_live                  ; (one a spark)
+    stz b_sprk
+    jsr cue_off
     jsl trick_seen
     phy
     lda #SM_XFER
@@ -942,17 +983,47 @@ rail_cross:
 ; not drift back into it; overshoot a line and you still ease back to it). A16 in/out: A = b_px -> A = new b_px.
 SETTLE_W = 7
 SETTLE_BACK = 2
+RAIL_CLR = 3                    ; ...and never closer than this to a rail
 settle:
     .a16
     ldx b_vx
-    bne @x
+    jne @x
     tax                         ; keep b_px
     lda pad
     and #(PAD_LEFT | PAD_RIGHT)
-    bne @keep
+    jne @keep
     lda b_state
     and #$00FF
-    bne @keep
+    jne @keep
+    ; never left resting by a rail (a steer that ends there): ease off it,
+    ; away from its groove, so the next steer isn't a creep over it
+    ldy #$0000
+@rl:
+    lda rails,y
+    and #$00FF
+    xba
+    sta tmp1
+    txa
+    sec
+    sbc tmp1                    ; px - rail
+    bpl @rp
+    cmp #($10000 - RAIL_CLR * 256 + 1)
+    bcc @rn
+    txa
+    sec
+    sbc #$0080
+    rts
+@rp:
+    cmp #(RAIL_CLR * 256)
+    bcs @rn
+    txa
+    clc
+    adc #$0080
+    rts
+@rn:
+    iny
+    cpy #4
+    bne @rl
     ldy #$0000
 @l:
     lda lines,y
@@ -1031,36 +1102,52 @@ lines_end:
 .a8
 
 str_wobble: .byte "RAIL WOBBLE!", 0
-str_wob_l:  .byte "STEER HARD OVER RAILS", 0
+str_wob_l:  .byte "HOP RAILS WITH B", 0
 str_wob_x:  .byte "HOP THE RAILS: B", 0
 
 rails:
     .byte 83, 107, 151, 175
 
-; The rails crackle white and blue while a hop now would carry you over both rails
-; of a track in one go (the move that pays as the chain's own, see the top):
-; it has to be on (a different trick since the last one, a TRACK HOP's worth
-; of road since the last), you on the ground and able to hop, and steering
-; at a track's near rail with it about CUE_F frames off (cue_dist), or just
-; over it (b_late) with its partner still to come. A8.
-CUE_F    = 9
+; The undocumented trick's tell (see the top). spark_501 (ents) starts it as a
+; 501 goes by: b_live = SPARK_T + LIVE_T. The warning, SPARK_T frames: the
+; 501's trolley pole sparks (draw_spark) and the wire crackles (the noise
+; bursts below, irregular, all through). Then LIVE_T frames the rails crackle
+; white and blue as well: live, the window (rail_cross pays both rails of a
+; track in one hop). Ends early on a crash or when it's landed. A8.
+SPARK_T  = 18                   ; warning frames before the rails go live
+LIVE_T   = 60                   ; the window
 CUE_SPARK  = $7FFF              ; white
 CUE_BLUE   = $7F30              ; #80c8ff: a pantograph's spark
 CUE_BLUE2  = $7A88              ; #40a0f0
+.assert SPARK_T >= 15, error, "the warning leads the window by 15 frames or more"
+.a8
 cue_rails:
-    jsr cue_wanted
-    lda #$00
-    rol a
-    cmp b_cue
-    beq @same
-    sta b_cue
-    cmp #$00
-    beq cue_off1
+    lda b_live
+    beq cue_off
+    lda b_state                 ; down: the spark's gone with it
+    beq @on
+    stz b_live
+    stz b_sprk
+    bra cue_off
+@on:
+    dec b_live
+    beq cue_quit
+    lda b_live                  ; the wire crackles: short noise bursts
+    and #$07
+    TAXB
+    lda f:crackle,x
+    beq @quiet
+    SFX SFX_STEP
+@quiet:
+    lda b_live
+    cmp #(LIVE_T + 1)
+    bcs @x                      ; still the warning: the rails aren't live yet
+    lda b_cue
+    bne @same
+    inc b_cue
     bra @paint
 @same:
-    cmp #$00
-    beq @x
-    lda frame                   ; on: it crackles, white / blue every 4 frames
+    lda frame                   ; live: it crackles, white / blue every 4 frames
     and #$03
     bne @x
 @paint:
@@ -1084,11 +1171,12 @@ cue_rails:
     sta pal_dirty
 @x:
     rts
+cue_quit:
+    stz b_sprk
 cue_off:
     lda b_cue
     beq cue_x
     stz b_cue
-cue_off1:
     A16
     lda f:bike_pal + 2 * (RAIL_SHINE_CG - 32)
     sta pal_buf + 2 * RAIL_SHINE_CG
@@ -1099,142 +1187,8 @@ cue_off1:
     sta pal_dirty
 cue_x:
     rts
-
-; carry set if the cue should be on (see cue_rails)
-cue_wanted:
-    lda b_state
-    jne @no
-    A16
-    lda b_hop
-    ora b_hopcd
-    jne @no16
-    lda b_xok
-    jeq @no16
-    lda b_speed
-    cmp #HOP_SPD
-    jcc @no16
-    lda b_dist
-    sec
-    sbc b_hopd
-    cmp #HOP_GAP
-    jcc @no16
-    A8
-    ; just steered over a near rail: its partner still to come
-    lda b_late
-    beq @steer
-    lda b_lrail
-    and #$01                    ; (rails 1, 3 are a pair's right one)
-    bne @lr
-    ; crossed a left rail (83 / 151): going right, partner +24 still ahead?
-    lda b_vx+1
-    jmi @no
-    lda b_lrail
-    TAXB
-    lda f:rails,x
-    clc
-    adc #24
-    cmp b_px+1
-    jeq @no
-    jcs @yes
-    jmp @no
-@lr:
-    lda b_vx+1
-    jpl @no
-    lda b_lrail
-    TAXB
-    lda f:rails,x
-    sec
-    sbc #24
-    cmp b_px+1
-    jcc @yes
-    jmp @no
-@steer:
-    ; |vx| / 32, if it's the way the pad points (else from a standstill)
-    stz tmp1
-    A16
-    lda pad
-    bit #PAD_LEFT
-    bne @gl
-    bit #PAD_RIGHT
-    beq @no16
-    lda b_vx
-    bmi @d0
-    bra @dv
-@gl:
-    lda b_vx
-    bpl @d0
-    eor #$FFFF
-    inc a
-@dv:
-    lsr a
-    lsr a
-    lsr a
-    lsr a
-    lsr a
-    cmp #17
-    bcc @di
-    lda #16
-@di:
-    tax
-    lda f:cue_dist,x
-    and #$00FF
-    sta tmp1
-@d0:
-    lda tmp1
-    bne @dk
-    lda f:cue_dist
-    and #$00FF
-    sta tmp1
-@dk:
-    lda pad
-    bit #PAD_LEFT
-    A8
-    bne @left
-    ; right: the near rail is 83 or 151, and you're short of it
-    ldx #$0000
-@rr:
-    lda f:rails,x
-    sec
-    sbc b_px+1
-    beq @rn
-    bcc @rn
-    cmp tmp1
-    bcc @yes
-    beq @yes
-@rn:
-    inx
-    inx
-    cpx #4
-    bcc @rr
-    bra @no
-@left:
-    ldx #$0001
-@ll:
-    lda b_px+1                  ; (on the rail going left: not over it yet)
-    sec
-    sbc f:rails,x
-    bcc @ln
-    cmp tmp1
-    bcc @yes
-    beq @yes
-@ln:
-    inx
-    inx
-    cpx #4
-    bcc @ll
-    bra @no
-@no16:
-    A8
-@no:
-    clc
-    rts
-@yes:
-    sec
-    rts
-
-; px a steer covers in CUE_F frames from |vx| / 32 (0 .. 16), holding on
-cue_dist: .byte 11, 11, 12, 13, 14, 14, 15, 16, 16, 16, 17, 17, 17, 17, 18, 18, 18
-.assert CUE_F = 9, error, "cue_dist is for 9 frames"
+; noise bursts by (frames left & 7): 3, 2, 3 apart
+crackle: .byte 1, 0, 0, 1, 0, 1, 0, 0
 
 ; crash: A = cause. Only while riding and not invulnerable.
 crash:
@@ -1566,6 +1520,7 @@ pop_clear_n:
     sta tmp1+1
     stz b_pnh
     stz b_warn
+    stz b_slow
     lda b_pnrow
     bra pc_fill
 pop_clear_m:
@@ -1607,15 +1562,6 @@ str_drop1: .byte "DROPPED 1 TOKEN", 0
 ; doesn't hold a chain up); points = base * chain. Banner "TRACK HOP! X3 +45".
 style_award:
     sta b_kind
-    cmp #SM_HOP                 ; any trick but a hop re-arms the TRANSFER
-    beq @arm
-    cmp #SM_XFER
-    beq @arm
-    cmp #SM_RAILS
-    beq @arm
-    lda #$01
-    sta b_xok
-@arm:
     A16
     lda b_kind
     and #$00FF
@@ -1664,6 +1610,17 @@ style_award:
     dex
     bne @mul
     sta tmp1                    ; this move's points
+    lda b_kind                  ; ...on the card under its source (ev_style)
+    and #$00FF
+    tax
+    lda f:sm_src,x
+    and #$00FF
+    tax
+    lda b_sty,x
+    clc
+    adc tmp1
+    sta b_sty,x
+    lda tmp1
     clc
     adc b_style
     cmp #STYLE_CAP              ; (keeps RIDE + TIPS inside 16 bits)
@@ -1783,9 +1740,11 @@ style_award:
     pla
     rts
 
-sm_base:  .byte 50, 100, 60, 80, 100, 80  ; x the chain (three digits at most)
+sm_base:  .byte 50, 100, 60, 80, 100, 80, 120  ; x the chain (three digits at most)
 .assert CHAIN_MAX * 120 < 1000, error, "style banner prints three digits"
-sm_names: .addr smn0, smn1, smn2, smn3, smn4, smn5
+; each move's source on the card (b_sty word offset: ev_style 1-4)
+sm_src:   .byte 0, 4, 4, 2, 6, 0, 0
+sm_names: .addr smn0, smn1, smn2, smn3, smn4, smn5, smn5
 smn0: .byte "TRACK HOP!", 0
 smn1: .byte "CLOSE CALL!", 0
 smn2: .byte "DRAFTING THE 501", 0
@@ -1816,6 +1775,7 @@ bike_draw:
 @noshake:
     A8
     jsr draw_player
+    jsr draw_spark
     jsr draw_warning
     ; traffic first (on top), then things lying on the road
     stz b_pass
@@ -2040,6 +2000,65 @@ rider_tab:
 hop_lift: .byte 0, 1, 3, 4, 5, 6, 7, 8, 9, 9, 9, 9, 9, 8, 7, 6, 5, 4, 3, 1, 0
 .assert HOP_T = 20, error, "hop_lift: one entry per frame in the air"
 
+; The sparking 501's trolley pole (b_sprk: spark_501 in ents, cue_rails):
+; a crackling 32 px white and blue burst on the pole's tip, at the car's tail
+; (its bottom end heading north, its top end heading south), two frames
+; that flicker, every frame it's on screen
+.a8
+draw_spark:
+    lda b_sprk
+    beq @x
+    dec a
+    dec a
+    TAXB
+    lda E_TYPE,x
+    cmp #T_TRAM_N
+    beq @n
+    cmp #T_TRAM_S
+    beq @s
+    stz b_sprk
+@x:
+    rts
+@s:
+    A16
+    lda #($10000 - 46)
+    bra @y
+@n:
+    A16
+    lda #45
+@y:
+    sta tmp6
+    lda E_WY,x
+    sec
+    sbc b_dist
+    eor #$FFFF
+    inc a
+    clc
+    adc #PLAYER_SY
+    clc
+    adc tmp6
+    sta spr_y
+    lda E_X,x
+    xba
+    and #$00FF
+    sta spr_x
+    A8
+    lda #$34                    ; the blue car's palette, on top
+    sta tmp5
+    lda frame                   ; it jumps about a little as it flickers
+    and #$02
+    beq @a
+    A16
+    dec spr_x
+    dec spr_x
+    inc spr_y
+    A8
+    LDPTR1 bm_spark1
+    jmp bmeta
+@a:
+    LDPTR1 bm_spark0
+    jmp bmeta
+
 ; streetcar coming up behind: blinking sign + bell
 draw_warning:
     lda b_bell
@@ -2061,8 +2080,8 @@ draw_warning:
     lda #200
     sta spr_y
     A8
-    lda #$3A                    ; palette 5, priority 3
-    sta tmp5
+    lda #$38                    ; streetcar palette, priority 3: the 501 in
+    sta tmp5                    ; your mirror (not a sign: that read as ahead)
     LDPTR1 bm_warn
     jmp bmeta
 @x:
@@ -2333,6 +2352,16 @@ bike_score:
     adc tmp2
     clc
     adc tmp1
+    sta ev_style                ; by source for the card: TTC TOKENS (x50),
+    lda b_sty                   ; then rail hops, pothole hops, close calls
+    sta ev_style+2              ; and drafts, transfers (chains included, as
+    lda b_sty+2                 ; each was called out). They add up to
+    sta ev_style+4              ; TOKENS+STYLE on every run; the card shows
+    lda b_sty+4                 ; them when it's paid (a finish), and a
+    sta ev_style+6              ; failed run's FORFEIT rows say why not
+    lda b_sty+6
+    sta ev_style+8
+    lda ev_style
     clc
     adc b_style
     sta ev_break+2
