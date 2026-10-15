@@ -60,9 +60,12 @@ run: app
 
 # play it in a browser: the page GitHub Pages serves (EmulatorJS + snes9x from its CDN)
 #   make web && python3 -m http.server -d build/web
-web: $(ROM) web/index.html
+# og.png, icon.png and favicon.png come from tools/og.py (needs build/emu, so they're committed)
+WEB := $(wildcard web/*)
+
+web: $(ROM) $(WEB)
 	@mkdir -p build/web
-	cp web/index.html $(ROM) build/web/
+	cp $(WEB) $(ROM) build/web/
 
 .PHONY: web
 
