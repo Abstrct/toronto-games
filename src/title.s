@@ -98,7 +98,6 @@ title_screen:
     stx t_idle
 @fresh:
 
-    PRINTC 26, TP_GREY, str_players
     PRINTC 24, TP_GREY, str_copy
     jsl fade_in
     lda #SONG_TITLE
@@ -157,7 +156,6 @@ title_screen:
     stz txt_bg
 
 @input:
-    jsr title_ticker
     A16
     lda pad_new
     A8
@@ -228,24 +226,6 @@ title_screen:
     jsl music_stop
     lda #TITLE_DEMO
     rtl
-
-; bottom line: until the sound test is used, "1-8 PLAYERS" and the
-; SELECT hint take turns every ~4 s
-title_ticker:
-    lda t_st
-    bne @x
-    lda frame
-    bne @x
-    PRINTC 26, TP_GREY, str_wipe
-    lda frame+1
-    and #$01
-    bne @hint
-    PRINTC 26, TP_GREY, str_players
-    rts
-@hint:
-    PRINTC 26, TP_GREY, str_sel_hint
-@x:
-    rts
 
 ; attract mode: after 20 s idle, the records, then a demo.
 ; Carry set = time for the demo.
@@ -428,7 +408,6 @@ st_input:
     SFX SFX_BACK
     jsr attract_off
     PRINTC 26, TP_GREY, str_wipe
-    PRINTC 26, TP_GREY, str_players
     rts
 @row:
     A8
@@ -862,8 +841,6 @@ star_end:
 str_press:   .byte " PRESS START ", 0
 str_blank:   .byte "             ", 0
 str_wipe:    .byte "                              ", 0
-str_players: .byte "1-8 PLAYERS  ", TXT_DOT + 32, "  TAKE TURNS", 0
-str_sel_hint: .byte "SELECT: SOUND TEST", 0
 str_att_rec: .byte "TORONTO RECORDS", 0
 str_att_rec2: .byte "THINK YOU CAN BEAT 'EM?", 0
 str_copy:    .byte 91+32, " 2026 ABSTRCT", 0     ; font.py tile 91 = (C)
