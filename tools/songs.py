@@ -7,7 +7,7 @@ Tempo is frames per 16th note at 60 Hz: 900 / BPM (a pair alternates)."""
 from audio import song, fill, tr, chan
 
 # instrument ids (see audio.INSTRUMENTS)
-LEAD25, LEAD50, BASS, DRUMS, ARP12, SAW, SAIL_LICK, PAD = range(8)
+LEAD25, LEAD50, BASS, DRUMS, PARK_BASS, SAW, SAIL_LICK, PAD = range(8)
 PLUCK, STAB, THIN, FLUTE, SAIL_STRUM, SOFTPLUCK, STRUM, SAIL_LEAD = range(8, 16)
 
 
@@ -398,43 +398,101 @@ def brother_downwind():
 
 
 # ---------------------------------------------------------------------------
-# 9 parallel parking - "Green P Shuffle" (original). F major swing: the old
-# I - vi - ii - V turnaround (F D7 Gm7 C7), a walking bass and a cheeky
-# melody that keeps almost getting it right.
-def green_p_shuffle():
-    F, D7, Gm7, C7 = 'F3 A3 C4 F4', 'F#3 A3 C4 D4', 'G3 Bb3 D4 F4', 'E3 G3 Bb3 C4'
-    pick = '1 . 3 4 2 . 3 4 1 . 3 4 2 3 4 3'
-    walk = ('F2:4 A2:4 C3:4 A2:4 D2:4 F#2:4 A2:4 C3:4 '
-            'G2:4 Bb2:4 D3:4 Bb2:4 C3:4 Bb2:4 G2:4 E2:4')
-    shuffle = 'k . h . s . h . k . h k s . h .'
-    head = sec('head',
-               '@11 A4:4 C5:2 A4:2 F4:4 G4:2 A4:2 F#4:4 A4:2 C5:2 D5:6 C5:2 '
-               'Bb4:4 D5:2 Bb4:2 G4:4 A4:2 Bb4:2 C5:6 Bb4:2 G4:4 E4:4 '
-               'F4:2 A4:2 C5:2 F5:2 E5:4 D5:4 C5:2 A4:2 F#4:2 A4:2 D5:8 '
-               'Bb4:2 A4:2 G4:2 Bb4:2 D5:4 F5:4 E5:4 C5:4 G4:4 - . . .',
-               fill([F, D7, Gm7, C7, F, D7, Gm7, C7], pick),
-               walk + ' ' + walk,
-               'x . h . s . h . ' + 'k . h k s . h . ' + rep(shuffle, 6) + ' k . h . s . s . s s s s T T t t')
-    return song((10, 7), [FLUTE, PLUCK, BASS, DRUMS], join(head), loop=0)
+# 9 parallel parking - "Park the Pain Away" (a nod to Peaches, "Fuck the Pain
+# Away"): an original tune in that song's world - F# minor at ~130, bare
+# groovebox electroclash with a broken (not four-on-the-floor) beat, a low
+# buzzing saw bass, a deadpan chanted lead, and a backing-up beeper in the
+# harmony. It stops dead before the loop, like you should.
+KEY_PARK = 2                    # written in E minor, played in F# minor
+
+
+def park_the_pain_away():
+    buzz_a = 'E2:2 E2:2 . . E3:2 E2:2 . . D3:2 E2:2'
+    buzz_b = 'E2:2 E2:2 . . E3:2 E2:2 G2:2 A2:2 B2:2'
+    buzz_c = 'C2:2 C2:2 . . C3:2 C2:2 . . B2:2 C3:2'
+    buzz_d = 'D2:2 D2:2 . . D3:2 D2:2 . . E3:2 D3:2'
+    beeper = 'B5 - . . . . . . B5 - . . . . . .'
+    machine = 'k . h . s . k . h . k . s . h .'
+    machine2 = 'k . h . s . k . h . k . s . s s'
+    verse_buzz = rep(rep(buzz_a, 3) + ' ' + buzz_b, 2)
+
+    def offbeat(n):
+        return '. . %s - . . %s - . . %s - . . %s -' % ((n,) * 4)
+
+    intro = sec('intro', rest(4),
+                '@9 ' + rest(2) + ' ' + rep(beeper, 2),
+                rest(2) + ' ' + buzz_a + ' ' + buzz_b,
+                'k . h . . . k . h . k . . . h . ' + machine + ' ' + machine + ' ' +
+                'k . h . s . k . s . s . s s s s')
+    verse = sec('verse',
+                '@10 -:4 E5:2 E5:2 G5:2 -:2 E5:2 D5:2 E5:4 -:12 '
+                '-:4 G5:2 G5:2 A5:2 -:2 G5:2 E5:2 D5:4 B4:4 -:8 '
+                '-:4 E5:2 E5:2 G5:2 -:2 E5:2 D5:2 E5:4 -:4 B5:2 -:6 '
+                '-:4 A5:2 G5:2 E5:2 -:2 D5:2 E5:2 E5:4 -:12',
+                rep(beeper, 8),
+                verse_buzz,
+                'x . h . s . k . h . k . s . h . ' + machine2 + ' ' + rep(machine + ' ' + machine2, 2) +
+                ' ' + machine + ' k . h . s . k . s s s . s s s s')
+    chorus = sec('chorus',
+                 'G5:4 G5:2 E5:2 G5:4 A5:4 F#5:6 E5:2 D5:8 '
+                 'E5:2 E5:2 G5:2 B5:2 A5:4 G5:4 E5:12 -:4 '
+                 'G5:4 G5:2 E5:2 G5:4 A5:4 B5:6 A5:2 F#5:8 '
+                 'G5:2 F#5:2 E5:2 D5:2 B4:4 D5:4 E5:12 -:4',
+                 ' '.join(offbeat(n) for n in ('G4', 'A4', 'B4', 'B4', 'G4', 'A4', 'B4', 'B4')),
+                 rep(' '.join([buzz_c, buzz_d, buzz_a, buzz_b]), 2),
+                 'x . o . s . k . o . k . s . o . ' + rep(machine + ' ' + machine2, 3) +
+                 ' k . h . s . k . s . s s s s s s')
+    brake = sec('brake',
+                '-:16 ' + rest(3),
+                '-:16 ' + rest(1) + ' ' + beeper + ' ' + beeper,
+                buzz_a + ' ' + buzz_a + ' ' + buzz_a + ' E2:2 E2:2 E3:2 -:10',
+                rep('k . . . . . k . . . k . . . . .', 2) + ' ' + machine +
+                ' s . s . s s s s x . . . - . . .')
+    return song(7, [THIN, STAB, PARK_BASS, DRUMS],
+                [tr(c, KEY_PARK) for c in join(intro, verse, chorus, brake)], loop=64)
 
 
 # ---------------------------------------------------------------------------
-# 10 ttc surfing - "Please Stand Clear" (original). E minor at 150, i - VI -
-# VII - V like a train that keeps lurching, the lead leaning one way, then
-# the other; a pumping root bass and a rattling ride on the 16ths.
-def please_stand_clear():
-    Em, C, D, B7 = 'E3 G3 B3 E4', 'C3 E3 G3 C4', 'D3 F#3 A3 D4', 'B2 D#3 F#3 A3'
-    arpt = '1 2 3 4 3 2 1 2 1 2 3 4 3 2 3 4'
-    ride = 'k . h k s . h . k k h . s . h h'
-    run = sec('run',
-              '@5 B4:2 B4:2 G4:2 E4:2 . . E4:2 G4:2 B4:2 C5:4 B4:2 A4:2 G4:4 E4:4 '
-              'D5:2 D5:2 A4:2 F#4:2 . . F#4:2 A4:2 D5:2 D#5:6 C5:2 B4:4 A4:4 '
-              'E5:4 D5:2 B4:2 G4:4 B4:4 C5:2 E5:2 G5:4 E5:4 C5:4 '
-              'D5:2 F#5:2 A5:4 F#5:4 D5:4 B4:4 D#5:4 F#5:4 - . . .',
-              fill([Em, C, D, B7, Em, C, D, B7], arpt),
-              pump('E2', 'C3', 'D3', 'B2', 'E2', 'C3', 'D3', 'B2'),
-              'x . h k s . h . ' + 'k k h . s . h h ' + rep(ride, 6) + ' k . s . s . s s T T t t s s s s')
-    return song((6, 6), [SAW, ARP12, BASS, DRUMS], join(run), loop=0)
+# 10 ttc surfing - "The Wait" (a nod to The Band, "The Weight"): an original
+# tune in that song's world - A major at a lazy ~75 with a loose 16th swing,
+# a gospel piano comp, a walking bass and a lean-back backbeat, verses that
+# wander I - iii - IV - I and a call-and-response chorus rocking A to D.
+def the_wait():
+    A, Csm, D, E = 'A3 C#4 E4', 'G#3 C#4 E4', 'A3 D4 F#4', 'G#3 B3 E4'
+    comp = '1:3 3 2:2 3:2 1:3 3 2:2 3:2'
+
+    def walk(r, f, a):
+        return '%s:6 %s:2 %s:4 %s:4' % (r, r, f, a)
+
+    lazy = 'k . h . s . h . k . h k s . h .'
+    lazy2 = 'k . h . s . h k . . h k s . h h'
+    intro = sec('intro',
+                '@15 A4:2 C#5:2 E5:4 D5:2 C#5:2 B4:4 A4:2 B4:2 C#5:2 E5:2 B4:6 - .',
+                '@8 ' + fill([A, E], comp),
+                walk('A2', 'E2', 'G#2') + ' ' + walk('E2', 'B2', 'G#2'),
+                'h . h . h . h . h . h . h . h . k . h . s . h . k . T . t . t t')
+    verse = sec('verse',
+                '. . . . E4:2 A4:2 A4:2 B4:2 C#5:4 B4:4 A4:2 G#4:2 E4:8 '
+                '. . . . F#4:2 A4:2 B4:2 A4:2 D5:4 C#5:6 B4:2 A4:8 '
+                '. . . . C#5:2 E5:2 E5:2 C#5:2 B4:4 C#5:4 B4:2 G#4:2 B4:8 '
+                'A4:4 F#4:2 A4:2 B4:4 D5:4 C#5:8 -:8',
+                fill([A, Csm, D, A, A, Csm, D, A], comp),
+                ' '.join([walk('A2', 'E2', 'B2'), walk('C#3', 'G#2', 'C#3'), walk('D3', 'A2', 'C#3'),
+                          walk('A2', 'E2', 'A2'), walk('A2', 'E2', 'B2'), walk('C#3', 'G#2', 'C#3'),
+                          walk('D3', 'A2', 'C#3'), walk('A2', 'E2', 'G#2')]),
+                'x . h . s . h . k . h k s . h . ' + lazy2 + ' ' + rep(lazy + ' ' + lazy2, 2) +
+                ' ' + lazy + ' k . h . s . h . s . s s T . t .')
+    chorus = sec('chorus',
+                 'C#5:4 E5:4 A5:6 G#5:2 F#5:6 E5:2 D5:8 '
+                 'C#5:4 E5:4 A5:4 E5:4 F#5:12 - . . . '
+                 'E5:4 C#5:2 E5:2 A5:4 B5:4 A5:4 F#5:2 E5:2 D5:8 '
+                 'B4:4 E5:4 G#5:4 B5:4 A5:12 - . . .',
+                 '@14 ' + fill([A, D, A, D, A, D, E, A], '1 . 2 . 3 . 2 . 1+:4 3:2 2:2'),
+                 pump('A2', 'D2', 'A2', 'D2', 'A2', 'D2', 'E2', 'A2'),
+                 'x . h . s . h . k . h k s . h . ' + rep(lazy + ' ' + lazy2, 3) +
+                 ' k . h . s . s . T T t t s s s s')
+    return song((13, 11), [SAIL_LEAD, PLUCK, BASS, DRUMS], join(intro, verse, chorus), loop=32)
+
 
 # ---------------------------------------------------------------------------
 # 11-13 result jingles (audio.s sfx_result): under two seconds each, played on
@@ -474,5 +532,5 @@ def all_songs():
     fail, record)."""
     return [kc_incidental(), bobcaygeese(), gold_guns_gulls(), ahead_by_a_centimetre(),
             whelp_im_alive(), hay_officer(), brother_downwind(), million_collars(),
-            podium_reprise(), green_p_shuffle(), please_stand_clear(),
+            podium_reprise(), park_the_pain_away(), the_wait(),
             jingle_finish(), jingle_fail(), jingle_record()]

@@ -195,7 +195,7 @@ INSTRUMENTS = [
     (0, 0xCE, 0xB0, 0x33),   # 1 lead, 50% square
     (3, 0xFF, 0xE0, 0x3C),   # 2 bass, triangle
     (5, 0xFF, 0xE0, 0x49),   # 3 drums
-    (2, 0xFF, 0x8C, 0x18),   # 4 arpeggio, 12% square
+    (4, 0xFF, 0xE0, 0x6A),   # 4 parking bass, saw (full sustain: the song is bare)
     (4, 0xCE, 0xB0, 0x4C),   # 5 saw lead
     (0, 0xCE, 0xB0, 0x50),   # 6 regatta lick, 50% square (louder: the song is sparse)
     (0, 0x8A, 0xE0, 0x1A),   # 7 soft pad

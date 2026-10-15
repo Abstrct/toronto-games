@@ -116,7 +116,8 @@ ends a demo and brings you back to the title.
 
 Most tracks are 8-bit loops after Canadian bands: the chords, tempo and
 groove follow the original, and the melodies wander just far enough off.
-The two newest tracks are originals.
+Parallel Parking and TTC Surfing have original tunes that only borrow
+the feel (tempo, key, groove) of the Peaches and The Band songs they nod to.
 
 To hear them all, press **SELECT** on the title screen to open the sound test:
 - **MUSIC**: the 11 songs, each with the band it's after.
@@ -137,8 +138,8 @@ START goes to the main menu.
 | 7 | Brother Downwind | Sam Roberts, "Brother Down" | Harbour Regatta |
 | 8 | If I Had a Million Collars | Barenaked Ladies, "If I Had $1000000" | Off-Leash Alert |
 | 9 | Podium Reprise | the title theme behind a fanfare | podium at Nathan Phillips Square |
-| 10 | Green P Shuffle | original: an F major swing | Parallel Parking |
-| 11 | Please Stand Clear | original: E minor at 150 | TTC Surfing |
+| 10 | Park the Pain Away | Peaches, "Fuck the Pain Away" | Parallel Parking |
+| 11 | The Wait | The Band, "The Weight" | TTC Surfing |
 
 Every event has its own song. The standings song carries straight on into
 the final table, and the podium brings the title theme back. The mix is

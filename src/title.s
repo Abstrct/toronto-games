@@ -691,8 +691,8 @@ str_s5:      .byte "HAY, OFFICER", 0
 str_s6:      .byte "BROTHER DOWNWIND", 0
 str_s7:      .byte "A MILLION COLLARS", 0
 str_s8:      .byte "PODIUM REPRISE", 0
-str_s9:      .byte "GREEN P SHUFFLE", 0
-str_s10:     .byte "PLEASE STAND CLEAR", 0
+str_s9:      .byte "PARK THE PAIN AWAY", 0
+str_s10:     .byte "THE WAIT", 0
 str_a0:      .byte "AFTER BROKEN SOCIAL SCENE", 0
 str_a1:      .byte "AFTER THE TRAGICALLY HIP", 0
 str_a2:      .byte "AFTER METRIC", 0

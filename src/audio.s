@@ -947,8 +947,8 @@ song_mvol:
     .byte $6A   ; 6 regatta     Brother Downwind (the start horn rides on top)
     .byte $70   ; 7 off-leash   If I Had a Million Collars
     .byte $76   ; 8 podium      Podium Reprise: a lift over the events (see below)
-    .byte $6C   ; 9 parking     Green P Shuffle
-    .byte $6A   ; 10 subway     Please Stand Clear
+    .byte $64   ; 9 parking     Park the Pain Away (bare, so its bass is a louder saw)
+    .byte $6A   ; 10 subway     The Wait
     .byte $7A   ; 11 jingle     finished
     .byte $7A   ; 12 jingle     failed
     .byte $7A   ; 13 jingle     new record
