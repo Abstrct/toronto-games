@@ -39,6 +39,17 @@ c_fall:       .res 1            ; card_plan: 1 = an itemised forfeit squeezed in
 c_rr1:        .res 1            ; score_card: rows that flash for a new record (0 = none)
 c_rr2:        .res 1
 c_n:          .res 1            ; card_plan rows / card_nav option count
+c_bsp:        .res 1            ; card_plan: base sub-rows shown under the base (0 or 2: card_bsplit)
+c_bcnt:       .res 2            ; card_plan: the base split's count (seconds left)
+c_nsrc:       .res 1            ; style_rows: style sources that add up to the bonus (0 = none)
+c_smask:      .res 1            ; style_pick: ev_style slots printed by name (the rest: OTHER STYLE)
+c_sfor:       .res 1            ; 1 = the style sub-rows hang under the FORFEIT row
+c_pdet:       .res 1            ; break_ok: 1 = the penalty row says its count (TACKLES 3 AT 150)
+c_gap:        .res 1            ; card_plan: 1 = a 4 px gap between the stats and the sum
+c_nsr:        .res 1            ; sub-rows drawn (c_srow)
+c_srow:       .res 8            ; their text rows, top down: card_hdma opens a 4 px gap above each
+c_tmsv:       .res 2            ; tm_sh / ts_sh while a card hides the sprites
+c_hdma:       .res 64           ; card_hdma: BG3VOFS table (3 bytes an entry)
 c_cell:       .res 2
 c_val:        .res 2
 c_li:         .res 2
@@ -169,7 +180,9 @@ dbl_lines:
 ; event_card: the event has loaded its scene (screen may be dark).
 ; Draws the briefing, fades in, waits for A, clears the text layer.
 event_card:
+    .a8
     stz pause_ok
+    jsr card_hide_obj           ; no sprite over the box (back once it's read)
     jsl txt_clear
     ldx #(1*32 + 1)
     A16
@@ -291,6 +304,9 @@ event_card:
 @w:
     jsl card_wait
     stz c_bok
+    pha
+    jsr card_restore
+    pla
     cmp #$FF
     bne @go
     jml practice_back           ; game.s: unwinds the event, back to the list
@@ -407,19 +423,22 @@ str_solo:        .byte "SOLO", 0
 ; lands after the run was already over (won or lost) changes nothing.
 ; A score that makes the event's top 5 goes on the Toronto board; a new #1
 ; gets the full moment.
-; Every text row sits 16 px apart (rows 3, 5, then CARD_TOP.. in steps of 2,
+; Every text line sits 16 px apart (rows 3, 5, then CARD_TOP.. in steps of 2,
 ; PRESS A on 23 with at least one blank row above it), whatever the result,
-; a 0 included:
+; a 0 included; a grey sub-row sits 12 px under the line above it (card_hdma):
 ;     WIPED OUT!                  (red: why the run ended; a finish is
 ;                                  green, card_finish: DELIVERED!)
 ;     PLAYER 1   WE THE NORTH!    (the cheer only for a new record)
 ;     METRES             812      (the event's picked stats, card_stat_pick,
 ;     WIPEOUTS             3       card_stat_pick_fail for a failed run)
 ;     RIDE               220      (ev_break: base, always shown)
+;       DELIVERY       1500       (grey base sub-rows on a finish: card_bsplit)
+;       29 SEC AT 20    580
 ;   + STYLE              970      (bonus / penalty rows only when not 0)
-;       TIGHT ROUNDING  470       (grey style sub-rows, 8 px apart: ev_style,
-;       LINE HONOURS    500        card_style_labels; ITEMISED STYLE below)
-;   - TACKLES            450      (the true cost, never clamped)
+;       TIGHT ROUNDING  470       (grey style sub-rows: ev_style,
+;       OTHER STYLE     500        card_style_labels; ITEMISED STYLE below)
+;   - TACKLES 3 AT 150   450      (the true cost, never clamped; the count
+;                                  when card_pcount says it)
 ;   = SCORE                0
 ;     FORFEIT TOKENS X50 100      (grey: card_forfeit, a failed run; itemised
 ;     FORFEIT STYLE      160       by card_fsplit, else one row)
@@ -431,8 +450,8 @@ str_solo:        .byte "SOLO", 0
 ; card_plan's order (the second stat first; the sum rows never).
 CARD_TOP  = 7                   ; first content row
 CARD_ROWS = 7                   ; content rows 7, 9 .. 19: row 21 stays blank above PRESS A
-CARD_HALF = CARD_ROWS * 2 + 1   ; the budget in half rows: an odd run of style sub-rows
-                                ; may end the card on row 20 (21 and 22 stay blank)
+CARD_Q    = CARD_ROWS * 4       ; the budget in 4 px steps (card_plan): sub-rows are 12 px
+CARD_GAPROW = 22                ; always blank inside the box: card_hdma's 4 px gaps show its top
 COL_L = 4                       ; stat labels and the + - = signs
 COL_S = 6                       ; sum labels
 COL_V = 23                      ; numbers, 5 wide (ends in column 27)
@@ -443,8 +462,10 @@ NORTH_COL = 15                  ; WE THE NORTH! on the name row (names end by co
 REL_NEXT = 45                   ; quiet frames before a card hands over to the next player
 
 score_card:
+    .a8
     stz pause_ok
     stz ev_giveup
+    jsr card_hide_obj           ; no sprite over the box (back after the card)
     jsr rec_insert
     jsr break_ok
     lda #$00
@@ -604,6 +625,12 @@ score_card:
 @stats_done:
     lda c_brk
     beq @plain
+    lda c_gap                   ; stats above the sum: 4 px more between them
+    beq @sum                    ; (card_plan)
+    lda c_y
+    sta c_srow                  ; (always the first: c_nsr is 0 here)
+    inc c_nsr
+@sum:
     jsr break_lines             ; base, then bonus / penalty unless 0
     lda #('=' - 32 + TXT_WIN)
     sta tmp2
@@ -770,8 +797,10 @@ score_card:
     lda #REL_NEXT
     sta c_relq
 @last:
+    jsr card_hdma               ; the sub-rows' 4 px gaps, with the text's upload
     jsl card_wait
     jsl fade_out
+    jsr card_restore
     rtl
 
 ; "SO LONG, NAME!" onto c_buf (terminated): the name that fell off the board
@@ -866,29 +895,37 @@ card_sting:
 
 ; card_plan: how many rows the sum, the note and the board lines take, so
 ; c_nst (stats shown: 2, 1 or 0, c_keep says which one stays), c_sub (style
-; sub-rows), c_note / c_noteptr, and what gives way when the card is full:
-; c_nobump (SO LONG, NAME!), c_noover (+214 OVER NAME). The budget is in
-; half rows: a line takes 2 (16 px), a style sub-row 1 (they sit 8 px apart
-; under + STYLE, like a receipt), CARD_HALF in all, which keeps a blank
-; row above PRESS A, so the prompt never reads as one more line of the card.
+; sub-rows), c_bsp (base sub-rows), c_note / c_noteptr, and what gives way
+; when the card is full: c_nobump (SO LONG, NAME!), c_noover (+214 OVER
+; NAME). The budget is in 4 px steps: a line takes 4 (16 px), a sub-row 3
+; (12 px: card_hdma opens a 4 px gap above each, so no two lines ever
+; touch), CARD_Q in all, which keeps a blank row above PRESS A, so the
+; prompt never reads as one more line of the card.
 ; Giving way, in order:
 ;   the second stat (card_stat_keep: the one the sum rows can't say stays),
 ;   SO LONG (it joins the board line instead: c_nobump 2, #5! SO LONG, NAME!,
 ;     so a bumped name is always said),
-;   the last stat, when the sum shows (the sum rows say what counted),
+;   the last stat, when the sum shows (the sum rows say what counted), unless
+;     the reason line talks about it (card_stat_must),
+;   the base's sub-rows (DELIVERY 1500 / 29 SEC AT 20: the base row says
+;     "1500 + TIME" instead),
 ;   an itemised forfeit becomes one row (FORFEIT BONUS),
-;   the style sub-rows (all or none: shown, they always add up to + STYLE;
-;     the +214 OVER line goes first if that alone makes them fit),
-;   a reason's second line, the +214 OVER line, the reason.
+;   the +214 OVER line, then the style sub-rows one at a time: the smallest
+;     sources join one OTHER STYLE row (so the rows always add up to the
+;     + STYLE row), down to none,
+;   a reason's second line, the reason.
 ; The sum rows never give way. WE THE NORTH! has its own place on the name
 ; row, so a new record always cheers.
 card_plan:
+    .a8
     lda #$01                    ; the SCORE row
     sta c_n
     stz c_sub
+    stz c_bsp
     lda c_brk
-    beq @note
+    jeq @note
     inc c_n                     ; the base
+    jsr base_split              ; -> c_bsp
     A16
     lda ev_break+2
     A8
@@ -909,7 +946,10 @@ card_plan:
     beq @sr
     inc c_n                     ; NEVER BELOW 0
 @sr:
-    jsr style_rows              ; -> c_sub
+    lda c_fitem                 ; a forfeit split by card_fsplit names its own parts
+    bne @note
+    lda c_nsrc
+    sta c_sub                   ; every style source, to start with
 @note:
     stz c_note
     lda ev_fail
@@ -1013,14 +1053,8 @@ card_plan:
     lda #$02
     sta c_nst
 @try:
-    lda c_n
-    clc
-    adc c_nst
-    asl a                       ; half rows
-    clc
-    adc c_sub
-    sta c_ct
-    cmp #(CARD_HALF + 1)
+    jsr plan_q
+    cmp #(CARD_Q + 1)
     jcc @centre
     ; too many: the next thing in line gives way
     lda c_nst
@@ -1033,13 +1067,20 @@ card_plan:
     bne @g3
     lda #$02                    ; SO LONG, NAME! joins the board line
     sta c_nobump
-    bra @less
+    jmp @less
 @g3:
     lda c_nst
-    beq @g1
+    beq @g3b
     lda c_brk
-    beq @g1
+    beq @g3b
+    jsr stat_must               ; the reason line talks about it: it stays
+    bcs @g3b
     dec c_nst                   ; the last stat: the sum rows say it
+    bra @try
+@g3b:
+    lda c_bsp
+    beq @g1
+    stz c_bsp                   ; the base's sub-rows
     bra @try
 @g1:
     lda c_fsplit
@@ -1055,15 +1096,18 @@ card_plan:
 @g4:
     lda c_sub
     beq @g5
-    lda c_noover                ; the +214 OVER line, if that makes them fit
+    lda c_noover                ; the +214 OVER line before any style row
     bne @g4s
-    lda c_ct
-    cmp #(CARD_HALF + 3)
-    bcs @g4s
     inc c_noover
     bra @less
 @g4s:
-    stz c_sub                   ; the style sub-rows, all of them
+    lda c_sub
+    cmp #$03
+    bcc @g4z
+    dec c_sub                   ; one more source joins OTHER STYLE
+    jmp @try
+@g4z:
+    stz c_sub                   ; (one name and OTHER says nothing: none)
     jmp @try
 @g5:
     lda c_note
@@ -1084,40 +1128,133 @@ card_plan:
     dec c_n
     jmp @try
 @centre:
-    ; first row: CARD_TOP + about half the spare half rows, in whole 16 px
-    ; steps, an odd one above the block: a gap under the name reads better
-    ; than one more over PRESS A, which always has its own
-    lda c_n
-    clc
-    adc c_nst
-    asl a
-    clc
-    adc c_sub
-    sta c_n
-    lda #CARD_HALF
+    ; first row: CARD_TOP + about half the spare, in whole 16 px steps, an
+    ; odd one above the block: a gap under the name reads better than one
+    ; more over PRESS A, which always has its own
+    stz c_gap
+    jsr plan_q
+    sta c_ct
+    lda #CARD_Q
     sec
-    sbc c_n
+    sbc c_ct
     bpl @sp
     lda #$00
 @sp:
+    sta c_ct                    ; the spare
+    beq @nogap                  ; stats over the sum, and a step to spare:
+    lda c_nst                   ; 4 px more between them, so the base never
+    beq @nogap                  ; reads as a stat's part
+    lda c_brk
+    beq @nogap
+    inc c_gap
+    dec c_ct
+@nogap:
+    lda c_ct
     clc
-    adc #$02
+    adc #$04
+    lsr a
     lsr a
     lsr a
     asl a
     clc
     adc #CARD_TOP
     sta c_y
+    jmp style_pick
+
+; A = the card's height in 4 px steps: 4 a line, 3 a sub-row
+plan_q:
+    .a8
+    lda c_sub
+    clc
+    adc c_bsp
+    sta c_ck
+    asl a
+    clc
+    adc c_ck
+    sta c_ck
+    lda c_n
+    clc
+    adc c_nst
+    asl a
+    asl a
+    clc
+    adc c_ck
     rts
 
-; style_rows: c_sub = the style sources (ev_style, card_style_labels) the
-; card itemises under + STYLE, or 0. All or nothing: only when the + row
-; shows (a bonus that isn't forfeit), every non-zero source has a label,
-; and the sources add up to the bonus exactly, so the rows always sum.
-style_rows:
-    stz c_sub
-    lda c_forf
+; carry set = the stat card_stat_keep names never gives way on this
+; ev_fail (card_stat_must: the reason line talks about it)
+stat_must:
+    .a8
+    lda event_idx
+    TAXB
+    lda ev_fail
+    and #$07
+    TAYB
+    lda f:card_stat_must,x
+@b:
+    lsr a
+    dey
+    bpl @b
+    rts
+
+; base_split: a finish whose base is a fixed part plus seconds left at a
+; rate (card_bsfix, card_bsrate) itemises it in two sub-rows,
+;   RIDE                 2080
+;      DELIVERY        1500
+;      29 SEC AT 20     580
+; when it divides exactly -> c_bsp = 2, c_bcnt = the seconds
+base_split:
+    .a8
+    stz c_bsp
+    lda ev_fail
     bne @x
+    lda event_idx
+    asl a
+    TAXB
+    A16
+    lda f:card_bsfix,x
+    beq @x16
+    sta c_val
+    lda ev_break
+    sec
+    sbc c_val
+    bcc @x16
+    sta WRDIVL
+    A8
+    lda event_idx
+    TAXB
+    lda f:card_bsrate,x
+    beq @x
+    sta WRDIVB
+    nop                         ; 16 cycles for the divider
+    nop
+    nop
+    nop
+    nop
+    nop
+    nop
+    nop
+    A16
+    lda RDMPYL                  ; remainder
+    bne @x16
+    lda RDDIVL
+    sta c_bcnt
+    A8
+    lda #$02
+    sta c_bsp
+    rts
+@x16:
+    A8
+@x:
+    rts
+
+; style_rows: c_nsrc = the style sources (ev_style, card_style_labels) the
+; card can itemise under the bonus (or its FORFEIT row), or 0: only when
+; every non-zero source has a label and they add up to the bonus exactly,
+; so the rows always sum.
+style_rows:
+    .a8
+    stz c_nsrc
     A16
     lda ev_break+2
     beq @x16
@@ -1145,7 +1282,7 @@ style_rows:
     bcc @no                     ; more than the bonus
     sta c_val
     A8
-    inc c_sub
+    inc c_nsrc
     A16
 @n:
     inx
@@ -1158,10 +1295,61 @@ style_rows:
     beq @x16                    ; they add up
 @no:
     A8
-    stz c_sub
+    stz c_nsrc
     rts
 @x16:
     A8
+    rts
+
+; style_pick: c_smask = the ev_style slots printed by name. All of them
+; when c_sub has room; else the c_sub - 1 biggest, and the rest share the
+; OTHER STYLE row (style_print)
+style_pick:
+    .a8
+    lda #$1F
+    sta c_smask
+    lda c_sub
+    cmp c_nsrc
+    bcs @x
+    stz c_smask
+    dec a
+    sta c_cr                    ; names still to pick
+@p:
+    lda c_cr
+    beq @x
+    A16
+    stz c_val                   ; the biggest so far
+    A8
+    stz c_ck                    ; ...its slot bit
+    lda #$01
+    sta c_ct
+    ldx #$0000
+@s:
+    lda c_smask
+    and c_ct
+    bne @ns
+    A16
+    lda ev_style,x
+    cmp c_val
+    A8
+    beq @ns
+    bcc @ns
+    A16
+    sta c_val
+    A8
+    lda c_ct
+    sta c_ck
+@ns:
+    asl c_ct
+    inx
+    inx
+    cpx #(STYLE_N * 2)
+    bne @s
+    lda c_ck
+    ora c_smask
+    sta c_smask
+    dec c_cr
+    bra @p
 @x:
     rts
 
@@ -1239,7 +1427,7 @@ strlen:
 ; the two stat lines shown on the card: ev_stat indices per event, the first
 ; one kept when there is room for only one
 card_stat_pick:
-    .byte 1, 3                  ; bike: TTC TOKENS, STYLE
+    .byte 1, 2                  ; bike: TOKENS, WIPEOUTS (the + row says the style)
     .byte 0, 2                  ; bay: TIME LEFT, SPILLS
     .byte 1, 2                  ; park: DOGS DODGED, TACKLES
     .byte 0, 2                  ; cops: SIP 'N' HOPS, HURDLES
@@ -1250,7 +1438,7 @@ card_stat_pick:
 card_stat_pick_fail:
     .byte 0, 2                  ; bike: METRES, WIPEOUTS (tokens and style are forfeit)
     .byte 0, 2                  ; bay: TIME LEFT, SPILLS
-    .byte 2, 1                  ; park: TACKLES, DOGS DODGED (the tackles ended it)
+    .byte 1, 2                  ; park: DOGS DODGED (HALF THE DOGS), TACKLES (the - row counts them too)
     .byte 0, 2                  ; cops: SIP 'N' HOPS, HURDLES
     .byte 1, 2                  ; sail: MARKS ROUNDED, BUMPS
     .byte 0, 2                  ; parking: SPOTS PARKED, TICKETS
@@ -1269,6 +1457,31 @@ card_stat_keep:
     .byte 0, 0                  ; subway
 card_stat_keep_end:
 .assert card_stat_keep_end - card_stat_keep = NUM_EVENTS * 2, error, "card_stat_keep: two bytes per event"
+
+; card_stat_must: bit n = on ev_fail n the stat card_stat_keep names never
+; gives way, because the reason line talks about it (Off-Leash: HALF THE
+; DOGS needs DOGS DODGED on the card)
+card_stat_must: .byte 0, 0, $0E, 0, 0, 0, 0    ; bike bay park cops sail parking subway
+
+; card_pcount / card_prate: the penalty row says its count, "TACKLES 3 AT
+; 150", when ev_stat (card_pcount - 1) x card_prate is the penalty exactly
+; (the true-cost rule: it always is); 0 = no count, the card_rate words
+card_pcount: .byte 3, 3, 3, 0, 0, 0, 1    ; bike: WIPEOUTS, bay: SPILLS, park: TACKLES, subway: GERMS
+card_prate:  .byte 200, 40, 150, 0, 0, 0, 40
+
+; card_bsplit: a finish's base as a fixed part plus seconds left at a rate,
+; itemised in two grey sub-rows when there is room ("DELIVERY 1500",
+; "29 SEC AT 20 580"); card_bsfix 0 = not split. Labels 14 characters at most.
+card_bsfix:   .word 1500, 1000, 500, 0, 1000, 0, 0   ; ev_bike / ev_bay / ev_park / ev_sail finish pay
+card_bsrate:  .byte 20, 40, 25, 0, 15, 0, 0           ; ...and a second left
+card_bslabel: .addr bs_bike, bs_bay, bs_park, 0, bs_sail, 0, 0
+card_bsplit_end:
+.assert card_bslabel - card_bsrate = NUM_EVENTS, error, "card_bsrate: one byte per event"
+.assert card_bsplit_end - card_bslabel = NUM_EVENTS * 2, error, "card_bslabel: one .addr per event"
+bs_bike: .byte "DELIVERY", 0
+bs_bay:  .byte "ON THE 5:42", 0
+bs_park: .byte "AT DUNDAS", 0
+bs_sail: .byte "FINISH", 0
 
 ; card_stat_of: 4 bytes per event, by ev_stat index; 1 = print the stat as
 ; "N OF M" with M = ev_stat 3 (TTC: legs leaned / gold surfs out of the
@@ -1311,6 +1524,12 @@ card_style_labels:
     .addr 0, 0, 0, 0, 0                                     ; subway
 card_style_labels_end:
 .assert card_style_labels_end - card_style_labels = NUM_EVENTS * STYLE_N * 2, error, "card_style_labels: STYLE_N .addr per event, nothing else"
+; card_style_other: the row that takes the smallest sources when they don't
+; all fit (style_pick), so the rows still add up; ALL THE REST where the
+; bonus isn't only style (Bike's TOKENS+STYLE)
+card_style_other: .addr sty_rest, sty_ost, sty_ost, sty_ost, sty_ost, sty_rest, sty_ost
+sty_ost:    .byte "OTHER STYLE", 0
+sty_rest:   .byte "ALL THE REST", 0
 sty_combo:  .byte "PERFECT STEPS", 0
 sty_double: .byte "DOUBLE TIME", 0
 sty_near:   .byte "DODGES & CUTS", 0
@@ -1322,9 +1541,12 @@ sty_fsurf:  .byte "FERRY SURF", 0
 sty_lhon:   .byte "LINE HONOURS", 0
 sty_ostyle: .byte "ROLL TACKS", 0
 
-; 1 = a failed run forfeits the bonus: the event leaves it in ev_break+2,
-; keeps it out of ev_score, and the card shows it as a grey FORFEIT row
-card_forfeit: .byte 1, 0, 0, 0, 0, 0, 0    ; bike bay park cops sail parking subway
+; card_forfeit: bit n = a run ending with ev_fail n forfeits the bonus: the
+; event leaves it in ev_break+2 (and its sources in ev_style), keeps it out
+; of ev_score, and the card shows it as a grey FORFEIT row (with the style
+; rows under it). An event not named here gets the same card whenever its
+; failed run's bonus plainly isn't in the score (break_ok).
+card_forfeit: .byte $1E, 0, 0, 0, 0, 0, 0  ; bike bay park cops sail parking subway
 ; a forfeit itemised in two rows (forfeit_split): 1 + the ev_stat index
 ; whose count x card_fsrate is the first part (the rest of the bonus is the
 ; second), 0 = one row; card_fslabel = the two rows' labels (after FORFEIT,
@@ -1345,15 +1567,22 @@ fl_bonus:  .byte "BONUS", 0     ; one row for an itemised forfeit on a full card
 ;   nothing still shows its sum);
 ; - or the sum is below 0 and ev_score is 0: c_floor = 1, the card shows the
 ;   true penalty and adds NEVER BELOW 0;
-; - a failed run in a card_forfeit event leaves the bonus out of the sum:
-;   c_forf = 1, and the bonus shows under the score as a grey FORFEIT row.
+; - a failed run whose bonus isn't in the score (card_forfeit says so for
+;   the ev_fail, or base - penalty is the score and base + bonus isn't) has
+;   it as a grey FORFEIT row under the score: c_forf = 1. Its parts are the
+;   style rows when ev_style adds up to it (c_sfor), else card_fsplit's.
 break_ok:
+    .a8
     stz c_floor
     stz c_forf
     stz c_fitem
     stz c_fall
+    stz c_sfor
+    stz c_nsr
     lda #$01
     sta c_fsplit
+    jsr style_rows              ; -> c_nsrc
+    jsr pen_detail              ; -> c_pdet
     A16
     lda ev_break+2
     sta c_val
@@ -1363,14 +1592,39 @@ break_ok:
     beq @sum
     lda event_idx
     TAXB
+    lda ev_fail
+    and #$07
+    TAYB
     lda f:card_forfeit,x
-    beq @sum
+@bit:
+    lsr a
+    dey
+    bpl @bit
+    bcs @forfeit
+    jsr sum_ok                  ; the bonus counted?
+    bcs @x
+@forfeit:
     inc c_forf
+    lda c_nsrc
+    beq @split
+    inc c_sfor                  ; FORFEIT STYLE, its parts under it
+    bra @f0
+@split:
     jsr forfeit_split
+@f0:
     A16
     stz c_val
     A8
 @sum:
+    jsr sum_ok
+@x:
+    rts
+
+; c_val = the bonus as counted -> carry set when base + c_val - penalty is
+; ev_score, or below 0 with ev_score 0 (c_floor)
+sum_ok:
+    .a8
+    stz c_floor
     A16
     lda ev_break
     clc
@@ -1394,6 +1648,41 @@ break_ok:
 @no:
     A8
     clc
+    rts
+
+; c_pdet = 1 when the penalty is card_pcount's stat x card_prate exactly,
+; so its row can say "TACKLES 3 AT 150"
+pen_detail:
+    .a8
+    stz c_pdet
+    lda event_idx
+    TAXB
+    lda f:card_pcount,x
+    beq @x
+    dec a
+    asl a
+    TAYB
+    lda ev_stat+1,y
+    bne @x
+    lda ev_stat,y
+    sta WRMPYA
+    lda f:card_prate,x
+    sta WRMPYB
+    nop                         ; 8 cycles for the multiplier
+    nop
+    nop
+    nop
+    A16
+    lda RDMPYL
+    beq @x16
+    cmp ev_break+4
+    bne @x16
+    A8
+    inc c_pdet
+    rts
+@x16:
+    A8
+@x:
     rts
 
 ; a forfeit the event itemises (card_fsplit): c_fa = the counted stat x
@@ -1451,20 +1740,19 @@ forfeit_split:
     rts
 
 ; under the score: a failed run's forfeit bonus, grey and unsigned, so it
-; can't be read as part of the sum: "FORFEIT TOKENS X50  100" and
-; "FORFEIT STYLE  300" when the event itemises it (forfeit_split), else
-; one row under the bonus label
+; can't be read as part of the sum: "FORFEIT STYLE  700" with its style
+; rows under it (c_sfor), "FORFEIT TOKENS X50  100" and "FORFEIT STYLE  300"
+; when card_fsplit itemises it (forfeit_split), else one row under the
+; bonus label (BONUS when that is over 10 characters)
 forfeit_line:
+    .a8
     lda c_forf
-    beq @x
+    jeq @x
     lda c_fitem
     bne @item
+    LDPTR0 fl_bonus
     lda c_fall
-    beq @one
-    LDPTR0 fl_bonus             ; squeezed: FORFEIT BONUS (the label may be too long)
-    A16
-    bra @amt
-@one:
+    bne @amt                    ; squeezed: FORFEIT BONUS
     lda event_idx
     asl a
     clc
@@ -1476,11 +1764,24 @@ forfeit_line:
     tax
     lda f:card_break_labels,x
     sta ptr0
+    A8
+    lda #^card_break_labels
+    sta ptr0+2
+    jsr strlen
+    cpy #11
+    bcc @amt
+    LDPTR0 fl_bonus             ; too long beside FORFEIT and the number
 @amt:
+    A16
     lda ev_break+2
     sta tmp1
     A8
-    jmp forfeit_row
+    jsr forfeit_row
+    lda c_sfor
+    beq @x
+    lda c_sub
+    beq @x
+    jmp style_print             ; what was forfeit, source by source
 @item:
     lda event_idx
     asl a
@@ -1554,9 +1855,11 @@ forfeit_row:
     jmp next_row
 
 ; the sum rows from c_y: base (always), + bonus and - penalty (only when not
-; 0), each under the event's label (card_break_labels) with its rate after
-; it when the event has one (card_rate / card_rate_fail)
+; 0), each under the event's label (card_break_labels) with a grey detail
+; after it (row_detail), and their sub-rows: the base's parts on a finish
+; (c_bsp), the bonus's style sources (c_sub)
 break_lines:
+    .a8
     stz tmp7
 @l:
     lda tmp7
@@ -1611,31 +1914,23 @@ break_lines:
     lda #($20 | (TP_WHITE << 2))
     jsl txt_print
     jsr strlen
-    ldx c_li
-    lda ev_fail
-    bne @rf
-    A16
-    lda f:card_rate,x
-    bra @rr
-@rf:
-    A16
-    lda f:card_rate_fail,x
-@rr:
-    beq @norate
-    sta ptr0
-    A8
-    lda #^card_rate
-    sta ptr0+2
     tya
+    sta c_ct                    ; the label's length
+    A16
+    lda c_val
+    pha
+    A8
+    jsr row_detail
+    bcc @norate
+    lda c_ct
     clc
     adc #(COL_S + 1)
     jsr cy_cell
     lda #($20 | (TP_GREY << 2))
     jsl txt_print
 @norate:
-    A8
     A16
-    lda c_val
+    pla
     sta tmp1
     A8
     lda tmp7
@@ -1649,6 +1944,12 @@ break_lines:
     jsl txt_num
     jsr next_row
     lda tmp7
+    bne @nbase
+    lda c_bsp
+    beq @next
+    jsr base_print              ; DELIVERY 1500 / 29 SEC AT 20 580
+    bra @next
+@nbase:
     cmp #$01
     bne @next
     lda c_sub
@@ -1661,41 +1962,121 @@ break_lines:
     jne @l
     rts
 
-; style_print: c_sub sub-rows under the + STYLE row just drawn (c_y is the
-; row after it): each non-zero ev_style word, label (card_style_labels)
-; indented in grey, points in grey two columns in from the sum's, so they
-; read as the parts of + STYLE, not more addends. They sit 8 px apart right
-; under it; the next line keeps its 8 px gap.
-style_print:
-    dec c_y                     ; straight under + STYLE
+; row_detail: the grey words after sum row tmp7's label (c_li = its table
+; offset) -> carry set, ptr0. The base on a finish with its sub-rows shown
+; has none; a penalty card_pcount can count says "3 AT 150"; else the
+; event's card_rate (finish) / card_rate_fail string, if any.
+row_detail:
+    .a8
+    lda tmp7
+    bne @nb
+    lda c_bsp
+    jne @none
+    bra @tab
+@nb:
+    cmp #$02
+    bne @tab
+    lda c_pdet
+    beq @tab
+    jsr buf_reset
     lda event_idx
-    asl a
-    asl a
-    clc
-    adc event_idx
-    asl a
-    A16
-    and #$00FF
-    sta c_li
-    A8
-    stz c_ck                    ; slot
-@l:
-    lda c_ck
+    TAXB
+    lda f:card_pcount,x
+    dec a
     asl a
     TAYB
     A16
-    lda ev_style,y
-    beq @n
+    lda ev_stat,y
     sta tmp1
-    lda c_li
-    tax
-    lda f:card_style_labels,x
+    A8
+    jsr buf_num
+    LDPTR0 str_at
+    jsr buf_str
+    lda event_idx
+    TAXB
+    lda f:card_prate,x
+    jsr buf_byte
+    jsr buf_term
+    LDPTR0 c_buf
+    sec
+    rts
+@tab:
+    ldx c_li
+    lda ev_fail
+    bne @rf
+    A16
+    lda f:card_rate,x
+    bra @rr
+@rf:
+    A16
+    lda f:card_rate_fail,x
+@rr:
+    beq @none16
     sta ptr0
+    A8
+    lda #^card_rate
+    sta ptr0+2
+    sec
+    rts
+@none16:
+    A8
+@none:
+    clc
+    rts
+
+; base_print: the base's two sub-rows under its row (c_y is the row after
+; it): the fixed part (card_bslabel, card_bsfix) and the seconds at the rate
+base_print:
+    .a8
+    dec c_y                     ; straight under the base
+    lda event_idx
+    asl a
+    TAXB
+    A16
+    lda f:card_bslabel,x
+    sta ptr0
+    lda f:card_bsfix,x
+    sta tmp1
+    A8
+    lda #^card_bslabel
+    sta ptr0+2
+    jsr sub_row
+    jsr buf_reset
+    A16
+    lda c_bcnt
+    sta tmp1
+    A8
+    jsr buf_num
+    LDPTR0 str_sec_at
+    jsr buf_str
+    lda event_idx
+    TAXB
+    lda f:card_bsrate,x
+    jsr buf_byte
+    jsr buf_term
+    lda event_idx
+    asl a
+    TAXB
+    A16
+    lda ev_break
+    sec
+    sbc f:card_bsfix,x
+    sta tmp1
+    A8
+    LDPTR0 c_buf
+    jsr sub_row
+    inc c_y                     ; the 8 px gap before the next line
+    rts
+
+; sub_row: one grey sub-row on row c_y, label ptr0 indented, tmp1 two
+; columns in from the sum's numbers, so it reads as a part of the row
+; above, not one more addend; its row goes on c_srow for card_hdma
+sub_row:
+    .a8
+    A16
     lda tmp1
     pha
     A8
-    lda #^card_style_labels
-    sta ptr0+2
     lda #STY_L
     jsr cy_cell
     lda #($20 | (TP_GREY << 2))
@@ -1709,17 +2090,230 @@ style_print:
     ldy #5
     lda #($20 | (TP_GREY << 2))
     jsl txt_num
+    lda c_nsr
+    cmp #8
+    bcs @full
+    TAXB
+    lda c_y
+    sta c_srow,x
+    inc c_nsr
+@full:
     inc c_y
+    rts
+
+; style_print: the style sub-rows under the + STYLE (or FORFEIT) row just
+; drawn (c_y is the row after it): each ev_style slot in c_smask by name, in
+; slot order, then OTHER STYLE with whatever the bonus has left, if any
+style_print:
+    .a8
+    dec c_y                     ; straight under it
+    A16
+    lda ev_break+2
+    sta c_val                   ; what OTHER STYLE gets
+    A8
+    lda event_idx
+    asl a
+    asl a
+    clc
+    adc event_idx
+    asl a
+    A16
+    and #$00FF
+    sta c_li
+    A8
+    lda #$01
+    sta c_ct                    ; slot bit
+    stz c_ck                    ; slot
+@l:
+    lda c_ck
+    asl a
+    TAYB
+    A16
+    lda ev_style,y
+    A8
+    beq @n
+    lda c_smask
+    and c_ct
+    beq @n
+    A16
+    lda ev_style,y
+    sta tmp1
+    lda c_val
+    sec
+    sbc tmp1
+    sta c_val
+    ldx c_li
+    lda f:card_style_labels,x
+    sta ptr0
+    A8
+    lda #^card_style_labels
+    sta ptr0+2
+    jsr sub_row
 @n:
     A16
     inc c_li
     inc c_li
     A8
+    asl c_ct
     inc c_ck
     lda c_ck
     cmp #STYLE_N
     bne @l
+    A16
+    lda c_val
+    sta tmp1
+    A8
+    beq @e
+    lda event_idx
+    asl a
+    TAXB
+    A16
+    lda f:card_style_other,x
+    sta ptr0
+    A8
+    lda #^card_style_other
+    sta ptr0+2
+    jsr sub_row
+@e:
     inc c_y                     ; the 8 px gap before the next line
+    rts
+
+; card_hdma: open a 4 px gap above every sub-row (c_srow, c_nsr), so the
+; text layer's 8 px rows read 12 px apart. An HDMA table on BG3VOFS (channel
+; 4): each gap shows the top of CARD_GAPROW (blank inside the box, borders
+; and all), then the next rows come 4 px lower; on CARD_GAPROW itself the
+; scroll goes back to 0, so PRESS A and the box's bottom stay put.
+; card_plan's budget keeps the lowered card above CARD_GAPROW.
+card_hdma:
+    .a8
+    lda c_nsr
+    jeq @x
+    ldx #$0000                  ; table offset
+    A16
+    lda #$0001                  ; the scanline reached: an entry's value lands
+    sta c_cell                  ; in the hblank after its first line, so each
+    stz c_val                   ; one starts a line early; the drop so far
+    A8
+    stz c_ck
+@j:
+    lda c_ck
+    TAYB
+    lda c_srow,y
+    A16
+    and #$00FF
+    asl a
+    asl a
+    asl a
+    clc
+    adc c_val
+    sta c_li                    ; where this gap starts on screen
+    sec
+    sbc c_cell
+    sta tmp1
+    lda #$0000
+    sec
+    sbc c_val
+    jsr hd_span                 ; the rows down to it, at the drop so far
+    lda #$0004
+    sta tmp1
+    lda #(CARD_GAPROW * 8)
+    sec
+    sbc c_li
+    jsr hd_span                 ; the gap
+    lda c_li
+    clc
+    adc #$0004
+    sta c_cell
+    lda c_val
+    clc
+    adc #$0004
+    sta c_val
+    A8
+    inc c_ck
+    lda c_ck
+    cmp c_nsr
+    bne @j
+    A16
+    lda #(CARD_GAPROW * 8)
+    sec
+    sbc c_cell
+    sta tmp1
+    lda #$0000
+    sec
+    sbc c_val
+    jsr hd_span                 ; down to the blank row
+    lda #$0001
+    sta tmp1
+    lda #$0000
+    jsr hd_span                 ; and the rest as it is
+    A8
+    stz c_hdma,x
+    lda #$02                    ; one register, written twice
+    sta $4340
+    lda #<BG3VOFS
+    sta $4341
+    ldx #.loword(c_hdma)
+    stx $4342
+    lda #^c_hdma
+    sta $4344
+    lda hdma_sh
+    ora #$10
+    sta hdma_sh
+@x:
+    rts
+
+; A = BG3VOFS, tmp1 = scanlines (0 = none) -> entries at c_hdma + X
+hd_span:
+    .a16
+    sta c_cd
+@l:
+    lda tmp1
+    beq @x
+    cmp #128
+    bcc @n
+    lda #127
+@n:
+    sta tmp2
+    A8
+    sta c_hdma,x
+    A16
+    lda c_cd
+    sta c_hdma+1,x
+    inx
+    inx
+    inx
+    lda tmp1
+    sec
+    sbc tmp2
+    sta tmp1
+    bra @l
+@x:
+    rts
+
+; the card is gone: its HDMA and the sprites it hid
+card_restore:
+    .a8
+    lda hdma_sh
+    and #$EF
+    sta hdma_sh
+    lda c_tmsv
+    sta tm_sh
+    lda c_tmsv+1
+    sta ts_sh
+    rts
+
+; a card hides every sprite (tm_sh / ts_sh, back with card_restore): no
+; event's sprite pokes through the box or its border
+card_hide_obj:
+    .a8
+    lda tm_sh
+    sta c_tmsv
+    and #$EF
+    sta tm_sh
+    lda ts_sh
+    sta c_tmsv+1
+    and #$EF
+    sta ts_sh
     rts
 
 brk_col:   .byte ($20 | (TP_WHITE << 2)), ($20 | (TP_GREEN << 2)), ($20 | (TP_RED << 2))
@@ -1728,6 +2322,8 @@ brk_opcol: .byte ($20 | (TP_GREEN << 2)), ($20 | (TP_RED << 2))
 
 str_floor:       .byte "SCORES NEVER GO BELOW 0", 0
 str_forfeit:     .byte "FORFEIT", 0
+str_at:          .byte " AT ", 0
+str_sec_at:      .byte " SEC AT ", 0
 str_out_of_time: .byte "OUT OF TIME!", 0
 str_gave_up:     .byte "GAVE UP!", 0
 str_score:       .byte "SCORE", 0
@@ -3354,24 +3950,9 @@ rb_draw:
     asl a
     sta tmp5
     A8
+    ; the place as a number: the medal icons on this page mean the SOLO
+    ; thresholds below, so a rank never wears one (#1 in yellow)
     lda tmp7
-    cmp #3
-    bcs @digit
-    TAXB
-    lda f:medal_tp,x
-    pha
-    lda #(TXT_MEDAL + TXT_WIN)
-    sta tmp2
-    A16
-    lda tmp5
-    clc
-    adc #5
-    tax
-    A8
-    pla
-    jsl txt_char
-    bra @who
-@digit:
     inc a
     A16
     and #$00FF
@@ -3382,7 +3963,13 @@ rb_draw:
     tax
     A8
     ldy #1
+    lda tmp7
+    bne @grey
+    lda #($20 | (TP_YELLOW << 2))
+    bra @num
+@grey:
     lda #($20 | (TP_GREY << 2))
+@num:
     jsl txt_num
 @who:
     ; entry = records + rank*REC_ROW + event*16
@@ -4374,16 +4961,15 @@ ef2_4: .byte "NAP IN BELLWOODS!", 0
 ; result card arithmetic (ev_break): base, bonus, penalty labels per event,
 ; 12 characters at most. BASE + BONUS - PENALTY = SCORE.
 card_break_labels:
-    .addr bl_ride,  bl_tips,  bl_wipe       ; bike
+    .addr bl_ride,  bl_tips,  bl_wipes      ; bike
     .addr bl_walk,  bl_style, bl_spill      ; bay
-    .addr bl_walk,  bl_dogs,  bl_tack150    ; park
+    .addr bl_walk,  bl_dogs,  bl_tackles    ; park
     .addr bl_run,   bl_style, bl_fine       ; cops
-    .addr bl_course, bl_style, bl_bump      ; sail
+    .addr bl_race,  bl_style, bl_bump       ; sail
     .addr bl_park,  bl_tstyle, bl_dings     ; parking
     .addr bl_ride,  bl_style, bl_germs      ; subway
 bl_tips:   .byte "TOKENS+STYLE", 0
 bl_walk:   .byte "WALK", 0
-bl_course: .byte "COURSE", 0
 bl_arrive: .byte "ARRIVAL", 0
 bl_run:    .byte "RUN", 0
 bl_race:   .byte "RACE", 0
@@ -4392,9 +4978,9 @@ bl_ride:   .byte "RIDE", 0
 bl_style:  .byte "STYLE", 0
 bl_tstyle: .byte "TIME+STYLE", 0
 bl_dogs:   .byte "DOGS", 0
-bl_tack150: .byte "TACKLES X150", 0
+bl_tackles: .byte "TACKLES", 0
 bl_pats:   .byte "PATS", 0
-bl_wipe:   .byte "WIPEOUT X200", 0
+bl_wipes:  .byte "WIPEOUTS", 0
 bl_spill:  .byte "SPILLS", 0
 bl_fine:   .byte "COP'S FINE", 0
 bl_bump:   .byte "BUMPS", 0
@@ -4405,15 +4991,16 @@ bl_germs:  .byte "GERMS", 0
 ; what it did (26 characters at most, centred; a $0A splits it into two lines,
 ; the second one dropped when the card is full). Per event, ev_fail 1 (its
 ; own fail), 2 (out of time), 3 (gave up: under the GAVE UP! header, so
-; never GAVE UP again), 4 (its second fail);
+; never GAVE UP again, and never another ending's line: each event has its
+; own fn_*_q), 4 (its second fail);
 ; 0 = none. Nothing earned (base and bonus 0) in a card_still event shows
 ; card_still_ln instead.
 card_fail_note:
     .addr fn_bike,   fn_bike_n, fn_bike_q, fn_bike_s    ; bike
-    .addr fn_bay,    fn_bay,    fn_bay,    fn_bay       ; bay
+    .addr fn_bay,    fn_bay,    fn_bay_q,  fn_bay       ; bay
     .addr fn_park,   fn_park_t, fn_park_q, fn_park_n    ; park
     .addr fn_cops,   fn_cops,   fn_cops_q, fn_cops      ; cops
-    .addr fn_sail,   fn_sail_t, fn_sail_t, fn_sail_h    ; sail
+    .addr fn_sail,   fn_sail_t, fn_sail_q, fn_sail_h    ; sail
     .addr fn_pk,     fn_pk,     fn_pk_q,   fn_pk_i      ; parking
     .addr fn_sub,    fn_sub,    fn_sub_q,  fn_sub       ; subway
 fn_bike:   .byte "THIRD WIPEOUT. NO DELIVERY", $0A, "PAID FOR THE RIDE ONLY", 0
@@ -4421,8 +5008,9 @@ fn_bike_n: .byte "OUT OF TIME. NO DELIVERY", $0A, "SAY THE 501 SHORT-TURNED", 0
 fn_bike_q: .byte "NO DELIVERY, NO TOKENS", $0A, "PAID FOR THE RIDE ONLY", 0
 fn_bike_s: .byte "STOPPED 8 S. NO DELIVERY", $0A, "PAID FOR THE RIDE ONLY", 0
 fn_bay:    .byte "THE 5:42 LEFT WITHOUT YOU", $0A, "ON THE DOTS = FASTER WALK", 0
+fn_bay_q:  .byte "THE WALK PAYS BY DISTANCE", 0
 fn_park:   .byte "HEARTS GONE: HALF THE DOGS", $0A, "DUNDAS PAYS THEM ALL", 0
-fn_park_q: .byte "GAVE UP: HALF THE DOGS", $0A, "DUNDAS PAYS THEM ALL", 0
+fn_park_q: .byte "HOME EARLY: HALF THE DOGS", $0A, "DUNDAS PAYS THEM ALL", 0
 fn_park_t: .byte "NO DUNDAS: HALF THE DOGS", $0A, "DUNDAS PAYS THEM ALL", 0
 fn_park_n: .byte "NO STEP NORTH IN 10 S", $0A, "HALF THE DOGS KEPT", 0
 fn_cops:   .byte "COP CAUGHT YOU: FINED 1/4", 0
@@ -4430,17 +5018,19 @@ fn_cops_q: .byte "THE COP FINES QUITTERS 1/4", 0
 fn_sail:   .byte "15 S GETTING NO CLOSER", $0A, "250 A MARK + PART OF NEXT", 0
 fn_sail_t: .byte "250 A MARK + PART OF NEXT", 0
 fn_sail_h: .byte "NOBODY TOUCHED THE HELM", 0
+fn_sail_q: .byte "DOCKED EARLY: 250 A MARK", $0A, "+ PART OF THE NEXT ONE", 0
 fn_pk:     .byte "HALF IN OR TOWED, ALL 3", 0
 fn_pk_i:   .byte "10 S WITHOUT DRIVING", 0
-fn_pk_q:   .byte "FINISHED SPOTS STILL COUNT", 0
+fn_pk_q:   .byte "SPOTS SO FAR STILL PAY", 0
 fn_sub:    .byte "20 GERMS: STYLE IS VOID", $0A, "ONLY LEGS YOU LEANED PAY", 0
 fn_sub_q:  .byte "NO UNION: STYLE IS VOID", $0A, "ONLY LEGS YOU LEANED PAY", 0
 
 ; a failed run that earned nothing (base and bonus 0) says the event's card_still_ln instead of its
-; reason line, for the ev_fail codes in card_still (bit n = ev_fail n: $1E all
-; four, $02 the event's own fail only, 0 never). For events where only not
-; playing earns a base of 0.
-card_still:    .byte $18, $0A, 0, $0A, $10, 0, $1E   ; bike bay park cops sail parking subway
+; reason line, for the ev_fail codes in card_still (bit n = ev_fail n: $16
+; all but gave up, $02 the event's own fail only, 0 never). For events where
+; only not playing earns a base of 0. A give-up always gets its own reason
+; line (card_fail_note), never the standing-still joke.
+card_still:    .byte $10, $02, 0, $02, $10, 0, $16   ; bike bay park cops sail parking subway (never bit 3: gave up)
 card_still_ln: .addr sti0, sti1, sti2, sti3, sti4, 0, sti6
 sti0: .byte "STANDING STILL PAYS 0", 0
 sti1: .byte "STANDING STILL PAYS 0", 0
@@ -4449,42 +5039,46 @@ sti3: .byte "NOT ONE HURDLE, NO POINTS", 0
 sti4: .byte "HANDS OFF THE HELM PAYS 0", 0
 sti6: .byte "THE TRAIN DID ALL THE WORK", 0
 
-; card_rate / card_rate_fail: an optional rate printed in grey after a sum
-; label ("TIPS 50 A TOKEN"), per event base, bonus, penalty; 0 = none. The
-; first table is for a finished run, the second for a failed one. Label +
-; space + rate fit in 16 characters.
+; card_rate / card_rate_fail: the grey words after a sum label, per event
+; base, bonus, penalty; 0 = none. The first table is for a finished run, the
+; second for a failed one. Label + space + words fit in 17 characters. One
+; plain format for every rate: "N EACH" / "N A THING" in words, and where
+; the card knows the count it says it ("TACKLES 3 AT 150": card_pcount; a
+; finish's base "DELIVERY 1500 / 29 SEC AT 20" in sub-rows: card_bsplit).
+; These words stand in when there is no room for the sub-rows, or no count.
 card_rate:
-    .addr rt_bike_fin, 0, 0     ; bike
-    .addr rt_bay_walk, 0, rt_40each ; bay
-    .addr rt_park_walk, 0, 0    ; park
+    .addr rt_bike_fin, 0, rt_200each ; bike
+    .addr rt_bay_fin, 0, rt_40each   ; bay
+    .addr rt_park_fin, 0, rt_150each ; park
     .addr rt_hurdles, 0, 0      ; cops
-    .addr rt_sail, 0, 0         ; sail
+    .addr rt_sail_fin, 0, 0     ; sail
     .addr 0, 0, 0               ; parking
-    .addr 0, 0, rt_sub_pen      ; subway
+    .addr 0, 0, rt_40each       ; subway
 card_rate_fail:
-    .addr rt_bike_m, 0, 0       ; bike
+    .addr rt_bike_m, 0, rt_200each ; bike
     .addr rt_bydist, 0, rt_40each ; bay
-    .addr rt_tenth, rt_half, 0  ; park
+    .addr rt_tenth, rt_half, rt_150each ; park
     .addr rt_hurdles, 0, 0      ; cops
     .addr 0, 0, 0               ; sail
     .addr 0, 0, 0               ; parking
-    .addr rt_sub_leg, 0, 0      ; subway
+    .addr rt_sub_leg, 0, rt_40each ; subway
 card_rate_end:
 .assert card_rate_fail - card_rate = NUM_EVENTS * 6, error, "card_rate: three .addr per event, nothing else"
 .assert card_rate_end - card_rate_fail = NUM_EVENTS * 6, error, "card_rate_fail: three .addr per event, nothing else"
 ; the rate strings (after both tables: a string inside one shifts its rows)
-rt_bay_walk: .byte "1000+40/S", 0
+rt_bike_fin: .byte "1500 + TIME", 0  ; card_bsfix: the base's fixed part, then
+rt_bay_fin:  .byte "1000 + TIME", 0  ; card_bsrate a second left
+rt_park_fin: .byte "500 + TIME", 0
+rt_sail_fin: .byte "1000 + TIME", 0
 rt_bydist:  .byte "BY DISTANCE", 0
 rt_40each:  .byte "40 EACH", 0
+rt_150each: .byte "150 EACH", 0
+rt_200each: .byte "200 EACH", 0
 rt_sub_leg: .byte "40 A LEG", 0
-rt_sub_pen: .byte "X40", 0
 rt_half:    .byte "HALF KEPT", 0
-rt_park_walk: .byte "500+25/S", 0
 rt_tenth:   .byte "50 A TENTH", 0
 rt_hurdles: .byte "50 A HURDLE", 0
-rt_bike_fin: .byte "1500+20/S", 0
 rt_bike_m:  .byte "1 PER 4 M", 0
-rt_sail:    .byte "1000+15/S", 0   ; ev_sail.s FINISH_MIN + PTS_SEC a second left
 
 ; stat labels: 4 per event (last is padding), 0 = unused
 card_stat_labels:
