@@ -15,7 +15,8 @@ from policies import Policy, idle, hold_up, random_input, A, B, X, UP, DOWN, LEF
 K_X, K_Y, K_DASH, K_DASHCD, K_BALLS, B_STATE = 0, 2, 16, 18, 26, 48
 K_STATE, K_STUM = 10, 288
 K_LIVE, K_CALM, K_ARMED, K_CHAIN = 540, 542, 544, 548
-D_SLOT, D_X, D_Y, D_STATE, D_KIND = 80, 96, 112, 176, 208
+D_SLOT, D_X, D_Y, D_STATE, D_TIMER, D_KIND = 80, 96, 112, 176, 192, 208
+WIND_F, LUNGE_F = 9, 16                # src/ev_park.s: the glow shows WIND_F frames before the spring
 DS_ALERT, DS_CHARGE, DS_SIT, DS_CROUCH, DS_LUNGE = 1, 2, 7, 9, 10
 THREAT = (DS_ALERT, DS_CHARGE, DS_CROUCH, DS_LUNGE)
 WINDOW = (DS_CROUCH, DS_LUNGE)          # the red "!", then the lunge: B pays by hand
@@ -52,8 +53,11 @@ class _Peeker(Policy):
         for i in range(NUM_ENT):
             if r[D_SLOT + 2 * i] == 0xFF:
                 continue
-            dogs.append({'i': i, 'x': r[D_X + 2 * i + 1], 'y': w(D_Y + 2 * i), 'st': r[D_STATE + 2 * i],
-                         'kind': r[D_KIND + 2 * i]})
+            st, tm = r[D_STATE + 2 * i], r[D_TIMER + 2 * i]
+            dogs.append({'i': i, 'x': r[D_X + 2 * i + 1], 'y': w(D_Y + 2 * i), 'st': st,
+                         'kind': r[D_KIND + 2 * i],
+                         # the tell, as drawn: white from the wind-up till he lands
+                         'glow': (st == DS_CROUCH and tm <= WIND_F) or (st == DS_LUNGE and tm <= LUNGE_F)})
         return me, dogs
 
     def press(self, m, btn):
@@ -93,7 +97,7 @@ class park_ace(_Peeker):
     """Perfect eyes: sidesteps every lunging dog late in his leap (CLOSE SHAVE),
     stepping INTO the side he sprang from (MATADOR), a ball if the step is
     on cooldown, and pats every dog it dodged (DODGE 'N' PAT)."""
-    dodge_at = 11            # frames after he springs (the flash): 9-16 is the shave
+    dodge_at = 11            # frames after he springs (the glow was 9 before): 6-15 is the shave
     matador = True
 
     def __init__(self):
@@ -346,11 +350,10 @@ class park_hand(_Peeker):
     It knows nothing about its own reaction time. It reacts only to what's
     on screen: a dog is a threat from the frame its white "!" shows (over the
     dog or pinned to the bottom edge); the red "!" says he's crouched to
-    spring, and the lunge is the dog leaving the ground (he flashes white).
-    Every leap takes the same LEAP frames to land, and the back half of it
-    is the shave. It learns, as a player does:
+    spring, and the tell is the dog winding up (he glows white, tags
+    jingle) a fixed beat before the shave opens. It learns, as a player does:
       - each kind's crouch (doodle, lab, husky, corgi look different), from
-        watching the red "!" turn into a lunge;
+        watching the red "!" turn into the glow;
       - its own lag, from how far into the leap its walker visibly steps
         compared with where it meant to, and from the popups (NICE: too
         early; TACKLED: too late).
@@ -364,20 +367,19 @@ class park_hand(_Peeker):
     It stands still while a dog is on it, and goes back for a pat when the
     dog it dodged sits within easy reach."""
 
-    KNOWN = {0: 29, 1: 26, 2: 25, 3: 33}   # crouch frames by kind, from earlier walks
+    KNOWN = {0: 20, 1: 17, 2: 16, 3: 24}   # red "!" to glow by kind, from earlier walks
 
     O0 = 10.0                # first guess at its own lag (frames): it leads a little
     safe = False             # park_safe: gets set on every "!" (the safe line)
     nice_only = False        # park_nice: never tries the shave
-    LEAP = 16                # frames from his flash to landing on me (the same every leap, by eye)
-    SHAVE_AT = 12.5          # frames into the leap the step should land (9-16 is the shave: early = NICE, late = tackled)
+    SHAVE_AT = 19.5          # frames after the glow the step should land (15-24 is the shave: early = NICE, late = tackled)
 
     def __init__(self):
         super().__init__()
         self.O = self.O0
         self.C = dict(self.KNOWN)  # kind -> crouch frames (seen this walk, or known)
         self.crouch = {}         # dog slot -> (t, kind, gap) when the red "!" showed
-        self.leap = {}           # dog slot -> (t, gap) when he sprang
+        self.leap = {}           # dog slot -> (t, gap) when he started to glow (the tell)
         self.plan = {}           # dog slot -> 'arm' / 'done' / press frame
         self.prevst = {}
         self.hold_b = 0
@@ -414,7 +416,7 @@ class park_hand(_Peeker):
             was = self.prevst.get(d['i'])
             if d['st'] == DS_CROUCH and was != DS_CROUCH:
                 self.crouch[d['i']] = (t, d['kind'], abs(d['x'] - me['x']) + abs(d['y'] - me['y']))
-            if d['st'] == DS_LUNGE and was == DS_CROUCH and d['i'] in self.crouch:
+            if d['glow'] and d['i'] not in self.leap and d['i'] in self.crouch:
                 c = t - self.crouch[d['i']][0]                     # his rhythm, seen
                 self.C[d['kind']] = (self.C[d['kind']] * 3 + c) / 4 if d['kind'] in self.C else c
                 self.leap[d['i']] = (t, abs(d['x'] - me['x']) + abs(d['y'] - me['y']))
@@ -425,11 +427,11 @@ class park_hand(_Peeker):
             pme, pdogs = self.last
             d = next((e for e in pdogs if e['i'] == i), None)
             err = None
-            if d is not None and d['st'] == DS_LUNGE and i in self.leap:
+            if d is not None and i in self.leap:
                 err = (t - self.leap[i][0]) - self.SHAVE_AT
             elif d is not None and d['st'] == DS_CROUCH and i in self.crouch:
                 t0, kind, gap = self.crouch[i]     # he hadn't even sprung
-                err = (t - t0 - self.C.get(kind, 28)) - self.SHAVE_AT
+                err = (t - t0 - self.C.get(kind, 20)) - self.SHAVE_AT
             if err is not None and shave:
                 self.errs.append(err)
                 self.O += 0.8 * max(-8.0, min(6.0, err))
@@ -471,8 +473,10 @@ class park_hand(_Peeker):
                 m &= ~UP                          # he's coming: stand and face him
             if plan == 'done':
                 continue
-            behind = d['y'] - cam > 192           # coming from off the bottom: no read on it
-            if plan is None and (self.dogs_seen == 1 or hurt >= 2 or behind or self.safe):
+            behind = d['y'] - cam > 192           # coming from off the bottom: wait till he shows
+            if plan is None and behind and not self.safe and d['st'] not in WINDOW:
+                continue                          # (he crouches in range, on screen: read him then)
+            if plan is None and (self.dogs_seen == 1 or hurt >= 2 or self.safe):
                 if not me['armed']:
                     self.hold_b = 8               # get set on the "!"
                 self.plan[d['i']] = 'done'
@@ -489,7 +493,7 @@ class park_hand(_Peeker):
             shave, side = plan
             if not shave:
                 when = t0                          # B on the red "!": NICE TIMING
-            elif d['i'] in self.leap:              # he's sprung (the flash): time it off that
+            elif d['i'] in self.leap:              # he glows (the tell): time it off that
                 when = self.leap[d['i']][0] + self.SHAVE_AT - self.O
             else:                                  # his rhythm, from the crouch
                 when = t0 + self.C[kind] + self.SHAVE_AT - self.O
@@ -565,13 +569,14 @@ class leash_prompt_red(leash_prompt):
 
 
 class leash_cue(Policy):
-    """Watches the screen for one thing only: the white flash a dog gives as
-    he springs (sprite palette 7 in OAM, the tell). Then B with the d-pad
-    toward the side he's facing from (an unflipped dog faces right: he's on
-    your left). It never gets set on the "!", never reads a dog's state or
-    timer. Run it at a practised human's 10-12 frames to check the tell
-    leaves a window a hand can hit:
-        pt.py curve park -p leash_cue -l 10,12"""
+    """THE TRICK'S ACCEPTANCE BOT. Watches the screen for one thing only: the
+    tell, a dog glowing white as he winds up to spring (sprite palette 7 in
+    OAM; his tags jingle at the same moment). Then B with the d-pad toward
+    the side he's facing from (an unflipped dog faces right: he's on your
+    left). It never gets set on the "!", never reads a dog's state or timer;
+    it walks north and stands still while a "!" is up (a dog is after it),
+    as anyone would. Run it at 12-24 frames:
+        pt.py curve park -p leash_cue -l 12,15,18,20,24"""
 
     def __init__(self):
         self.was = False
@@ -593,7 +598,9 @@ class leash_cue(Policy):
         if side and not self.was:
             self.hold, self.side = 6, side
         self.was = bool(side)
-        m = UP
+        g = self.game
+        live = g.core.peek(g.sym['ev_ram'] + K_LIVE, 1)[0]      # a "!" is up
+        m = 0 if live else UP
         if self.hold:
             self.hold -= 1
             m |= B | self.side
