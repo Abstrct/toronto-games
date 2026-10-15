@@ -12,12 +12,13 @@
 ; the strip) name it; past the strip it's BIT LATE, BUD.
 ; A sip finished mid-air over a hurdle is a SIP 'N' HOP. It pays
 ;   base x chain x chalk
-; base 8 + a point for every 16 BUZZ you had before the sip (nobody tells you:
-; from 128 up it's LIQUID COURAGE and the base takes 4 more, but the sip takes
-; you into the red), doubled over a green bin (BIG SIP 'N' HOP) or a raccoon
-; (RACCOON RUN); chain X1..X5 (one more for each SIP 'N' HOP in a
-; row); chalk X1, X2 ON THE CHALK, X3 DEAD ON. The banner's second line
-; spells out the parts that multiply. A dry hop that paid take-off points
+; base 8 + a point for every 16 BUZZ you had before the sip, doubled over a
+; green bin (BIG SIP 'N' HOP) or a raccoon (RACCOON RUN); chain X1..X5 (one
+; more for each SIP 'N' HOP in a row); chalk X1, X2 ON THE CHALK, X3 DEAD ON.
+; Nobody tells you: off a gold BUZZ (the meter's third cell) it's LIQUID
+; COURAGE and the base takes 4 more, but that sip takes you into the red. The
+; banner's second line spells out the parts that multiply, the base named
+; for what it is: "SIP 22 X5 CHAIN X3 DEAD ON". A dry hop that paid take-off points
 ; holds the chain; one way off the chalk ends it (so does a spill, a
 ; scramble, a seen or a sloshed sip). Sip on the ground next to a green bin
 ; and a raccoon nicks your can. Run into a hurdle and you stop dead against
@@ -26,13 +27,18 @@
 ; can't bust you, and the game tells you what each obstacle needs; you stand
 ; against a hurdle longer, and hopping at nothing only gets a word, not
 ; WINDED. Then he finds his legs over 4 s.
-; BUZZ is the sip budget: each sip adds to it and it wears off slowly. In the
-; red (TIPSY) the cop gains on you until he's on screen, watching, and a sip
-; is SLOSHED: no points, chain over. So a top run picks its sips (the big
-; hurdles, DEAD ON take-offs) and rides the BUZZ high without going red.
-; From COURAGE to TIPSY the BUZZ meter turns gold and the runner's can glows
-; (pulsing): the tell that a SIP 'N' HOP now pays the bigger base, and the
-; banner's sum line starts GOLD.
+; BUZZ is the sip budget: each sip fills one cell of the 4-cell meter and it
+; wears off slowly (a cell every 256 frames). Two pink cells, then a gold one,
+; then red. In the red (TIPSY) the cop gains on you until he's on screen,
+; watching, and a sip is SLOSHED: no points, chain over. A sip from the gold
+; always goes red, so a top run fills to the gold, spends it on a big hurdle,
+; and waits out the red. The tell (cops_glow, cops_meter): the gold cell and
+; the red one are framed in their colours even empty, with a hard edge between
+; them; when the BUZZ is gold and the cop can't see you, the BUZZ label turns
+; gold, the can glows and a bell rings. Draining out of the red, the label
+; blinks gold and ticks for the last 32 frames before the gold. B down in the
+; red honks a warning and blinks the label red, and that sip goes down slowly
+; (20 frames, never committed mid-air), so letting go saves it.
 ; Score (ev_break): RUN (50 a hurdle hopped or scrambled over) + STYLE (take-offs, sips, SIP 'N'
 ; HOPs). The finish tally and the card add it up the same way.
 ; A spill costs no points (bar that hop's take-off and its 50): it costs
@@ -83,8 +89,8 @@ COMBO_PTS  = 8               ; SIP 'N' HOP over crates or a bench: x chain x cha
                              ; + a point for every 16 BUZZ you had before the sip (the
                              ; base shows it; nobody tells you), double over a green bin
                              ; (BIG SIP 'N' HOP) or a raccoon (RACCOON RUN)
-COURAGE    = 128             ; ...BUZZ this high before it: LIQUID COURAGE,
-COURAGE_PTS = 4              ; ...and the base takes this much more
+COURAGE    = 128             ; ...BUZZ this high before it (the gold cell): LIQUID
+COURAGE_PTS = 4              ; COURAGE, and the base takes this much more
 ; the chalk: a chevron (the mark) with a chalk strip on to the hurdle. Take
 ; off on it and the hop pays TAKE-OFF points (style), graded by how close to
 ; the chevron you were, and a SIP 'N' HOP on it pays X2 (X3 DEAD ON)
@@ -95,11 +101,14 @@ DEAD_LATE  = 3
 TO_MAX     = 40              ; take-off points DEAD ON the chevron...
 TO_ZERO    = 64              ; ...falling a point every 1.6 px to nothing this far past it
 
-BUZZ_TIPSY = 176             ; BUZZ meter in the red: TIPSY. The cop gains on you, and a
+BUZZ_TIPSY = 192             ; BUZZ meter in the red (its last cell): TIPSY. The cop gains on you, and a
                              ; sip now is SLOSHED (no points, chain over)
 TIPSY_GAIN = $0060           ; ...this much a frame (8.8)
 TIPSY_NEAR = 96              ; ...until he's this close: on screen, watching your sips
-SIP_BUZZ   = 56              ; each sip; it wears off 1 every 4 frames
+SIP_BUZZ   = 64              ; each sip: a cell of the meter; it wears off 1 every 4 frames
+BUZZ_PRE   = BUZZ_TIPSY + 8  ; draining red: the last 32 frames before the gold blink and tick
+MZ_TILE    = 95              ; BG3 tiles 95..99: the meter's zone cells (cops_meter.bin;
+                             ; spare font slots under the countdown's 100..127)
 CHAIN_MAX  = 5
 
 ST_RUN     = 0
@@ -179,6 +188,15 @@ c_hchain = ev_ram + 342      ; the chain the HUD shows ($FF: redraw)
 c_cansv  = ev_ram + 344      ; the runner's can colours (palette 0: 12, 13, 14), 6 bytes
 c_glow   = ev_ram + 350      ; 1: the can's lit up (the BUZZ is gold)
 c_hopwarn = ev_ram + 352     ; 1: the warm-up's said HOPS AT NOTHING WIND YOU once
+c_sty    = ev_ram + 354      ; style by source, 5 words (ev_style): take-offs, lucky sips,
+                             ; SIP 'N' HOPs (X1 chain), the chain's extra, the gold's part
+c_live   = ev_ram + 364      ; 1: the BUZZ is gold and the cop can't see you (byte)
+c_pre    = ev_ram + 365      ; 1: draining red, gold within 32 frames (and he can't see you)
+c_rwarn  = ev_ram + 366      ; 1: honked at this sip in the red
+c_hlive  = ev_ram + 367      ; the BUZZ label's text palette as drawn (cops_meter)
+c_bellcd = ev_ram + 368      ; frames before the bell may ring again
+c_mq     = ev_ram + 370      ; the meter's quarters (cops_meter)
+c_mcell  = ev_ram + 372      ; ...the cell being drawn
 EV_SEED  = ev_ram + 510
 
 NUM_ENT = 10
@@ -706,14 +724,36 @@ cops_input:
     and #PAD_B
     A8
     beq @nob
+    lda c_buzz
+    cmp #BUZZ_TIPSY
+    bcs @red
     lda c_air
     beq @go
     lda #$01
     sta c_asip
     bra @go
+@red:
+    ; in the red this sip would be SLOSHED: B down honks (once), the BUZZ
+    ; label blinks red (cops_meter), and the sip goes down at the ground's pace even
+    ; mid-air and never commits: let go within 20 frames and it's off
+    lda c_rwarn
+    bne @rw
+    inc c_rwarn
+    SFX SFX_HORN
+@rw:
+    lda #$01
+    sta c_sipping
+    lda #3
+    bra @rate
 @nob:
+    stz c_rwarn
     lda c_asip
-    beq @x
+    bne @go
+    lda c_buzz
+    cmp #BUZZ_TIPSY
+    bcc @x
+    stz c_prog                  ; let go in the red: that sip's off
+    rts
 @go:
     lda #$01
     sta c_sipping
@@ -878,6 +918,10 @@ chalk_check:
     clc
     adc c_style
     sta c_style
+    lda c_jto
+    clc
+    adc c_sty                   ; (style by source: TAKE-OFFS)
+    sta c_sty
     ; the tier
     lda tmp2
     clc
@@ -1003,6 +1047,10 @@ sip_done:
     clc
     adc #SIP_PTS
     sta c_style
+    lda c_sty+2
+    clc
+    adc #SIP_PTS                ; (LUCKY SIPS)
+    sta c_sty+2
     A8
     lda c_air
     beq @x
@@ -1265,17 +1313,16 @@ sip_n_hop:
     inc c_chalks
     A8
 @nch:
-    ; the base: 8 + BUZZ/16 (+ COURAGE_PTS from 128 up: LIQUID COURAGE, and
-    ; the sip on top of it takes you into the red: TIPSY, the cop closes in,
-    ; and your next sips are SLOSHED until it wears off), doubled for the big
-    ; ones
+    ; the base: 8 + BUZZ/16, + COURAGE_PTS off a gold BUZZ (the undocumented
+    ; trick: LIQUID COURAGE), doubled for the big ones (<= 46: a sip in the
+    ; red never gets here)
+    stz tmp6                    ; the gold's part of the base
     lda c_jbz
     cmp #COURAGE
-    lda #0
-    bcc @nc
+    bcc @ng
     lda #COURAGE_PTS
-@nc:
-    sta tmp4
+    sta tmp6
+@ng:
     lda c_jbz
     lsr a
     lsr a
@@ -1283,26 +1330,18 @@ sip_n_hop:
     lsr a
     clc
     adc #COMBO_PTS
-    adc tmp4
     ldx c_jcoon
     bne @big
     ldx c_jbin
     beq @bs
 @big:
     asl a
+    asl tmp6
 @bs:
-    sta tmp4                    ; base
-    ; chain x chalk (<= 15), then x base (<= 44: 660)
+    sta tmp4                    ; the base, bar the gold's part
+    ; that x chalk (<= 90): the hop at X1 chain (style: SIP 'N' HOPS)
     lda c_jchalk
     inc a
-    sta WRMPYA
-    lda c_chain
-    sta WRMPYB
-    nop
-    nop
-    nop
-    nop
-    lda RDMPYL
     sta WRMPYA
     lda tmp4
     sta WRMPYB
@@ -1312,7 +1351,66 @@ sip_n_hop:
     nop
     A16
     lda RDMPYL
+    sta tmp5
+    clc
+    adc c_sty+4
+    sta c_sty+4
+    A8
+    ; x chain (<= 450); the chain's extra is CHAIN BONUS
+    lda tmp5
+    sta WRMPYA
+    lda c_chain
+    sta WRMPYB
+    nop
+    nop
+    nop
+    nop
+    A16
+    lda RDMPYL
     sta tmp3
+    sec
+    sbc tmp5
+    clc
+    adc c_sty+6
+    sta c_sty+6
+    A8
+    ; the gold's part x chalk x chain (<= 120) is its own style row
+    lda tmp6
+    beq @x1
+    sta WRMPYA
+    lda c_jchalk
+    inc a
+    sta WRMPYB
+    nop
+    nop
+    nop
+    nop
+    lda RDMPYL
+    sta WRMPYA
+    lda c_chain
+    sta WRMPYB
+    nop
+    nop
+    nop
+    nop
+    A16
+    lda RDMPYL
+    pha
+    clc
+    adc c_sty+8
+    sta c_sty+8
+    pla
+    clc
+    adc tmp3
+    sta tmp3
+    A8
+    lda tmp4                    ; the banner's base takes it in
+    clc
+    adc tmp6
+    sta tmp4
+@x1:
+    A16
+    lda tmp3
     clc
     adc c_style
     sta c_style
@@ -1351,8 +1449,8 @@ sip_n_hop:
     jsr buf_num
     lda #$00
     sta c_buf,y
-    ; line 2, when there's a sum to show: "20 X5 CHAIN X3 DEAD ON" (the parts
-    ; that multiply: no "X1 CHAIN", and nothing at all for a plain base)
+    ; line 2, when there's a sum to show: "SIP 22 X5 CHAIN X3 DEAD ON" (the
+    ; parts that multiply: no "X1 CHAIN", and nothing at all for a plain base)
     jsr buf_ptr
     lda c_jbz
     cmp #COURAGE
@@ -1367,13 +1465,8 @@ sip_n_hop:
     jmp popup_t
 @two:
     ldy #(c_buf2 - c_buf)
-    ; off a gold BUZZ the base says so: "GOLD 21 X3 CHAIN"
-    lda c_jbz
-    cmp #COURAGE
-    bcc @ng
-    LDPTR0 str_gold
+    LDPTR0 str_sipb             ; "SIP 19": what the sip itself was worth
     jsr buf_str
-@ng:
     A16
     lda tmp4
     and #$00FF
@@ -1946,6 +2039,10 @@ trip:
     sec
     sbc c_jto
     sta c_style
+    lda c_sty
+    sec
+    sbc c_jto
+    sta c_sty
     stz c_jto
     A8
 @ta:
@@ -2180,11 +2277,11 @@ popup_clear:
     jsl txt_fill
     rts
 
-; blank rows 6-16 (the tally)
+; blank rows 5-17 (the tally)
 panel_clear:
-    ldx #(6*32)
+    ldx #(5*32)
     A16
-    lda #$0B20
+    lda #$0D20
     sta tmp1
     A8
     stz tmp2
@@ -2204,9 +2301,9 @@ tally_req:
     rts
 
 tally_box:
-    ldx #(6*32 + 3)
+    ldx #(5*32 + 3)
     A16
-    lda #$0B1A                  ; 26 x 11
+    lda #$0D1A                  ; 26 x 13
     sta tmp1
     A8
     lda #$20
@@ -2214,22 +2311,23 @@ tally_box:
     rts
 
 ; (in two frames' text slots: it's too much text for one). The same sum as
-; the card: RUN 50 A HURDLE + STYLE (- COP'S FINE) = SCORE
+; the card: RUN 50 A HURDLE + STYLE (- COP'S FINE) = SCORE, a blank row
+; between each (title 6, run 8, style 10, fine 12, why 14, score 16)
 tally_text:
     lda #TXT_WIN
     sta txt_bg
     lda ev_fail
     bne @bust
-    PRINTC 7, TP_GREEN, str_t_won
+    PRINTC 6, TP_GREEN, str_t_won
     bra @run
 @bust:
-    PRINTC 7, TP_RED, str_t_bust
+    PRINTC 6, TP_RED, str_t_bust
 @run:
-    PRINT 6, 9, TP_WHITE, str_t_run
-    PRINT 10, 9, TP_GREY, str_t_rate
+    PRINT 6, 8, TP_WHITE, str_t_run
+    PRINT 10, 8, TP_GREY, str_t_rate
     stz tmp7
     ldx ev_break
-    ldy #(9*32 + 21)
+    ldy #(8*32 + 21)
     lda #TP_YELLOW
     jsr tnum
     PRINT 6, 10, TP_WHITE, str_t_style
@@ -2250,14 +2348,14 @@ tally_text2:
     sta txt_bg
     lda ev_fail
     bne @fine
-    PRINTC 13, TP_GREY, str_t_spa
+    PRINTC 12, TP_GREY, str_t_spa
     bra @score
 @fine:
-    PRINT 6, 11, TP_WHITE, str_t_fine
+    PRINT 6, 12, TP_WHITE, str_t_fine
     lda #'-'
     sta tmp7
     ldx c_fine
-    ldy #(11*32 + 21)
+    ldy #(12*32 + 21)
     lda #TP_RED
     jsr tnum
     ; one framing, as the card's: the fine is a quarter (or there was nothing
@@ -2266,15 +2364,15 @@ tally_text2:
     lda ev_break
     A8
     bne @fq
-    PRINTC 13, TP_GREY, str_t_none
+    PRINTC 14, TP_GREY, str_t_none
     bra @score
 @fq:
-    PRINTC 13, TP_GREY, str_t_half
+    PRINTC 14, TP_GREY, str_t_half
 @score:
-    PRINT 6, 15, TP_WHITE, str_t_score
+    PRINT 6, 16, TP_WHITE, str_t_score
     stz tmp7
     ldx ev_score
-    ldy #(15*32 + 21)
+    ldy #(16*32 + 21)
     lda #TP_YELLOW
     jsr tnum
     stz txt_bg
@@ -2875,29 +2973,8 @@ cops_hud:
     lda #$20
     jsl txt_fill
 @buzz:
-    ; buzz meter 4 cells (0-255 -> 16 quarters)
-    lda c_buzz
-    lsr a
-    lsr a
-    lsr a
-    lsr a
-    sta tmp3
-    ; pink; gold from COURAGE (a SIP 'N' HOP now pays a bigger base); red
-    ; once you're TIPSY (a sip now is SLOSHED)
-    lda c_buzz
-    cmp #BUZZ_TIPSY
-    bcs @red
-    cmp #COURAGE
-    lda #($20 | (TP_PINK << 2))
-    bcc @bc
-    lda #($20 | (TP_YELLOW << 2))
-    bra @bc
-@red:
-    lda #($20 | (TP_RED << 2))
-@bc:
-    ldx #(1*32 + 16)
-    stz tmp7
-    jsr meter4
+    ; buzz meter: 4 cells, a sip each: pink, pink, gold, red (bank $80)
+    jsl cops_meter
     ; cop meter: fuller = closer (gap GAP_MAX -> GAP_BUST = 0 -> 16 quarters)
     A16
     lda c_gap
@@ -3038,6 +3115,9 @@ calc_pts:
     rts
 
 ; ev_stat: SIP 'N' HOPs, lucky sips, hurdles, spills
+; ev_style: STYLE by source (c_sty: take-offs, lucky sips, SIP 'N' HOPs at X1
+; chain, the chain's extra, the gold BUZZ's 4 on the base), on every card: they sum to
+; ev_break+2 (STYLE) finished, busted or gave up
 ; ev_break: run, style, the cop's fine; base + bonus - penalty = ev_score
 ; finish: run + style, no fine (the tally and the card add it up the same way)
 ; busted / gave up: the fine is a quarter of run + style (the true cost: no
@@ -3055,6 +3135,13 @@ cops_score:
     sta ev_stat+6
     stz c_fine
     stz ev_break+4
+    ldx #8
+@sty:
+    lda c_sty,x
+    sta ev_style,x
+    dex
+    dex
+    bpl @sty
     A8
     jsr calc_base
     stz ev_fail
@@ -3178,18 +3265,23 @@ str_oof_bin:   .byte "GREEN BIN: HOLD A AT RED", 0
 str_hop1:      .byte "HOP AT THE CHALK, BUD!", 0
 str_hop2:      .byte "HOPS AT NOTHING WIND YOU", 0
 str_crack:     .byte "*CRACK* NEW CAN: 6 SIPS", 0
-str_gold:      .byte "GOLD ", 0
+str_sipb:      .byte "SIP ", 0
 
 ; ------------------------------------------------------------------
-; the tell: from COURAGE up to TIPSY the BUZZ meter is gold (cops_hud), and
-; the runner's can glows with it, pulsing (8 frames lit, 8 not) so it reads
-; at a glance on the runner, not just up in the HUD. Runner palette 0
-; (CGRAM 128..143): 12 can stripe, 13 can, 14 can top.
+; The tell for the undocumented trick (a SIP 'N' HOP off a gold BUZZ). The
+; setup is always on screen: the meter's gold cell and red cell are framed in
+; their colours even empty (cops_meter), and each sip fills a cell. While it's
+; live (the BUZZ gold and the cop off screen) the BUZZ label is gold, the
+; runner's can glows (pulsing: 8 frames lit, 8 not) and a bell rings as it
+; comes on. Draining out of the red toward the gold, the label blinks gold
+; and ticks every 8 frames for the last 32 (the warning before it opens). Runner
+; palette 0 (CGRAM 128..143): 12 can stripe, 13 can, 14 can top.
 CAN_PAL = pal_buf + (128 + 12) * 2
 
 .a8
 .i16
 cops_glow_init:
+    VLOAD (VRAM_TXTTILES + MZ_TILE * 8), cops_mz_tiles, 80
     A16
     lda CAN_PAL
     sta c_cansv
@@ -3201,17 +3293,62 @@ cops_glow_init:
     stz c_glow
     rtl
 
+; every frame (cops_draw): is it live, is the gold coming, the bell and the
+; tick, the can
 .a8
 .i16
 cops_glow:
+    lda c_bellcd
+    beq @cd
+    dec c_bellcd
+@cd:
+    ldx #$0000                  ; X: 1 live, 2 gold coming
     lda c_state
     cmp #ST_ESCAPE
-    bcs @off
+    bcs @edges
+    A16
+    lda c_gap
+    cmp #(COP_SEEN*256)
+    A8
+    bcc @edges                  ; he's watching: nothing's live
     lda c_buzz
     cmp #COURAGE
-    bcc @off
+    bcc @edges
+    inx
     cmp #BUZZ_TIPSY
-    bcs @off
+    bcc @edges
+    inx                         ; red...
+    cmp #BUZZ_PRE
+    bcc @edges
+    ldx #$0000                  ; ...and a way off the gold yet
+@edges:
+    txa
+    lsr a
+    lsr a                       ; C: gold coming
+    lda #$00
+    rol a
+    sta c_pre
+    beq @np
+    lda frame
+    and #$07
+    bne @np
+    SFX SFX_TICK
+@np:
+    txa
+    and #$01
+    cmp c_live
+    beq @same
+    sta c_live
+    lda c_live
+    beq @same
+    lda c_bellcd                ; on: ding (not twice in a second)
+    bne @same
+    lda #60
+    sta c_bellcd
+    SFX SFX_BELL
+@same:
+    lda c_live
+    beq @off
     lda frame
     and #$08
     beq @off
@@ -3246,3 +3383,105 @@ cops_glow:
     sta pal_dirty
 @x:
     rtl
+
+; the BUZZ meter (cops_hud, every 4th frame): 4 cells, a sip each. Cells 1-2
+; pink (the plain meter tiles), 3 gold and 4 red (the zone tiles, framed in
+; their colour). Quarters: 0 empty, else BUZZ/16 + 1, so the gold cell shows
+; fill from the first point of gold and the red from the first of red. The
+; cells never blink (they're the truth); the BUZZ label does the talking.
+.a8
+.i16
+cops_meter:
+    lda c_buzz
+    beq @q
+    lsr a
+    lsr a
+    lsr a
+    lsr a
+    inc a
+    cmp #17
+    bcc @q
+    lda #16
+@q:
+    sta c_mq
+    stz c_mcell
+    ldx #(1*32 + 16)
+@cell:
+    ; this cell's quarters: clamp(q - 4 x cell, 0, 4)
+    lda c_mcell
+    asl a
+    asl a
+    sta tmp2
+    lda c_mq
+    sec
+    sbc tmp2
+    bcs @pos
+    lda #$00
+@pos:
+    cmp #5
+    bcc @q4
+    lda #4
+@q4:
+    sta tmp2
+    lda c_mcell
+    cmp #2
+    bcs @zone
+    lda tmp2
+    clc
+    adc #TXT_METER
+    sta tmp2
+    lda #($20 | (TP_PINK << 2))
+    bra @put
+@zone:
+    beq @gold
+    lda tmp2
+    clc
+    adc #MZ_TILE
+    sta tmp2
+    lda #($20 | (TP_RED << 2))
+    bra @put
+@gold:
+    lda tmp2
+    clc
+    adc #MZ_TILE
+    sta tmp2
+    lda #($20 | (TP_YELLOW << 2))
+@put:
+    jsl txt_char
+    inx
+    inc c_mcell
+    lda c_mcell
+    cmp #4
+    bne @cell
+    ; the label: gold while it's live, blinking gold while the gold's coming,
+    ; blinking red while B's down in the red; else white
+    ldy #TP_YELLOW
+    lda c_live
+    bne @lab
+    lda frame
+    and #$08
+    beq @w
+    lda c_pre
+    bne @lab
+    ldy #TP_RED
+    lda c_rwarn
+    bne @lab
+@w:
+    ldy #TP_WHITE
+@lab:
+    tya
+    cmp c_hlive
+    beq @x
+    sta c_hlive
+    asl a
+    asl a
+    ora #$20
+    pha
+    LDPTR0 str_buzz
+    pla
+    ldx #(1*32 + 11)
+    jsl txt_print
+@x:
+    rtl
+
+cops_mz_tiles: .incbin "cops_meter.bin"

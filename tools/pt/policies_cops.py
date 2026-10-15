@@ -31,9 +31,11 @@ the event's physics (src/ev_cops.s):
   cops_prompt a first-timer who obeys only on-screen prompts, no
               anticipation (`pt curve -p cops_prompt -l 20,22,25`)
   cops_allsip sips over every hop, never minds the BUZZ (it goes red)
-  cops_gold   plays the undocumented trick off its tell alone: the BUZZ meter's
-              colour on the HUD (gold just under the red). `python3
-              tools/pt/policies_cops.py gold 10,12,15` counts how often it lands
+  cops_gold   plays the undocumented trick off its tell alone: the HUD's BUZZ
+              meter cells and label (gold while it's live). `python3
+              tools/pt/policies_cops.py gold 12,15,18,20,24` counts how often
+              it lands at each hand latency (+-3 frames), and how often the
+              tell-blind bots (cops_prompt, cops_allsip) land it by accident
   cops_lost   Marcus's lost first-timer (20-30 frame hand): must beat mash_a
   cops_noob   an honest first-timer: +-5 frames off the chalk, freezes on one
               hurdle in four, sips without minding the BUZZ (run it through
@@ -59,6 +61,8 @@ from policies import Policy, A, B
 RUN_SPD, SIP_SPD, TRIP_SPD = 0x200, 0xE0, 0x80
 JUMP_V, GRAVITY, MIN_HOP, HOP_CUT = 0x3C0, 0x20, 8, 0x180
 COP_SEEN = 110
+SIP_BUZZ, COURAGE, BUZZ_TIPSY = 64, 128, 192    # a cell of the meter each; gold; red
+MZ_TILE, TXT_METER = 95, 73                     # the HUD meter's zone tiles, plain tiles
 GAP_MAX = 176
 OB_HW = [0, 10, 10, 8, 8]
 OB_H = [0, 12, 10, 30, 9]
@@ -160,7 +164,7 @@ class _Runner(Policy):
     noise = 0           # +- frames of jump timing error
     miss = 0.0          # chance to fluff a hurdle entirely
     ground_buzz = 60    # BUZZ below this: room for a ground sip (save the rest for SIP 'N' HOPs)
-    air_buzz = 120      # ...for a SIP 'N' HOP (176+ is TIPSY: the cop closes in)
+    air_buzz = 120      # ...for a SIP 'N' HOP (192+ is TIPSY: the cop closes in)
     react = 12          # frames to notice you've stopped dead against a hurdle
 
     def __init__(self):
@@ -400,7 +404,7 @@ class cops_eyes(Policy):
     ground_q = 3                # HUD cop meter at or below this: a ground gulp is safe
     air_q = 5                   # ...at or below this (and he's off screen): sip through the jump
     ground_buzz = 2             # HUD buzz meter (16 steps) at or below this: room for a ground gulp
-    air_buzz = 5                # ...for a sip over crates or a bench (10+ is TIPSY: the cop gains)
+    air_buzz = 5                # ...for a sip over crates or a bench (12+ is TIPSY: the cop gains)
     air_buzz_big = 7            # ...over a bin or a raccoon (they pay double)
     careless = 0.1
     courage = False             # gulps on the ground to take a big hurdle at BUZZ 128+
@@ -487,12 +491,12 @@ class cops_eyes(Policy):
                 self.b_until = t + self.GULP
                 m |= B
             elif self.sips and self.courage and q <= self.ground_q and not cop_on_screen and not bin_close:
-                # a gulp now that leaves the BUZZ at 128..170 when we take off for
-                # the bin or raccoon coming up: its SIP 'N' HOP is LIQUID COURAGE
+                # a gulp now that leaves the BUZZ gold (128..191) when we take off
+                # for the bin or raccoon coming up: its SIP 'N' HOP is LIQUID COURAGE
                 big = [a for a in ahead if a[2]['i'] not in self.done]
                 if big and big[0][2]['t'] in (T_BIN, T_COON) and 90 < big[0][0] < 240:
                     frames = self.GULP + big[0][0] / 2
-                    if 130 <= s.buzz + 56 - frames / 4 <= 170:
+                    if 132 <= s.buzz + SIP_BUZZ - frames / 4 <= 186:
                         self.b_until = t + self.GULP
                         m |= B
         return m
@@ -511,7 +515,7 @@ class cops_noob(cops_eyes):
     def act(self, t, tel, rng):
         # sips without minding the BUZZ until the meter first goes red (and
         # TIPSY! / SLOSHED! comes up): from then on, only while it's pink
-        if self.g is not None and self.ground_buzz > 10 and self.g.core.peek(self.g.sym['ev_ram'] + 20, 1)[0] >= 176:
+        if self.g is not None and self.ground_buzz > 10 and self.g.core.peek(self.g.sym['ev_ram'] + 20, 1)[0] >= BUZZ_TIPSY:
             self.ground_buzz, self.air_buzz, self.air_buzz_big = 6, 8, 9
         return super().act(t, tel, rng)
 
@@ -527,17 +531,17 @@ class cops_pro(cops_eyes):
     the buzz."""
     ERR = 1
     ground_q, air_q = 4, 6
-    ground_buzz, air_buzz, air_buzz_big = 2, 6, 10
+    ground_buzz, air_buzz, air_buzz_big = 2, 6, 11
     courage = True
 
 
 class cops_ace(cops_pro):
     """The best run we know: cops_pro who knows the undocumented trick. A SIP
     'N' HOP's base is 8 + a point for every 16 BUZZ you had before the sip
-    (LIQUID COURAGE from 128 up, 4 more on the base), so it rides the meter
-    just under the red and takes the big hurdles on courage."""
+    (4 more off a gold BUZZ, 128..191: LIQUID COURAGE), so it rides the meter
+    in the gold and takes every hurdle it can on courage."""
     ERR = 0.5
-    ground_buzz, air_buzz, air_buzz_big = 4, 10, 10
+    ground_buzz, air_buzz, air_buzz_big = 4, 11, 11
 
 
 class cops_prompt(Policy):
@@ -589,7 +593,7 @@ class cops_prompt(Policy):
                 self.stop = True
                 self.b_until = -1
             self.scram = 'SCRAMBLE' in txt and 'TAP A' in txt
-        if self.stop and s.buzz < 176 and (s.gap >> 8) > PLAYER_SX + 20:
+        if self.stop and s.buzz < BUZZ_TIPSY and (s.gap >> 8) > PLAYER_SX + 20:
             self.stop = False       # the meter's pink again and he's gone
         m = 0
         if t < self.a_until:
@@ -649,15 +653,31 @@ class cops_lost(cops_noob):
         return m
 
 
+def hud_buzz(g):
+    """What the HUD's BUZZ shows: (zone, quarters, label colour). Zone from
+    the meter's cells (pink, pink, gold, red: where the fill reaches), label
+    from the BUZZ text's palette: 'gold' while the trick is live, blinking gold
+    while the gold is coming, blinking red while B is down in the red."""
+    tm = g.core.peek(g.sym['txt_map'] + (1 * 32 + 16) * 2, 8)
+    t = [tm[2 * i] for i in range(4)]
+    q = [max(0, min(4, t[0] - TXT_METER)), max(0, min(4, t[1] - TXT_METER)),
+         max(0, min(4, t[2] - MZ_TILE)), max(0, min(4, t[3] - MZ_TILE))]
+    zone = 'red' if q[3] else 'gold' if q[2] else 'pink'
+    lab = g.core.peek(g.sym['txt_map'] + (1 * 32 + 11) * 2, 2)
+    col = {0: 'white', 1: 'gold', 2: 'red'}.get((lab[1] >> 2) & 7, 'white')
+    return zone, sum(q), col
+
+
 class cops_gold(cops_eyes):
-    """The tell's proof: a player who has noticed that the BUZZ meter turns
-    gold (and the can glows) just under the red, and plays on that alone. It
-    reads the meter from the HUD's text layer (its colour and fill), never the
-    BUZZ itself:
-    - pink: gulp on the ground (cop off screen, nothing close) to fill it up;
-    - gold: stop gulping; sip through the next hop (the cop off screen);
-    - red: no sips until it's pink again.
-    `tries` counts hops it took with B on a gold meter, `landed` the ones that
+    """The tell's proof: a player who has noticed the BUZZ meter's gold cell,
+    the bell and the BUZZ label going gold, and plays on that alone. It reads
+    the HUD (the meter's cells and the label's colour, as `hud_buzz`), never
+    the BUZZ itself or the cop's distance in RAM:
+    - meter pink, label white: gulp on the ground (cop off screen, nothing
+      close) to fill it, and sip through hops while it's pink;
+    - label gold (live): stop gulping; sip through the next hop;
+    - red, or label blinking: no sips.
+    `tries` counts hops it took with B on a gold label, `landed` the ones that
     paid the undocumented trick (read from RAM afterwards, only to score the
     bot: `python3 tools/pt/policies_cops.py gold`)."""
     ERR = 2
@@ -666,12 +686,6 @@ class cops_gold(cops_eyes):
         super().__init__()
         self.tries = self.landed = 0
         self.watch = None       # c_brave when we took off on gold
-
-    def meter(self):
-        tm = self.g.core.peek(self.g.sym['txt_map'] + (1 * 32 + 16) * 2, 8)
-        pal = (tm[1] >> 2) & 7
-        fill = sum(max(0, min(4, tm[2 * i] - 73)) for i in range(4))
-        return {7: 'pink', 1: 'gold', 2: 'red'}.get(pal, 'pink'), fill
 
     def act(self, t, tel, rng):
         if self.g is None:
@@ -684,15 +698,16 @@ class cops_gold(cops_eyes):
             elif self.flew or t > self.watch_t + 90:
                 self.landed += brave > self.watch
                 self.watch = None
-        col, fill = self.meter()
-        # what the hand will do: gulp on pink, hop-sip on gold, nothing on red
-        self.ground_buzz = 16 if col == 'pink' else -1
-        self.air_buzz = self.air_buzz_big = 16 if col == 'gold' else -1
-        self.air_q = 16 if col == 'gold' else 6
+        zone, fill, col = hud_buzz(self.g)
+        live = col == 'gold' and zone == 'gold'
+        # what the hand will do: gulp and hop-sip on pink, hop-sip on gold, nothing on red
+        self.ground_buzz = 16 if zone == 'pink' and col == 'white' else -1
+        self.air_buzz = self.air_buzz_big = 16 if (live or (zone == 'pink' and col == 'white')) else -1
+        self.air_q = 16 if live else 6
         took_off = t >= self.a_until
         # cops_eyes judges room from s.buzz >> 4: give it only what the meter shows
         m = self._act_seen(t, tel, rng, fill)
-        if took_off and t < self.a_until and m & B and col == 'gold':
+        if took_off and t < self.a_until and m & B and live:
             self.tries += 1
             self.watch, self.watch_t, self.flew = brave, t, False
         return m
@@ -726,43 +741,64 @@ DEFAULTS = {'cops': ['idle', 'hold_b', 'hold_a', 'mash_a', 'hold_b_mash_a', 'tap
 CURVE = {'cops': 'cops_eyes'}
 
 
-if __name__ == '__main__' and sys.argv[1:2] == ['gold']:
-    # the tell's proof: cops_gold at a 10-15 frame hand lands the undocumented
-    # trick more often than not when it goes for it
+def _hand_run(pol, seed, lat, jit=3):
+    """One run of `pol` on a hand `lat` frames late (+-jit), 3% of changes
+    missed: (score, tricks landed)."""
     import random as _r
-    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     import pt
-    lats = [int(x) for x in (sys.argv[2] if len(sys.argv) > 2 else '10,12,15').split(',')]
+    g = pt.Game()
+    pol.game = g
+    pt.goto_target(g, 'cops')
+    rng = _r.Random(seed)
+    g.core.poke(g.sym['rng'], bytes([rng.randrange(1, 256), rng.randrange(256)]))
+    hrng = _r.Random(seed * 7919 + 1)
+    pending, hold, want = [], 0, 0
+    for t in range(60 * 120):
+        m = pol.act(t, g.last, rng)
+        if m != want and hrng.random() >= 0.03:
+            want = m
+            due = t + max(0, lat + hrng.randint(-jit, jit))
+            if pending:
+                due = max(due, pending[-1][0] + 1)
+            pending.append((due, m))
+        while pending and pending[0][0] <= t:
+            hold = pending.pop(0)[1]
+        g.step(1, hold)
+        if t % 15 == 0 and t > 60 and not g.scene().startswith('cops.play'):
+            break
+    brave = _w(g.core.peek(g.sym['ev_ram'] + 340, 2), 0)
+    g.step(300, 0)
+    sc = g.state(full=False)['ev_score']
+    g.core.close()
+    return sc, brave
+
+
+if __name__ == '__main__' and sys.argv[1:2] == ['gold']:
+    # the tell's proof: cops_gold, on a hand L frames late (+-3), lands the
+    # undocumented trick more often than not when it goes for it; the
+    # tell-blind bots (on-screen prompts only, or a sip on every hop) land it
+    # by accident only now and then
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    lats = [int(x) for x in (sys.argv[2] if len(sys.argv) > 2 else '12,15,18,20,24').split(',')]
     n = int(sys.argv[3]) if len(sys.argv) > 3 else 6
     for lat in lats:
-        T = L = 0
+        T = L = runs = 0
         sc = []
         for seed in range(1, n + 1):
             pol = cops_gold()
-            g = pt.Game()
-            pol.game = g
-            pt.goto_target(g, 'cops')
-            rng = _r.Random(seed)
-            g.core.poke(g.sym['rng'], bytes([rng.randrange(1, 256), rng.randrange(256)]))
-            hrng = _r.Random(seed * 7919 + 1)
-            pending, hold, want = [], 0, 0
-            for t in range(60 * 120):
-                m = pol.act(t, g.last, rng)
-                if m != want and hrng.random() >= 0.03:
-                    want = m
-                    due = t + max(0, lat + hrng.randint(-(lat // 4), lat // 4))
-                    if pending:
-                        due = max(due, pending[-1][0] + 1)
-                    pending.append((due, m))
-                while pending and pending[0][0] <= t:
-                    hold = pending.pop(0)[1]
-                g.step(1, hold)
-                if t % 15 == 0 and t > 60 and not g.scene().startswith('cops.play'):
-                    break
-            g.step(300, 0)
-            sc.append(g.state(full=False)['ev_score'])
+            score, brave = _hand_run(pol, seed, lat)
+            sc.append(score)
             T += pol.tries
             L += pol.landed
-            g.core.close()
-        print('latency %2d: went for it %3d times, landed %3d (%.0f%%); scores %s'
-              % (lat, T, L, 100.0 * L / max(1, T), sc))
+            runs += brave > 0
+        print('cue bot, latency %2d+-3: went for it %3d times, landed %3d (%.0f%%), %d/%d runs landed one; scores %s'
+              % (lat, T, L, 100.0 * L / max(1, T), runs, n, sc))
+    for name, lat in (('cops_prompt', 20), ('cops_allsip', 15)):
+        tot, runs, sc = 0, 0, []
+        for seed in range(1, n + 1):
+            score, brave = _hand_run(POLICIES[name](), seed, lat)
+            tot += brave
+            runs += brave > 0
+            sc.append(score)
+        print('tell-blind %-11s latency %2d: landed it %d times in %d runs (%d runs with one); scores %s'
+              % (name, lat, tot, n, runs, sc))
