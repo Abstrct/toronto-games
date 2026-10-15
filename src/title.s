@@ -866,4 +866,4 @@ str_players: .byte "1-8 PLAYERS  ", TXT_DOT + 32, "  TAKE TURNS", 0
 str_sel_hint: .byte "SELECT: SOUND TEST", 0
 str_att_rec: .byte "TORONTO RECORDS", 0
 str_att_rec2: .byte "THINK YOU CAN BEAT 'EM?", 0
-str_copy:    .byte 91+32, " 2026 TORONTO GAMES", 0     ; font.py tile 91 = (C)
+str_copy:    .byte 91+32, " 2026 ABSTRCT", 0     ; font.py tile 91 = (C)
