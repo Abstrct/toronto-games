@@ -1535,7 +1535,7 @@ sty_double: .byte "DOUBLE TIME", 0
 sty_near:   .byte "DODGES & CUTS", 0
 sty_presto: .byte "PRESTO TAPS", 0
 sty_other:  .byte "SLALOM", 0
-sty_tight:  .byte "TIGHT ROUNDING", 0
+sty_tight:  .byte "TIGHT ROUNDS", 0
 sty_ctack:  .byte "CLEAN TACKS", 0
 sty_fsurf:  .byte "FERRY SURF", 0
 sty_lhon:   .byte "LINE HONOURS", 0
@@ -1571,7 +1571,7 @@ sty_sb_hands: .byte "NO HANDS", 0
 ; of ev_score, and the card shows it as a grey FORFEIT row (with the style
 ; rows under it). An event not named here gets the same card whenever its
 ; failed run's bonus plainly isn't in the score (break_ok).
-card_forfeit: .byte $1E, 0, 0, 0, 0, 0, 0  ; bike bay park cops sail parking subway
+card_forfeit: .byte $1E, 0, 0, 0, $1E, 0, 0  ; bike bay park cops sail parking subway
 ; a forfeit itemised in two rows (forfeit_split): 1 + the ev_stat index
 ; whose count x card_fsrate is the first part (the rest of the bonus is the
 ; second), 0 = one row; card_fslabel = the two rows' labels (after FORFEIT,
@@ -4967,7 +4967,7 @@ ec0: .byte "D-PAD STEER    A PEDAL", $0A, "B HOP RAILS AND POTHOLES", $0A, "TOKE
 ec1: .byte "ALTERNATE ", TXT_ARROW_L+32, " ", TXT_ARROW_R+32, " ON BIG DOTS", $0A, TXT_ARROW_U+32, TXT_ARROW_D+32, " WHERE THE ARROW POINTS", $0A, "NO LANE? A = EXCUSE ME", 0
 ec2: .byte "D-PAD WALK   A THROW BALL", $0A, "B ON ANY ! = SAFE DODGE", $0A, "LATER B = MORE PTS: RISKY!", 0
 ec3: .byte "YELLOW CHALK: TAP A", $0A, "RED CHALK: HOLD A", $0A, "HOLD B: SIPS PAY UNSEEN", 0
-ec4: .byte "LEFT/RIGHT: TURN  A: HIKE", $0A, "YELLOW ARROW: NEXT MARK", $0A, "GREEN DIAMONDS: ON COURSE", 0
+ec4: .byte "TAP ", TXT_ARROW_L+32, " ", TXT_ARROW_R+32, " TURN  HOLD A HIKE", $0A, "YELLOW ARROW: NEXT MARK", $0A, "GREEN DIAMONDS: ON COURSE", 0
 ec5: .byte TXT_ARROW_U+32, " TO THE LINE, ", TXT_ARROW_D+32, "+", TXT_ARROW_R+32, " BACK IN", $0A, "NOW! IN THE PANEL: ", TXT_ARROW_D+32, "+", TXT_ARROW_L+32, $0A, "STOPPED IN THE SPOT? A", 0
 ec6: .byte "HOLLOW ARROW: GET READY", $0A, "SOLID: HOLD D-PAD THAT WAY", $0A, "TAP ON THE FLASH: GOLD X3", 0
 ef0: .byte "WIPED OUT!", 0
@@ -5041,9 +5041,9 @@ fn_park_n: .byte "NO STEP NORTH IN 10 S", $0A, "HALF THE DOGS KEPT", 0
 fn_cops:   .byte "COP CAUGHT YOU: FINED 1/4", 0
 fn_cops_q: .byte "THE COP FINES QUITTERS 1/4", 0
 fn_sail:   .byte "15 S GETTING NO CLOSER", $0A, "250 A MARK + PART OF NEXT", 0
-fn_sail_t: .byte "250 A MARK + PART OF NEXT", 0
-fn_sail_h: .byte "NOBODY TOUCHED THE HELM", 0
-fn_sail_q: .byte "DOCKED EARLY: 250 A MARK", $0A, "+ PART OF THE NEXT ONE", 0
+fn_sail_t: .byte "250 A MARK + PART OF NEXT", $0A, "STYLE PAYS AT THE LINE", 0
+fn_sail_h: .byte "NOBODY STEERED IN 10 S", 0
+fn_sail_q: .byte "DOCKED EARLY: 250 A MARK", $0A, "STYLE PAYS AT THE LINE", 0
 fn_pk:     .byte "HALF IN OR TOWED, ALL 3", 0
 fn_pk_i:   .byte "10 S WITHOUT DRIVING", 0
 fn_pk_q:   .byte "ONLY SPOTS YOU PARKED PAY", 0
@@ -5061,7 +5061,7 @@ sti0: .byte "STANDING STILL PAYS 0", 0
 sti1: .byte "STANDING STILL PAYS 0", 0
 sti2: .byte "NOT ONE STEP, NO POINTS", 0
 sti3: .byte "NOT ONE HURDLE, NO POINTS", 0
-sti4: .byte "HANDS OFF THE HELM PAYS 0", 0
+sti4: .byte "NO HELM IN 10 S PAYS 0", 0
 sti6: .byte "THE TRAIN DID ALL THE WORK", 0
 
 ; card_rate / card_rate_fail: the grey words after a sum label, per event
