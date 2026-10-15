@@ -11,8 +11,9 @@ It runs in any SNES emulator (Snes9x, bsnes, Mesen) or on a flash cart.
 
 ## The events
 
-Every event opens with a card that shows where you are, what to do, your
-controls and the Toronto Record. Read it, then press A.
+Every event opens with a card: the goal in a line, then a picture of the
+pad with the buttons that event uses in colour (the rest grey) and a word
+for each, plus who's up and the Toronto Record. Press A.
 
 | # | Event | Where | Controls | Goal |
 |---|-------|-------|----------|------|

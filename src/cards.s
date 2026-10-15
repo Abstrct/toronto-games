@@ -99,6 +99,12 @@ c_cattr:      .res 1
 c_ct:         .res 1
 c_cr:         .res 1
 c_ck:         .res 1
+; pad_draw
+p_n:          .res 2
+p_i:          .res 2
+p_mask:       .res 1
+p_k:          .res 1
+p_attr:       .res 1
 
 .segment "HIBSS"                ; bank $7E: long addressing only
 ; text buffer: doubled line breaks, champions' names, the medal ticker
@@ -145,35 +151,158 @@ print_ev_entry_c:
     jsl txt_print_centre
     rts
 
-; like print_ev_entry, with a blank line between lines (16 px pitch)
-print_ev_entry16:
-    pha
-    phx
+; ------------------------------------------------------------------
+; pad_draw: the intro card's pad map. A SNES pad (rows 8-15) with the parts the
+; event uses in colour and the rest grey, a word for each lit part above or
+; below it, and a short leader line from the word to the part.
+PAD_CELL = 8*32 + 5             ; the pad's top-left cell
+pad_draw:
+    .a8
+    ; its tiles go in 100-127, the countdown's: it loads its own over them
+    A16
+    lda #.loword(pad_tiles)
+    sta ptr0
+    lda #(PAD_NDMA * 16)
+    sta tmp0
+    A8
+    lda #^pad_tiles
+    sta ptr0+2
+    ldx #(VRAM_TXTTILES + PAD_TILE0*8)
+    lda #$80
+    jsl dma_queue               ; lands in fade_in's first (dark) frame
+    ; the pad, all grey
+    A16
+    ldx #$0000
+    ldy #(PAD_CELL*2)
+@row:
+    lda #PAD_W
+    sta p_n
+@col:
+    lda f:pad_base,x
+    sta txt_map,y
+    inx
+    inx
+    iny
+    iny
+    dec p_n
+    bne @col
+    tya
+    clc
+    adc #((32 - PAD_W)*2)
+    tay
+    cpx #(PAD_W*PAD_H*2)
+    bne @row
+    A8
+    ; light the event's parts (and the d-pad's hub with any arm)
+    lda event_idx
+    TAXB
+    lda f:pad_lit,x
+    sta p_mask
+    stz p_k
+@part:
+    lsr p_mask
+    bcc @next
+    jsr pad_part
+@next:
+    inc p_k
+    lda p_k
+    cmp #8
+    bne @part
+    lda event_idx
+    TAXB
+    lda f:pad_lit,x
+    and #$0F
+    beq @words
+    jsr pad_part                ; p_k = 8: the hub
+@words:
+    LDPTR1 pad_words
     lda event_idx
     jsr table_ptr
-    jsr dbl_lines
-    plx
-    pla
+    A16
+    lda ptr0
+    sta ptr1
+    A8
+    lda ptr0+2
+    sta ptr1+2
+    ldy #$0000
+@word:
+    A16
+    lda [ptr1],y
+    cmp #$FFFF
+    beq @lines
+    tax
+    iny
+    iny
+    A8
+    lda [ptr1],y
+    sta p_attr
+    iny
+    A16
+    lda [ptr1],y
+    sta ptr0
+    iny
+    iny
+    sty p_i
+    A8
+    lda ptr1+2
+    sta ptr0+2
+    lda p_attr
     jsl txt_print
+    ldy p_i
+    bra @word
+@lines:
+    .a16
+    iny
+    iny
+@line:
+    lda [ptr1],y                ; the left cell of a 2-cell line: drawn at the shared edge
+    cmp #$FFFF
+    beq @done
+    asl a
+    tax
+    lda #(PAD_LINE | $2000 | (TP_WHITE << 10))
+    sta txt_map,x
+    lda #(PAD_LINE | $6000 | (TP_WHITE << 10))
+    sta txt_map+2,x
+    iny
+    iny
+    bra @line
+@done:
+    A8
+    lda #$01
+    sta txt_dirty
     rts
 
-; copy the string at ptr0 into c_buf with every line break doubled; ptr0 = c_buf
-dbl_lines:
-    ldy #$0000
-    ldx #$0000
-@l:
-    lda [ptr0],y
-    sta f:c_buf,x
+; pad_part: repaint part p_k's four cells in its colour (pad_cells, pad_part_attr)
+pad_part:
+    .a8
+    lda p_k
+    TAXB
+    lda f:pad_part_attr,x
+    sta p_attr
+    lda p_k
+    asl a
+    asl a
+    asl a
+    TAXB
+    lda #4
+    sta p_n
+@c:
+    A16
+    lda f:pad_cells,x
+    clc
+    adc #PAD_CELL
+    asl a
+    tay
+    A8
+    lda txt_map+1,y
+    and #$C3                    ; keep the flips, take the part's palette
+    ora p_attr
+    sta txt_map+1,y
     inx
-    cmp #$0A
-    bne @n
-    sta f:c_buf,x
     inx
-@n:
-    iny
-    cmp #$00
-    bne @l
-    LDPTR0 c_buf
+    dec p_n
+    bne @c
     rts
 
 ; ------------------------------------------------------------------
@@ -197,55 +326,26 @@ event_card:
     ldx #(2*32)
     lda #($20 | (TP_YELLOW << 2))
     jsr print_ev_entry_c
-    LDPTR1 ev_places
+    LDPTR1 ev_goals
     ldx #(4*32)
-    lda #($20 | (TP_CYAN << 2))
-    jsr print_ev_entry_c
-    LDPTR1 ev_blurbs
-    ldx #(6*32 + 3)
     lda #($20 | (TP_WHITE << 2))
-    jsr print_ev_entry16
-    LDPTR1 ev_controls
-    ldx #(10*32 + 3)
-    lda #($20 | (TP_GREEN << 2))
-    jsr print_ev_entry16
-    ; who is up
-    PRINT 3, 16, TP_GREY, str_up
+    jsr print_ev_entry_c
+    jsr pad_draw
+    ; who is up, and the record to beat
     lda #($20 | (TP_YELLOW << 2))
     sta tmp6
     lda cur_player
-    ldx #(16*32 + 10)
+    ldx #(20*32 + 3)
     jsl print_player_name
-    PRINT 3, 18, TP_GREY, str_for
-    lda cur_player
-    jsl player_offset
-    lda players+PL_SPONSOR,x
-    pha
-    lda #($20 | (TP_CYAN << 2))
-    sta tmp6
-    pla
-    ldx #(18*32 + 10)
-    jsl print_sponsor_name
-    ; record
-    PRINT 3, 20, TP_GREY, str_record
+    PRINT 18, 20, TP_GREY, str_rec
     jsr record_ptr
     A16
     lda records,x
     sta tmp1
-    txa
-    clc
-    adc #.loword(records + 2)
-    sta ptr0
     A8
-    stz ptr0+2
-    phx
-    ldx #(20*32 + 10)
-    lda #($20 | (TP_WHITE << 2))
-    jsl txt_print
-    plx
     ldx #(20*32 + 22)
     ldy #5
-    lda #($20 | (TP_YELLOW << 2))
+    lda #($20 | (TP_WHITE << 2))
     jsl txt_num
     ; going solo: the medal lines
     lda num_players
@@ -406,10 +506,8 @@ par_line:
     bne @k
     rts
 
-str_up:          .byte "UP NOW", 0
-str_for:         .byte "FOR", 0
-str_record:      .byte "RECORD", 0
-str_ready:       .byte "PRESS A WHEN READY", 0
+str_rec:         .byte "REC", 0
+str_ready:       .byte "PRESS A", 0
 str_ready_b:     .byte "A READY    B OTHER EVENT", 0
 str_pass:        .byte "HAND THE PAD TO ", 0
 str_solo:        .byte "SOLO", 0
@@ -4939,9 +5037,8 @@ ticker_draw:
 
 ; ------------------------------------------------------------------
 ; per-event text
-ev_blurbs:   .addr eb0, eb1, eb2, eb3, eb4, eb5, eb6
-ev_controls: .addr ec0, ec1, ec2, ec3, ec4, ec5, ec6
-ev_fails:    .addr ef0, ef1, ef2, ef3, ef4, ef5_1, ef6
+ev_goals:    .addr eb0, eb1, eb2, eb3, eb4, eb5, eb6
+ev_fails:   .addr ef0, ef1, ef2, ef3, ef4, ef5_1, ef6
 ; the header of a finished run (green), 28 characters at most
 card_finish: .addr fh0, fh1, fh2, fh3, fh4, fh5, fh6
 fh0: .byte "DELIVERED! SIGN HERE.", 0
@@ -4957,20 +5054,114 @@ card_part_stat: .byte $FF, $FF, $FF, $FF, $FF, 0, $FF   ; parking: SPOTS PARKED
 card_part_need: .byte 0, 0, 0, 0, 0, 3, 0
 card_part:      .addr 0, 0, 0, 0, 0, fp5, 0
 fp5: .byte "PARKED # OF 3 ON BRUNSWICK", 0
-eb0: .byte "GET THE PACKAGE TO SPADINA", $0A, "IN TIME. PREFERABLY ALIVE.", 0
-eb1: .byte "MAKE THE 5:42 GO TRAIN.", $0A, "RED ! = SOMEONE IN THE WAY", 0
-eb2: .byte "QUEEN GATE TO DUNDAS GATE.", $0A, "DODGE DOGS, THEN PAT THEM!", 0
-eb3: .byte "THE BIKE COP SAW THAT", $0A, "TALLBOY. RUN TO SPADINA!", 0
-eb4: .byte "ROUND MARKS 1, 2 AND 3,", $0A, "THEN CROSS THE DOTTED LINE", 0
-eb5: .byte "3 SPOTS. DON'T DENT A BMW.", $0A, "NONSTOP +300: KEEP ROLLING", 0
-eb6: .byte "SURF LINE 1 TO UNION.", $0A, "GRAB A POLE, GET GERMS.", 0
-ec0: .byte "D-PAD STEER    A PEDAL", $0A, "B HOP RAILS AND POTHOLES", $0A, "TOKENS 50, WIPEOUT DROPS 2", 0
-ec1: .byte "ALTERNATE ", TXT_ARROW_L+32, " ", TXT_ARROW_R+32, " ON BIG DOTS", $0A, TXT_ARROW_U+32, TXT_ARROW_D+32, " WHERE THE ARROW POINTS", $0A, "NO LANE? A = EXCUSE ME", 0
-ec2: .byte "D-PAD WALK   A THROW BALL", $0A, "B ON ANY ! = SAFE DODGE", $0A, "LATER B = MORE PTS: RISKY!", 0
-ec3: .byte "YELLOW CHALK: TAP A", $0A, "RED CHALK: HOLD A", $0A, "HOLD B: SIPS PAY UNSEEN", 0
-ec4: .byte "TAP ", TXT_ARROW_L+32, " ", TXT_ARROW_R+32, " TURN  HOLD A HIKE", $0A, "YELLOW ARROW: NEXT MARK", $0A, "GREEN DIAMONDS: ON COURSE", 0
-ec5: .byte TXT_ARROW_U+32, " TO THE LINE, ", TXT_ARROW_D+32, "+", TXT_ARROW_R+32, " BACK IN", $0A, "NOW! IN THE PANEL: ", TXT_ARROW_D+32, "+", TXT_ARROW_L+32, $0A, "STOPPED IN THE SPOT? A", 0
-ec6: .byte "HOLLOW ARROW: GET READY", $0A, "SOLID: HOLD D-PAD THAT WAY", $0A, "TAP ON THE FLASH: GOLD X3", 0
+; the intro card: the goal (one line), then the pad map (pad_draw)
+.include "pad.inc"
+eb0: .byte "GET TO SPADINA", 0
+eb1: .byte "MAKE THE 5:42", 0
+eb2: .byte "GET TO DUNDAS GATE", 0
+eb3: .byte "RUN TO SPADINA", 0
+eb4: .byte "MARKS 1-2-3, THEN FINISH", 0
+eb5: .byte "PARK IN 3 SPOTS", 0
+eb6: .byte "RIDE TO UNION. NO HANDS.", 0
+; parts in colour: bits 0-7 = d-pad up, down, left, right, A, B, X, Y
+pad_lit: .byte $3F, $1F, $3F, $30, $1C, $1F, $0F
+; per event: words (.word cell, .byte attr, .addr text) to $FFFF, then leader
+; lines (.word the left of the two cells) to $FFFF. Labels sit on row 6 (above
+; the pad) or 17 (below), lines on 7 or 16; a part's centre is a cell edge:
+; d-pad column 9, B 23, A 25.
+PW_G = $20 | (TP_GREEN << 2)
+pad_words: .addr pw0, pw1, pw2, pw3, pw4, pw5, pw6
+pw0:    .word 17*32+6
+        .byte PW_G
+        .addr pt_steer
+        .word 17*32+21
+        .byte PW_G
+        .addr pt_hop
+        .word 6*32+22
+        .byte PW_G
+        .addr pt_pedal
+        .word $FFFF, 16*32+8, 16*32+22, 7*32+24, $FFFF
+pw1:    .word 6*32+5
+        .byte PW_G
+        .addr pt_lane
+        .word 17*32+5
+        .byte PW_G
+        .addr pt_step
+        .word 6*32+20
+        .byte PW_G
+        .addr pt_excuse
+        .word $FFFF, 7*32+8, 16*32+8, 7*32+24, $FFFF
+pw2:    .word 17*32+7
+        .byte PW_G
+        .addr pt_walk
+        .word 17*32+19
+        .byte $20 | (TP_RED << 2)
+        .addr pt_bang
+        .word 17*32+21
+        .byte PW_G
+        .addr pt_dodge
+        .word 6*32+23
+        .byte PW_G
+        .addr pt_ball
+        .word $FFFF, 16*32+8, 16*32+22, 7*32+24, $FFFF
+pw3:    .word 6*32+20                   ; yellow chalk: tap A, red chalk: hold A
+        .byte $20 | (TP_YELLOW << 2)
+        .addr pt_chalk
+        .word 6*32+21
+        .byte PW_G
+        .addr pt_tap
+        .word 6*32+25
+        .byte $20 | (TP_RED << 2)
+        .addr pt_chalk
+        .word 6*32+26
+        .byte PW_G
+        .addr pt_hold
+        .word 17*32+19
+        .byte PW_G
+        .addr pt_sip
+        .word $FFFF, 16*32+22, 7*32+24, $FFFF
+pw4:    .word 17*32+5
+        .byte PW_G
+        .addr pt_turn
+        .word 6*32+23
+        .byte PW_G
+        .addr pt_hike
+        .word $FFFF, 16*32+8, 7*32+24, $FFFF
+pw5:    .word 6*32+6
+        .byte PW_G
+        .addr pt_gas
+        .word 17*32+2
+        .byte PW_G
+        .addr pt_back
+        .word 6*32+23
+        .byte PW_G
+        .addr pt_park
+        .word $FFFF, 7*32+8, 16*32+8, 7*32+24, $FFFF
+pw6:    .word 17*32+7
+        .byte PW_G
+        .addr pt_lean
+        .word $FFFF, 16*32+8, $FFFF
+pt_steer:    .byte "STEER", 0
+pt_hop:      .byte "HOP", 0
+pt_pedal:    .byte "PEDAL", 0
+pt_lane:     .byte TXT_ARROW_U+32, TXT_ARROW_D+32, " LANE", 0
+pt_step:     .byte TXT_ARROW_L+32, TXT_ARROW_R+32, " STEP", 0
+pt_excuse:   .byte "EXCUSE ME", 0
+pt_walk:     .byte "WALK", 0
+pt_bang:     .byte "!", 0
+pt_dodge:    .byte "DODGE", 0
+pt_ball:     .byte "BALL", 0
+pt_chalk:    .byte TXT_CHALK, 0
+pt_tap:      .byte "TAP", 0
+pt_hold:     .byte "HOLD", 0
+pt_sip:      .byte "HOLD SIP", 0
+pt_turn:     .byte TXT_ARROW_L+32, TXT_ARROW_R+32, " TURN", 0
+pt_hike:     .byte "HIKE", 0
+pt_gas:      .byte TXT_ARROW_U+32, " GAS", 0
+pt_back:     .byte TXT_ARROW_D+32, " BACK ", TXT_ARROW_L+32, TXT_ARROW_R+32, " STEER", 0
+pt_park:     .byte "PARK", 0
+pt_lean:     .byte "LEAN", 0
+pad_tiles:   .incbin "pad_tiles.bin"
 ef0: .byte "WIPED OUT!", 0
 ef1: .byte "MISSED THE TRAIN!", 0
 ef2: .byte "TACKLED!", 0
