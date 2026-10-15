@@ -543,7 +543,38 @@ def build_sprites():
     return sh
 
 
+def build_meter():
+    """The BUZZ meter's zone cells (BG3 2bpp, 0..4 quarters full): framed in
+    the zone's own colour (the text palette's colour 1: gold or red), so the
+    gold cell and the red one show on the meter even when they're empty: a
+    dark outline (as the plain meter's) with a dark edge on the left, and a
+    rim in the zone colour round the window navy; full is solid.
+    ev_cops.s loads them into spare font tiles (MZ_TILE)."""
+    from snes import tile_bytes
+    data = bytearray()
+    for q in range(5):
+        fill = (1, 4, 5, 7, 8)[q]      # past the edge column; the first quarter shows
+        rows = ['22222222']
+        for y in range(1, 7):
+            r = ''
+            for x in range(8):
+                if x == 0:
+                    r += '2'            # the hard edge on the zone's left
+                elif x < fill:
+                    r += '1'
+                elif y in (1, 6) or x in (1, 7):
+                    r += '1'            # a rim in the zone colour
+                else:
+                    r += '3'
+            rows.append(r)
+        rows.append('22222222')
+        pix = [{'1': 1, '2': 2, '3': 3}.get(c, 0) for r in rows for c in r]
+        data += tile_bytes(pix, 2)
+    out('cops_meter.bin', data)
+
+
 def build():
+    build_meter()
     far = far_layer()
     near = near_layer()
     both = Image.new('RGBA', (512, 512), (0, 0, 0, 0))
