@@ -1,0 +1,56 @@
+# Builds the ROM and publishes web/index.html with it to GitHub Pages, so the
+# game can be played in a browser (EmulatorJS running snes9x).
+name: Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Pillow
+        run: pip install pillow
+
+      # the toolchain the ROM is built with locally; only ca65 and ld65 are needed
+      - name: Build cc65 V2.18
+        run: |
+          git clone --depth 1 --branch V2.18 https://github.com/cc65/cc65.git "$RUNNER_TEMP/cc65"
+          make -C "$RUNNER_TEMP/cc65/src" -j"$(nproc)" ca65 ld65
+          echo "$RUNNER_TEMP/cc65/bin" >> "$GITHUB_PATH"
+
+      - name: Build ROM and page
+        run: make -j"$(nproc)" web
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: build/web
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

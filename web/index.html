@@ -34,6 +34,13 @@
     border-radius: 6px;
     overflow: hidden;
   }
+  .download { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin: 16px 0 0; }
+  .download span { color: var(--muted); font-size: 14px; }
+  .button {
+    display: inline-block; padding: 8px 16px; border-radius: 6px;
+    background: var(--red); color: #fff; font-weight: 600; text-decoration: none;
+  }
+  .button:hover { filter: brightness(1.1); }
   section { margin-top: 24px; }
   h2 { font-size: 15px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); margin: 0 0 8px; }
   table { width: 100%; border-collapse: collapse; background: var(--panel); border-radius: 6px; overflow: hidden; }
@@ -59,6 +66,11 @@
 
   <div id="screen"><div id="game"></div></div>
 
+  <p class="download">
+    <a class="button" href="toronto_games.sfc" download>Download the ROM</a>
+    <span>toronto_games.sfc · 512 KB · for any SNES emulator or a flash cart</span>
+  </p>
+
   <section>
     <h2>Keyboard</h2>
     <table>
@@ -79,8 +91,7 @@
 
   <footer>
     A Super Nintendo ROM written in 65816 assembly. Runs here in snes9x via
-    <a href="https://emulatorjs.org">EmulatorJS</a>.
-    <a href="toronto_games.sfc" download>Download the ROM</a> for any SNES emulator or a flash cart ·
+    <a href="https://emulatorjs.org">EmulatorJS</a> ·
     <a href="https://github.com/Abstrct/toronto-games">Source</a>
   </footer>
 </main>
