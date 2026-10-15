@@ -392,7 +392,26 @@ body{margin:0;background:#0b0d1a}
   EJS_startOnLoaded = true;
   // on mobile Safari EmulatorJS covers a game started without a tap with a "Click to resume"
   // prompt until sound is allowed; let it play silently instead, and unmute on the first tap
-  EJS_ready = () => { EJS_emulator.checkStarted = () => {}; };
+  EJS_ready = () => {
+    EJS_emulator.checkStarted = () => {};
+    // RetroArch normally paces frames by the sound card, and sound stays suspended until the
+    // first click, so the game sat frozen on its first frame until then. Pace by the screen
+    // instead (the limiter below keeps that at the SNES rate) and let sound join when allowed.
+    const cfg = EJS_GameManager.prototype.getRetroArchCfg;
+    EJS_GameManager.prototype.getRetroArchCfg = function () { return cfg.call(this) + "audio_sync = false\n"; };
+  };
+  // With frames paced by the screen, a 120 or 144 Hz display would run the game fast: hold
+  // requestAnimationFrame (only the emulator uses it here) to the SNES's ~60.1 frames a second.
+  {
+    const raf = window.requestAnimationFrame.bind(window);
+    const step = 1000 / 60.1;
+    let due = 0;
+    window.requestAnimationFrame = cb => raf(function tick(t) {
+      if (t < due - 2) return raf(tick);          // too soon for the next frame: wait a refresh
+      due = t - due > step ? t + step : due + step;  // keep the average; resync after a stall
+      cb(t);
+    });
+  }
   EJS_defaultOptions = { "save-save-interval": "30" };
   EJS_pathtodata = "https://cdn.emulatorjs.org/4.2.3/data/";
 
