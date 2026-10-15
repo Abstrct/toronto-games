@@ -124,7 +124,7 @@
   EJS_gameUrl = "toronto_games.sfc";
   EJS_color = "#da251d";
   EJS_backgroundColor = "#000";
-  EJS_startButtonName = "Play";
+  EJS_startOnLoaded = true;
   EJS_defaultOptions = { "save-save-interval": "30" };
   EJS_pathtodata = "https://cdn.emulatorjs.org/4.2.3/data/";
 
@@ -134,6 +134,16 @@
   };
   document.addEventListener("visibilitychange", () => { if (document.hidden) flushSave(); });
   window.addEventListener("pagehide", flushSave);
+
+  // the game starts by itself, but browsers hold sound until the first click or key press
+  const unmute = () => {
+    try {
+      const ctx = EJS_emulator.Module.AL.currentCtx.audioCtx;
+      if (ctx.state === "suspended") ctx.resume();
+    } catch (e) {}
+  };
+  for (const type of ["pointerdown", "keydown", "touchstart"])
+    window.addEventListener(type, unmute, { capture: true });
 </script>
 <script src="https://cdn.emulatorjs.org/4.2.3/data/loader.js"></script>
 </body>
