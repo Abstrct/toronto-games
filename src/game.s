@@ -916,11 +916,11 @@ rec_sig: .byte REC_SIG
 
 default_records:
     ; EV_BIKE  Bike Courier
-    REC 7500, "COURIER"
-    REC 6200, "FIXIE"
-    REC 5000, "TTC GUS"
-    REC 3800, "PEDICAB"
-    REC 2500, "SALMON"
+    REC 6000, "COURIER"
+    REC 4900, "FIXIE"
+    REC 3900, "TTC GUS"
+    REC 2900, "PEDICAB"
+    REC 2000, "SALMON"
     ; EV_BAY   Bay St Power Walk
     REC 3300, "SUITGUY"
     REC 2800, "BAYBANKR"
@@ -928,17 +928,17 @@ default_records:
     REC 1800, "INTERN"
     REC 1400, "TIMBIT"
     ; EV_PARK  Off-Leash Alert
-    REC 10000, "DOODLE"
-    REC 8100, "GOLDIE"
-    REC 6500, "FRISBEE"
-    REC 5200, "HIPSTER"
-    REC 4000, "SQUIRREL"
+    REC 10200, "DOODLE"
+    REC 8600, "GOLDIE"
+    REC 7000, "FRISBEE"
+    REC 5600, "HIPSTER"
+    REC 4200, "SQUIRREL"
     ; EV_COPS  Tallboy Trot
-    REC 6300, "RACCOON"
-    REC 4900, "BIKE COP"
-    REC 3700, "BANDIT"
-    REC 2600, "BUSKER"
-    REC 1600, "NANA"
+    REC 6600, "RACCOON"
+    REC 5200, "BIKE COP"
+    REC 3900, "BANDIT"
+    REC 2700, "BUSKER"
+    REC 1700, "NANA"
     ; EV_SAIL  Harbour Regatta
     REC 3900, "GOOSE"
     REC 3300, "SKIPPER"
@@ -946,11 +946,11 @@ default_records:
     REC 2400, "KAYAKER"
     REC 2000, "SEAGULL"
     ; EV_PARKING  Parallel Parking
-    REC 5000, "GREEN P"
-    REC 4000, "VALET"
-    REC 3200, "CABBIE"
-    REC 2400, "LEARNER"
-    REC 1500, "TOWTRUCK"
+    REC 5500, "GREEN P"
+    REC 4400, "VALET"
+    REC 3500, "CABBIE"
+    REC 2600, "LEARNER"
+    REC 1700, "TOWTRUCK"
     ; EV_SUBWAY   TTC Surfing
     REC 6100, "HANDRAIL"
     REC 5000, "COMMUTER"

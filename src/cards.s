@@ -1427,7 +1427,7 @@ strlen:
 ; the two stat lines shown on the card: ev_stat indices per event, the first
 ; one kept when there is room for only one
 card_stat_pick:
-    .byte 1, 2                  ; bike: TOKENS, WIPEOUTS (the + row says the style)
+    .byte 2, 1                  ; bike: WIPEOUTS, TOKENS (the style rows say the rest)
     .byte 0, 2                  ; bay: TIME LEFT, SPILLS
     .byte 1, 2                  ; park: DOGS DODGED, TACKLES
     .byte 0, 2                  ; cops: SIP 'N' HOPS, HURDLES
@@ -1450,7 +1450,7 @@ card_stat_pick_fail:
 card_stat_keep:
     .byte 0, 0                  ; bike
     .byte 1, 1                  ; bay: SPILLS
-    .byte 0, 0                  ; park
+    .byte 1, 0                  ; park: TACKLES (only the stat says them); DOGS DODGED
     .byte 0, 0                  ; cops
     .byte 0, 0                  ; sail: TIME LEFT; MARKS ROUNDED
     .byte 0, 0                  ; parking
@@ -1466,13 +1466,13 @@ card_stat_must: .byte 0, 0, $0E, 0, 0, 0, 0    ; bike bay park cops sail parking
 ; card_pcount / card_prate: the penalty row says its count, "TACKLES 3 AT
 ; 150", when ev_stat (card_pcount - 1) x card_prate is the penalty exactly
 ; (the true-cost rule: it always is); 0 = no count, the card_rate words
-card_pcount: .byte 3, 3, 3, 0, 0, 0, 1    ; bike: WIPEOUTS, bay: SPILLS, park: TACKLES, subway: GERMS
-card_prate:  .byte 200, 40, 150, 0, 0, 0, 40
+card_pcount: .byte 3, 3, 0, 0, 0, 0, 1    ; bike: WIPEOUTS, bay: SPILLS, subway: GERMS
+card_prate:  .byte 200, 40, 0, 0, 0, 0, 40
 
 ; card_bsplit: a finish's base as a fixed part plus seconds left at a rate,
 ; itemised in two grey sub-rows when there is room ("DELIVERY 1500",
 ; "29 SEC AT 20 580"); card_bsfix 0 = not split. Labels 14 characters at most.
-card_bsfix:   .word 1500, 1000, 500, 0, 1000, 0, 0   ; ev_bike / ev_bay / ev_park / ev_sail finish pay
+card_bsfix:   .word 1500, 1000, 1000, 0, 1000, 0, 0   ; ev_bike / ev_bay / ev_park / ev_sail finish pay
 card_bsrate:  .byte 20, 40, 25, 0, 15, 0, 0           ; ...and a second left
 card_bslabel: .addr bs_bike, bs_bay, bs_park, 0, bs_sail, 0, 0
 card_bsplit_end:
@@ -1515,12 +1515,12 @@ str_of3: .byte " OF", 0
 ; they give way after the stats and before anything that says why the run
 ; ended (card_plan). Labels: 14 characters at most, 0 = an unused slot.
 card_style_labels:
-    .addr 0, 0, 0, 0, 0                                     ; bike
+    .addr sty_bk_tok, sty_bk_rail, sty_bk_pot, sty_bk_close, sty_bk_ttc ; bike
     .addr sty_combo, sty_double, sty_near, sty_presto, sty_other ; bay
-    .addr 0, 0, 0, 0, 0                                     ; park
-    .addr 0, 0, 0, 0, 0                                     ; cops
+    .addr sty_pa_dodge, sty_pa_nice, sty_pa_shave, sty_pa_ole, sty_pa_pat ; park
+    .addr sty_co_take, sty_co_luck, sty_co_snh, sty_co_chain, sty_co_gold ; cops
     .addr sty_tight, sty_ctack, sty_fsurf, sty_lhon, sty_ostyle  ; sail
-    .addr 0, 0, 0, 0, 0                                     ; parking
+    .addr sty_pk_time, sty_pk_roll, sty_pk_kiss, sty_pk_tidy, sty_pk_bike ; parking
     .addr 0, 0, 0, 0, 0                                     ; subway
 card_style_labels_end:
 .assert card_style_labels_end - card_style_labels = NUM_EVENTS * STYLE_N * 2, error, "card_style_labels: STYLE_N .addr per event, nothing else"
@@ -1540,6 +1540,26 @@ sty_ctack:  .byte "CLEAN TACKS", 0
 sty_fsurf:  .byte "FERRY SURF", 0
 sty_lhon:   .byte "LINE HONOURS", 0
 sty_ostyle: .byte "ROLL TACKS", 0
+sty_bk_tok:   .byte "TTC TOKENS", 0
+sty_bk_rail:  .byte "RAIL HOPS", 0
+sty_bk_pot:   .byte "POTHOLE HOPS", 0
+sty_bk_close: .byte "CLOSE+DRAFTS", 0
+sty_bk_ttc:   .byte "TTC TRANSFER", 0
+sty_pa_dodge: .byte "DODGES", 0
+sty_pa_nice:  .byte "NICE TIMING", 0
+sty_pa_shave: .byte "CLOSE SHAVES", 0
+sty_pa_ole:   .byte "MATADORS", 0
+sty_pa_pat:   .byte "PATS", 0
+sty_co_take:  .byte "TAKE-OFFS", 0
+sty_co_luck:  .byte "LUCKY SIPS", 0
+sty_co_snh:   .byte "SIP 'N' HOPS", 0
+sty_co_chain: .byte "CHAIN BONUS", 0
+sty_co_gold:  .byte "GOLD BUZZ", 0
+sty_pk_time:  .byte "TIME LEFT", 0
+sty_pk_roll:  .byte "KEPT ROLLING", 0
+sty_pk_kiss:  .byte "CURB KISSES", 0
+sty_pk_tidy:  .byte "TIDY PARKING", 0
+sty_pk_bike:  .byte "BIKE SHAVE", 0
 
 ; card_forfeit: bit n = a run ending with ev_fail n forfeits the bonus: the
 ; event leaves it in ev_break+2 (and its sources in ev_style), keeps it out
@@ -4940,10 +4960,10 @@ eb5: .byte "3 SPOTS. DON'T DENT A BMW.", $0A, "NONSTOP +300: KEEP ROLLING", 0
 eb6: .byte "SURF LINE 1 TO UNION.", $0A, "GRAB A POLE, GET GERMS.", 0
 ec0: .byte "D-PAD STEER    A PEDAL", $0A, "B HOP RAILS AND POTHOLES", $0A, "TOKENS 50, WIPEOUT DROPS 2", 0
 ec1: .byte "ALTERNATE ", TXT_ARROW_L+32, " ", TXT_ARROW_R+32, " ON BIG DOTS", $0A, TXT_ARROW_U+32, TXT_ARROW_D+32, " WHERE THE ARROW POINTS", $0A, "NO LANE? A = EXCUSE ME", 0
-ec2: .byte "D-PAD WALK   A THROW BALL", $0A, "SAFE: B ON ! = 100 PER DOG", $0A, "RED ! 200, B MID-LEAP 400+", 0
+ec2: .byte "D-PAD WALK   A THROW BALL", $0A, "B ON ANY ! = SAFE DODGE", $0A, "LATER B = MORE PTS: RISKY!", 0
 ec3: .byte "YELLOW CHALK: TAP A", $0A, "RED CHALK: HOLD A", $0A, "HOLD B: SIPS PAY UNSEEN", 0
 ec4: .byte "LEFT/RIGHT: TURN  A: HIKE", $0A, "YELLOW ARROW: NEXT MARK", $0A, "GREEN DIAMONDS: ON COURSE", 0
-ec5: .byte "UP TO THE LINE, A TO PARK", $0A, "BACK IN: HOLD DOWN+RIGHT,", $0A, "ROLL TO DOWN+LEFT AT NOW!", 0
+ec5: .byte TXT_ARROW_U+32, " TO THE LINE, ", TXT_ARROW_D+32, "+", TXT_ARROW_R+32, " BACK IN", $0A, "NOW! IN THE PANEL: ", TXT_ARROW_D+32, "+", TXT_ARROW_L+32, $0A, "STOPPED IN THE SPOT? A", 0
 ec6: .byte "HOLLOW ARROW: GET READY", $0A, "SOLID: HOLD D-PAD THAT WAY", $0A, "TAP TO STAY GOLD: SURF X3", 0
 ef0: .byte "WIPED OUT!", 0
 ef1: .byte "MISSED THE TRAIN!", 0
@@ -5010,7 +5030,7 @@ fn_bike_s: .byte "STOPPED 8 S. NO DELIVERY", $0A, "PAID FOR THE RIDE ONLY", 0
 fn_bay:    .byte "THE 5:42 LEFT WITHOUT YOU", $0A, "ON THE DOTS = FASTER WALK", 0
 fn_bay_q:  .byte "THE WALK PAYS BY DISTANCE", 0
 fn_park:   .byte "HEARTS GONE: HALF THE DOGS", $0A, "DUNDAS PAYS THEM ALL", 0
-fn_park_q: .byte "HOME EARLY: HALF THE DOGS", $0A, "DUNDAS PAYS THEM ALL", 0
+fn_park_q: .byte "WALK BANKED, HALF THE DOGS", $0A, "DUNDAS PAYS THEM ALL", 0
 fn_park_t: .byte "NO DUNDAS: HALF THE DOGS", $0A, "DUNDAS PAYS THEM ALL", 0
 fn_park_n: .byte "NO STEP NORTH IN 10 S", $0A, "HALF THE DOGS KEPT", 0
 fn_cops:   .byte "COP CAUGHT YOU: FINED 1/4", 0
@@ -5021,7 +5041,7 @@ fn_sail_h: .byte "NOBODY TOUCHED THE HELM", 0
 fn_sail_q: .byte "DOCKED EARLY: 250 A MARK", $0A, "+ PART OF THE NEXT ONE", 0
 fn_pk:     .byte "HALF IN OR TOWED, ALL 3", 0
 fn_pk_i:   .byte "10 S WITHOUT DRIVING", 0
-fn_pk_q:   .byte "SPOTS SO FAR STILL PAY", 0
+fn_pk_q:   .byte "ONLY SPOTS YOU PARKED PAY", 0
 fn_sub:    .byte "20 GERMS: STYLE IS VOID", $0A, "ONLY LEGS YOU LEANED PAY", 0
 fn_sub_q:  .byte "NO UNION: STYLE IS VOID", $0A, "ONLY LEGS YOU LEANED PAY", 0
 
@@ -5030,7 +5050,7 @@ fn_sub_q:  .byte "NO UNION: STYLE IS VOID", $0A, "ONLY LEGS YOU LEANED PAY", 0
 ; all but gave up, $02 the event's own fail only, 0 never). For events where
 ; only not playing earns a base of 0. A give-up always gets its own reason
 ; line (card_fail_note), never the standing-still joke.
-card_still:    .byte $10, $02, 0, $02, $10, 0, $16   ; bike bay park cops sail parking subway (never bit 3: gave up)
+card_still:    .byte $10, $02, $10, $02, $10, 0, $16   ; bike bay park cops sail parking subway (never bit 3: gave up)
 card_still_ln: .addr sti0, sti1, sti2, sti3, sti4, 0, sti6
 sti0: .byte "STANDING STILL PAYS 0", 0
 sti1: .byte "STANDING STILL PAYS 0", 0
@@ -5049,7 +5069,7 @@ sti6: .byte "THE TRAIN DID ALL THE WORK", 0
 card_rate:
     .addr rt_bike_fin, 0, rt_200each ; bike
     .addr rt_bay_fin, 0, rt_40each   ; bay
-    .addr rt_park_fin, 0, rt_150each ; park
+    .addr rt_park_fin, 0, 0     ; park: a tackle costs a heart, never points
     .addr rt_hurdles, 0, 0      ; cops
     .addr rt_sail_fin, 0, 0     ; sail
     .addr 0, 0, 0               ; parking
@@ -5057,7 +5077,7 @@ card_rate:
 card_rate_fail:
     .addr rt_bike_m, 0, rt_200each ; bike
     .addr rt_bydist, 0, rt_40each ; bay
-    .addr rt_tenth, rt_half, rt_150each ; park
+    .addr rt_tenth, rt_half, 0  ; park
     .addr rt_hurdles, 0, 0      ; cops
     .addr 0, 0, 0               ; sail
     .addr 0, 0, 0               ; parking
@@ -5068,15 +5088,14 @@ card_rate_end:
 ; the rate strings (after both tables: a string inside one shifts its rows)
 rt_bike_fin: .byte "1500 + TIME", 0  ; card_bsfix: the base's fixed part, then
 rt_bay_fin:  .byte "1000 + TIME", 0  ; card_bsrate a second left
-rt_park_fin: .byte "500 + TIME", 0
+rt_park_fin: .byte "1000 + TIME", 0
 rt_sail_fin: .byte "1000 + TIME", 0
 rt_bydist:  .byte "BY DISTANCE", 0
 rt_40each:  .byte "40 EACH", 0
-rt_150each: .byte "150 EACH", 0
 rt_200each: .byte "200 EACH", 0
 rt_sub_leg: .byte "40 A LEG", 0
 rt_half:    .byte "HALF KEPT", 0
-rt_tenth:   .byte "50 A TENTH", 0
+rt_tenth:   .byte "100 A TENTH", 0
 rt_hurdles: .byte "50 A HURDLE", 0
 rt_bike_m:  .byte "1 PER 4 M", 0
 
