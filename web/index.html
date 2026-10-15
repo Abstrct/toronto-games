@@ -433,6 +433,13 @@ body{margin:0;background:#0b0d1a}
   };
   for (const type of ["pointerdown", "keydown", "click", "touchend"])
     window.addEventListener(type, unmute, { capture: true });
+
+  // EmulatorJS skips auto-repeat keydowns before it calls preventDefault, so holding a
+  // direction (driving in Parallel Parking) scrolled the page with every repeat
+  const scrollKeys = ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", " ", "PageUp", "PageDown", "Home", "End"];
+  document.getElementById("game").addEventListener("keydown", e => {
+    if (scrollKeys.includes(e.key) && !e.target.closest("input, select, textarea")) e.preventDefault();
+  });
 </script>
 <script src="https://cdn.emulatorjs.org/4.2.3/data/loader.js"></script>
 </body>
