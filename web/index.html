@@ -340,11 +340,10 @@ body{margin:0;background:#0b0d1a}
   EJS_gameUrl = "toronto_games.sfc";
   EJS_color = "#da251d";
   EJS_backgroundColor = "#000";
-  // with a keyboard the game starts by itself; phones and tablets get a Play button, since
-  // mobile Safari won't run sound until a tap and covers a self-started game with a resume prompt
-  const touchDevice = matchMedia("(pointer: coarse)").matches || navigator.maxTouchPoints > 1;
-  EJS_startOnLoaded = !touchDevice;
-  EJS_startButtonName = "Play";
+  EJS_startOnLoaded = true;
+  // on mobile Safari EmulatorJS covers a game started without a tap with a "Click to resume"
+  // prompt until sound is allowed; let it play silently instead, and unmute on the first tap
+  EJS_ready = () => { EJS_emulator.checkStarted = () => {}; };
   EJS_defaultOptions = { "save-save-interval": "30" };
   EJS_pathtodata = "https://cdn.emulatorjs.org/4.2.3/data/";
 
@@ -355,7 +354,7 @@ body{margin:0;background:#0b0d1a}
   document.addEventListener("visibilitychange", () => { if (document.hidden) flushSave(); });
   window.addEventListener("pagehide", flushSave);
 
-  // the game starts by itself, but browsers hold sound until the first click or key press
+  // the game starts by itself, but browsers hold sound until the first click, tap or key press
   const unmute = () => {
     try {
       const ctx = EJS_emulator.Module.AL.currentCtx.audioCtx;
