@@ -14,8 +14,9 @@ steer (s_adir: straight at the mark, or close-hauled on the right tack); the
 coach line says "TO MARK 2: TAP < 2 TIMES", "TACK NOW! TAP > 4 TIMES", "IN
 IRONS! TAP < ONCE", "ADRIFT SOON! ...".
 
-    sail_expert   roll-tacks with quick taps (hike into the tack, let go
-                  head to wind), puts in early hitches so three tacks pay,
+    sail_expert   roll-tacks with quick taps (presses A with its first tap
+                  across the wind, lets go a beat after the boat lights up
+                  and the sail slats), puts in early hitches so three tacks pay,
                   tacks onto the layline that fetches the windward mark,
                   turns onto the line that passes each buoy at its own chosen
                   distance (graded TIGHT ROUNDING), steers round geese and
@@ -40,9 +41,15 @@ IRONS! TAP < ONCE", "ADRIFT SOON! ...".
     sail_obey_late1s / sail_obey_slow / sail_obey_ontime: the same with late
                   orders at most a second late / a slow miscounting thumb /
                   never late
-    sail_tell     the tell test for the undocumented trick: obeys the panel,
-                  hikes into each TACK NOW and lets go only when it sees the
-                  boat flash (OAM palette 5); run it at 10-12 frames
+    sail_follow   the sprint-9 obey test: does exactly what the panel says,
+                  4-8 taps a second; run it at 15, 20 and 25 frames
+    sail_tell     the cue test for the undocumented trick: obeys the panel,
+                  presses A with the first tap of each TACK NOW and lets go
+                  the moment it sees the boat light up (OAM palette 5, the
+                  warning); the latency is its reaction (target: lands it on
+                  half the tells or more at 15-20 frames)
+In a gust the panel bots hike when the HUD flashes GUST (gust_hike), for
+about as long as a gust lasts; the HUD's own HIKE label isn't a GUST.
 """
 import math
 import os
@@ -174,7 +181,7 @@ class _Sailor(Policy):
     slop = 0             # extra frames a hold runs on (sloppy hands)
     tap_period = 0       # turn 2+ notches with taps this far apart (0: hold the pad)
     roll = False         # roll tacks (the undocumented trick)
-    roll_lead = 3
+    roll_d = 17          # ... let go of A this long after the warning starts
 
     def __init__(self):
         self.tack = 0
@@ -330,19 +337,41 @@ class _Sailor(Policy):
         if self.hike and b['gust'] and self.hikes(rng):
             m |= A
         if self.roll:
-            # ROLL TACK: hike into the tack, let go just before the bow is
-            # head to wind (it swings 2 a frame: ROLL_LEAD frames' worth early)
-            rel = sdiff(b['head'], b['wind'])
-            swing = sdiff(b['hgoal'], b['head'])
-            across = sdiff(b['hgoal'], b['wind'])
-            if swing and (swing > 0) != (rel > 0) and (across > 0) != (rel > 0) and abs(rel) < NOGO + 20:
-                m = (m | A) if abs(rel) > 2 * self.roll_lead else (m & ~A)
+            m = self.roll_hand(t, b, m)
         if self.kick and not m:
             m = A
         return m
 
     def hikes(self, rng):
         return True
+
+    def roll_hand(self, t, b, m):
+        """The undocumented trick, by what's on screen: hike (a fresh press
+        of A) with the first tap across the wind, and let go roll_d frames
+        after the boat lights up and the sail starts to slat (the warning)."""
+        g = _game(self)
+        rel = sdiff(b['head'], b['wind'])
+        if not hasattr(self, 'flash_t'):
+            self.flash_t, self.tack_t0, self.let_go = None, None, False
+        across = self.expect is not None and (sdiff(self.expect, b['wind']) > 0) != (rel > 0) \
+            and abs(rel) < NOGO + 24
+        if across and self.tack_t0 is None:
+            self.tack_t0 = t
+        fl = boat_flash(g)
+        if fl and self.flash_t is None:
+            self.flash_t = t
+        if self.tack_t0 is None and self.flash_t is None:
+            return m
+        if (self.flash_t is not None and not fl and t - self.flash_t > 30) or \
+                (self.flash_t is None and t - self.tack_t0 > 90):
+            self.flash_t, self.tack_t0, self.let_go = None, None, False
+            return m
+        if self.let_go or (self.flash_t is not None and t - self.flash_t >= self.roll_d):
+            self.let_go = True
+            return m & ~A
+        if self.tack_t0 is not None and t - self.tack_t0 < 3:
+            return m & ~A                     # (a gust hike: let go, then hike for the tack)
+        return m | A
 
 
 class sail_expert(_Sailor):
@@ -362,7 +391,7 @@ class sail_expert(_Sailor):
             self.hysteresis = rng.choice((8, 10, 12, 14, 16))
             self.hitch = rng.choice((50, 60, 70, 80, 90, 100))
             self.tack_lead = rng.choice((8, 10, 12, 14, 16))
-            self.roll_lead = rng.choice((2, 3, 3, 4))
+            self.roll_d = rng.choice((15, 16, 17, 18, 19))
             self.hike_odds = rng.choice((0.7, 0.8, 0.9, 1.0))
             self.tack_t = 0
             self.gust_on = None
@@ -677,6 +706,20 @@ def screen_row(g, row):
     return out.strip()
 
 
+def gust_hike(pol, g, t, rng):
+    """A first-timer in a gust: when the HUD flashes GUST (the hint said
+    HOLD A TO HIKE OUT) she hikes most of the time, for about as long as a
+    gust lasts (3 s). The HUD's own HIKE (A held, or blinking on a tack) is
+    not a GUST: she only reads that one word."""
+    if not hasattr(pol, 'gust_until'):
+        pol.gust_until, pol.gust_seen = -1, -999
+    if 'GUST' in screen_row(g, 1) and t - pol.gust_seen > 240:
+        pol.gust_seen = t
+        if rng.random() < getattr(pol, 'hike_odds', 0.6):
+            pol.gust_until = t + 170
+    return t < pol.gust_until
+
+
 COACH_RE = re.compile(r'TAP ([<>]) (?:(\d) (?:MORE )?TIMES|ONCE|TO BEAR OFF)')
 
 
@@ -713,13 +756,7 @@ class sail_coach(Policy):
             if f <= t < f + 4:
                 mask = d
         self.plan = [(f, d) for (f, d) in self.plan if t < f + 4]
-        hud = screen_row(g, 1)
-        gusting = 'GUST' in hud or 'HIKE' in hud
-        if gusting and self.gust is None:
-            self.gust = rng.random() < self.hike_odds
-        elif not gusting:
-            self.gust = None
-        if self.gust:
+        if gust_hike(self, g, t, rng):
             mask |= A
         return mask
 
@@ -788,13 +825,7 @@ class sail_obey(Policy):
         if self.plan and all(t >= f + 4 for f, _ in self.plan):
             self.done_at = t
             self.plan = []
-        hud = screen_row(g, 1)
-        gusting = 'GUST' in hud or 'HIKE' in hud
-        if gusting and self.gust is None:
-            self.gust = rng.random() < self.hike_odds
-        elif not gusting:
-            self.gust = None
-        if self.gust:
+        if gust_hike(self, g, t, rng):
             mask |= A
         return mask
 
@@ -827,6 +858,19 @@ class sail_obey_ontime(sail_obey):
     redo = False
 
 
+class sail_follow(sail_obey_ontime):
+    """The sprint-9 obey test (pt8's Tasha): does exactly what the panel says
+    the moment she reads it (the curve's latency is her reaction), with her
+    own thumb for the run: 4-8 taps a second (taps 7-15 frames apart). Run
+    it at 15, 20 and 25 frames: she must round every mark within a few
+    orders."""
+
+    def act(self, t, tel, rng):
+        if self.period is None:
+            self.period = rng.randint(7, 15)
+        return super().act(t, tel, rng)
+
+
 
 def boat_flash(g):
     """the boat drawn lit up (sprite palette 5): what the player sees while
@@ -841,13 +885,13 @@ def boat_flash(g):
 
 
 class sail_tell(sail_obey):
-    """The trick's tell, tested by a first-timer who's seen the title demo:
-    she obeys the coach panel (as sail_obey, never late), and when it says
-    TACK NOW she holds A from her first tap (hikes into the tack). She lets
-    go of A when she sees the boat flash, and not before: run it at 10-12
-    frames of latency (pt.py curve sail -p sail_tell -l 10,11,12) and it
-    should land the trick on most tacks. It counts what the panel shows:
-    tells[] = (tacks tried, ROLL TACK popups)."""
+    """The trick's cue test: a first-timer who's seen the title demo. She
+    obeys the coach panel (as sail_obey, never late), and when it says TACK
+    NOW (the HUD's HIKE blinks) she presses A with her first tap (hikes into
+    the tack; a gust hike she lets go of first). She lets go of A the moment
+    she sees the boat light up and the sail slat, and not before: that's the
+    warning, and the curve's latency is her reaction to it. tells[] = (tacks
+    tried, trick popups) as the panel shows them."""
     late_odds = 0.0
     redo = False
     tells = []
@@ -886,6 +930,8 @@ class sail_tell(sail_obey):
             elif t - self.rolling > 150:
                 self.rolling = 0                  # never saw it: give up on this one
                 m &= ~A
+            elif t < self.rolling + 6:
+                m &= ~A                           # (a gust hike: let go, then hike for the tack)
             else:
                 m |= A
         return m
@@ -957,7 +1003,7 @@ class sail_flail(Policy):
 
 
 POLICIES = {c.__name__: c for c in (sail_expert, sail_casual, sail_human, sail_pointer, sail_coach, sail_dana, sail_fumble,
-                                    sail_obey, sail_obey_slow, sail_obey_late1s, sail_obey_ontime, sail_tell,
+                                    sail_obey, sail_obey_slow, sail_obey_late1s, sail_obey_ontime, sail_follow, sail_tell,
                                     sail_tack, sail_random, sail_flail)}
 DEFAULTS = {'sail': ['idle', 'hold_a', 'hold_right', 'mash_a', 'random_input', 'sail_random', 'sail_tack', 'sail_flail',
                      'sail_pointer', 'sail_coach', 'sail_dana', 'sail_obey', 'sail_human', 'sail_casual', 'sail_expert']}
