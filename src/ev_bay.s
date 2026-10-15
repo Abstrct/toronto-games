@@ -15,17 +15,20 @@
 ;  The walk is on the BEAT (the big dots, every quarter note: 2 steps a
 ; second, a brisk walk). A beat is only missed when neither its 8th nor the
 ; "and" after it got a step, so a walker a little late, or one who steps on
-; the "and" all along, still walks. DOUBLE TIME: a good step on the beat and
-; another on the small dot after it (8 steps every 2 s) is a longer stride
-; and twice the PERFECTs: that is the expert's walk. Trying it is free: a
-; loose small dot after a good big one only drops you to single time.
+; the "and" all along, still walks; a step on the "and" alone is graded from
+; the nearer big dot (half a beat LATE or EARLY), never as a PERFECT on the
+; small dot, so a hand a whole 8th behind never out-scores a quicker one.
+; The target lights as each big dot lands (8 frames), and only then.
+; DOUBLE TIME: a good step on the beat and another on the small dot after it
+; (8 steps every 2 s) is a longer stride and twice the PERFECTs (booked to
+; its own row): that is the expert's walk. Trying it is free: a loose small
+; dot after a good big one only drops you to single time.
 ; Consecutive good beats build the GROOVE (speed); 4 taps inside 19 frames
 ; is a mash and trips you.
 ; Style: unbroken GOOD-or-better steps build the POWER WALK combo (a level
 ; every 10, x2..x8); every PERFECT scores the level, half again DEAD ON (the
-; beat's two centre frames), twice in DOUBLE TIME. Anything sloppy, a bump,
-; a double step or an "EXCUSE ME!" breaks it, so weaving through lanes beats
-; asking.
+; beat's two centre frames). Anything sloppy, a bump, a double step or an
+; "EXCUSE ME!" breaks it, so weaving through lanes beats asking.
 ; Lanes: everybody ahead in your lane inside WARN_PX, or WARN_T frames of
 ; closing in, gets a red !, and a white arrow by your chest points to the
 ; lane that's clear (an A when there's none but they can hear you: anyone
@@ -33,16 +36,21 @@
 ; it in the last moments before you'd walk into them is CUT IT FINE (25).
 ; A bump in the lane you just moved into on a red ! is only a brush (no
 ; spill). PRESTO TAP (Y on a bar's downbeat, PERFECT) adds 5 x level and
-; pushes the combo; a Y anywhere else is CARD DECLINED.
-; A bump knocks you off your stride (DOUBLE TIME: stops you dead) and spills
-; coffee (40), all but the first; they step aside. The cup holds four
-; spills; then it's DECAF: no DOUBLE TIME for the rest of the walk, and
-; every bump spills somebody else's latte (still 40). A steady walk that
-; lands off the dots still strides (a rhythm of your own), and the coach
-; says which way to move. Out of time within sight of Union, the doors are
-; held a few seconds. Undocumented: CUT IT FINEs inside 2 s of each other
-; are a SLALOM (X2, X3, X4 the cut); while one is open, the arrow and the !
-; you could cut past flash gold.
+; pushes the combo; a Y anywhere else is CARD DECLINED. EXCUSE ME with no
+; red ! in your lane stops you dead for a beat (nobody to ask).
+; A bump knocks you off your stride (DOUBLE TIME: stops you dead); every bump
+; but the first spills coffee (40) and stops you dead to mop up (SPILL_T),
+; so walking into people costs the train, not just points; they step aside.
+; The cup holds four spills; then it's DECAF: no DOUBLE TIME for the rest of
+; the walk, and every bump spills somebody else's latte (still 40, still a
+; stop). A steady walk that lands off the dots still strides (a rhythm of
+; your own), and the coach says which way to move. Out of time within sight
+; of Union, the doors are held a few seconds.
+;  Undocumented: CUT IT FINEs inside SLALOM_T of each other are a SLALOM
+; (X2, X3, X4 the cut). While one is open, whoever a lane over you could
+; fall in behind wears a gold ring; once someone in your way is in reach, a
+; gold burst ! goes up over them with a beep and the arrow turns gold,
+; TELL_T frames before cutting past them counts (cut_window).
 .p816
 .smart -
 .include "globals.inc"
@@ -77,6 +85,7 @@ BUMP_T     = 12             ; frames a bump knocks you off your stride
 BUMP_DT    = 24             ; ... and stops you dead in DOUBLE TIME
 BUMP_N     = 2              ; notches of groove a bump costs
 BUMP_NDT   = 4              ; ... rushing in DOUBLE TIME
+SPILL_T    = 40             ; frames a spill stops you dead (every bump but the first)
 DOORS_T    = 10*60          ; "doors closing" with this many frames left
 
 ST_WALK    = 0
@@ -141,7 +150,6 @@ E_STATE = E_REL + NUM_ENT*2
 EV_SEED  = ev_ram + 510
 
 w_decaf  = ev_ram + 512         ; coffee ran out
-w_flash  = ev_ram + 514         ; beat target lit
 w_groove = ev_ram + 516         ; "POWER WALK!" shown for this streak
 r_seg    = ev_ram + 520         ; course RNG draws for one segment
 r_lane   = ev_ram + 521
@@ -234,6 +242,8 @@ w_cutw   = ev_ram + 696         ; slot of the nearest one in your lane you could
                                 ; cut it fine past right now ($FFFF none)
 w_rawu   = ev_ram + 698         ; lane_advice: room above / below as found
 w_rawd   = ev_ram + 700
+w_cwt    = ev_ram + 703         ; w_cutw's gold !: frames until cutting past
+                                ; them counts (0: the window is open)
 
 T_SUIT    = 1
 T_TOURIST = 2
@@ -361,7 +371,8 @@ bay_init:
     sta w_pri
     ldx #$FFFF
     stx w_warn                  ; nobody in the way yet (no stray '!' on
-    stx w_jogw                  ; the intro card)
+    stx w_jogw                  ; the intro card), no gold ! either
+    stx w_cutw
     stx h_sec
     stx h_pass
     stx h_cof
@@ -552,10 +563,6 @@ beat_advance:
     beq @g
     dec w_gradet
 @g:
-    lda w_flash
-    beq @f
-    dec w_flash
-@f:
     inc w_ph
     lda w_ph
     cmp #BEAT
@@ -754,7 +761,7 @@ str_tshave:.byte "DODGE LATER: CUT IT FINE +25", 0
 str_tbeat: .byte "TIP: STEP AS BIG DOTS LAND", 0
 str_tbdt:  .byte "DOUBLE TIME: EVERY DOT, ", TXT_ARROW_L + $20, TXT_ARROW_R + $20, TXT_ARROW_L + $20, TXT_ARROW_R + $20, 0
 str_tdt:   .byte "SMALL DOTS TOO: DOUBLE TIME", 0
-str_tspill:.byte "NEXT BUMP SPILLS COFFEE: -40", 0
+str_tspill:.byte "NEXT BUMP SPILLS: STOP, -40", 0
 str_tlast: .byte "LAST SIP! 1 MORE SPILL: DECAF", 0
 str_tpresto:.byte "Y ON GOLD DOTS: COMBO BOOST", 0
 str_tfoot: .byte "OTHER FOOT! ", TXT_ARROW_L + $20, " ", TXT_ARROW_R + $20, " ", TXT_ARROW_L + $20, " ", TXT_ARROW_R + $20, 0
@@ -1024,6 +1031,7 @@ input_steps:
     bcc @g
     dey                         ; -6/-7, +5..+7: EARLY / LATE
 @g:
+    jsr off_beat                ; (on the "and" alone: half a beat LATE)
     lda w_same
     beq @g2
     ldy #G_OFF
@@ -1069,8 +1077,6 @@ input_steps:
     A8
     jsr combo_perfect
 @lit:
-    lda #8
-    sta w_flash
     lda w_deadon
     beq @nd
     lda #G_DEADON
@@ -1094,6 +1100,42 @@ input_steps:
 @shuffle:
     rts
 
+; A step on the "and" with nothing on the beat before it, walking single
+; time, is half a beat off: graded from the nearer big dot (LATE if it's at
+; or before the small one, EARLY if after) and never on the small dot, so a
+; hand a whole 8th behind the music never out-scores one a few frames
+; behind it. It still strides (a steady walk of your own). DOUBLE TIME's
+; "and" after a dropped beat is judged as ever. Y = grade, tmp1 = signed
+; frames off the "and": Y = G_OFF and tmp1 = frames off the beat if so
+; (8..15 LATE, -8..-14 EARLY).
+off_beat:
+    lda w_dt
+    bne @x
+    lda w_bgrade
+    bne @x
+    lda w_ph                    ; the 8th this step belongs to
+    cmp #9
+    lda w_beat
+    bcc @n
+    inc a
+@n:
+    lsr a
+    bcc @x                      ; the beat itself
+    ldy #G_OFF
+    lda tmp1
+    beq @late
+    bmi @late
+    sec
+    sbc #BEAT                   ; after the small dot: EARLY for the next
+    sta tmp1
+    rts
+@late:
+    clc
+    adc #BEAT                   ; at or before it: LATE for the last
+    sta tmp1
+@x:
+    rts
+
 ; A step (Y = its grade, tmp1 = signed frames off): is the walk steady?
 ; Steps landing as the one before did (+-2 frames, three in a row) are a
 ; rhythm of your own, even off the dots (a TV's lag, a late habit): an
@@ -1104,25 +1146,23 @@ input_steps:
 steady_step:
     lda tmp1
     sec
-    sbc w_soff
-    cmp #$80
+    sbc w_soff                  ; (-29..29: offsets wrap round the 8th)
+@red:
+    bpl @pos
+    cmp #($100 - 7)
     bcs @neg
+    clc
+    adc #BEAT
+    bra @red
+@pos:
     cmp #8
     bcc @abs
     sec
-    sbc #BEAT                   ; (offsets wrap round the 8th)
-    eor #$FF
-    inc a
-    bra @abs
+    sbc #BEAT
+    bra @red
 @neg:
     eor #$FF
     inc a                       ; |diff|
-    cmp #8
-    bcc @abs
-    eor #$FF
-    inc a
-    clc
-    adc #BEAT
 @abs:
     cmp #3
     bcc @same
@@ -1357,17 +1397,14 @@ combo_perfect:
     adc tmp2
     sta tmp2
 @dd:
-    stz w_ssrc                  ; (the card's PERFECT STEPS row)
-    lda tmp2
-    jsr style_add
-    lda w_dt                    ; and twice again in DOUBLE TIME (the
-    beq @d2                     ; second half: the DOUBLE TIME row)
+    stz w_ssrc                  ; (the card's PERFECT STEPS row, or, walking
+    lda w_dt                    ; DOUBLE TIME, its own row: twice the steps)
+    beq @d2
     lda #2
     sta w_ssrc
+@d2:
     lda tmp2
     jmp style_add
-@d2:
-    rts
 
 ; A = points (0..255) to style, booked to source w_ssrc (s_src, the card's
 ; rows). Keeps X and Y.
@@ -1483,8 +1520,6 @@ input_presto:
     inc w_presto
     A8
     SFX SFX_GO                  ; the reader's beep
-    lda #12
-    sta w_flash
     lda w_level
     asl a
     asl a
@@ -1681,8 +1716,10 @@ move_player:
     rts
 
 tick_timers:
-    lda w_slt                   ; a SLALOM chain closing
-    beq @sl
+    lda w_slt                   ; a SLALOM chain closing (held while
+    beq @sl                     ; its gold ! is up)
+    ldx w_cutw
+    bpl @sl
     dec w_slt
 @sl:
     lda w_lchg                  ; finding your feet in a new lane
@@ -1880,7 +1917,7 @@ input_lane:
 SHAVE_PX = 16
 SHAVE_PTS= 25               ; (str_tshave says +25)
 DODGE_PTS= 20               ; (the card says +20)
-SLALOM_T = 120
+SLALOM_T = 150
 close_shave:
     lda w_state
     cmp #ST_WALK
@@ -1909,6 +1946,12 @@ close_shave:
     lda E_TYPE,y
     cmp #T_JOGGER
     beq @jog
+    cpy w_cutw                  ; under the chain's gold !: the window is
+    bne @px                     ; TELL_T frames after it went up, never
+    lda w_cwt                   ; sooner
+    jeq @got
+    bra @far
+@px:
     jsr cut_px                  ; tmp3: how close is cutting it fine
     A16
     lda tmp4
@@ -1916,6 +1959,7 @@ close_shave:
     cmp tmp3
     bcc @got
     A8
+@far:
     lda E_FLAGS,y               ; a red ! over them, still well ahead: a
     and #$40                    ; DODGE, paid as you get past them
     jeq @n
@@ -2062,15 +2106,8 @@ dodge_pay:
 SHAVE_T = 24
 cut_px:
     .a8
-    A16
-    lda w_speed
-    cmp w_target
-    bcs @s
-    lda w_target
-@s:
-    sec
-    sbc E_V,y                   ; closing speed (8.8)
-    bcc @min
+    jsr close_v                 ; closing speed (8.8)
+    .a16
     sta tmp3
     asl a                       ; x 24 = x 16 + x 8
     clc
@@ -2082,7 +2119,6 @@ cut_px:
     and #$00FF                  ; px in the last SHAVE_T frames
     cmp #SHAVE_PX
     bcs @got
-@min:
     lda #SHAVE_PX
 @got:
     clc
@@ -2101,6 +2137,24 @@ cut_px:
 @x:
     rts
 .assert SHAVE_T = 24, error, "cut_px multiplies by 24"
+
+; Y = slot: A16 = how fast you're closing in on them (8.8, at the stride
+; you're easing toward if that's faster), 0 if you aren't. Returns A16.
+close_v:
+    .a8
+    A16
+    lda w_speed
+    cmp w_target
+    bcs @s
+    lda w_target
+@s:
+    sec
+    sbc E_V,y
+    bcs @x
+    lda #$0000
+@x:
+    rts
+    .a8
 
 str_dodge: .byte "DODGE!", 0
 slalom_msg: .addr str_sl2, str_sl3, str_sl4
@@ -2210,10 +2264,11 @@ lane_free:
     clc
     rts
 
-; A: "EXCUSE ME!": everyone on foot just ahead in your lane steps aside.
-; Stopping to ask breaks the POWER WALK combo; asking nobody stops you dead
-; and costs the groove (so shouting blind on a timer doesn't pay).
-EXCUSE_PX = 64
+; A: "EXCUSE ME!": everyone on foot in your lane under a red ! (in your
+; way) steps aside. Stopping to ask breaks the POWER WALK combo; asking with
+; nobody in your way (no red ! in your lane) stops you dead for a beat and
+; costs groove, so shouting blind on a timer doesn't pay.
+EXCUSE_T = 20                   ; frames you stand there looking around
 input_excuse:
     ldx w_cd
     beq @ready
@@ -2232,8 +2287,8 @@ input_excuse:
     stx w_cd
     jsr combo_break
     stz d_f                     ; people who stepped aside
-    stz d_b                     ; anybody in earshot at all
-    stz w_immov                 ; a cart or board close ahead
+    stz d_b                     ; anybody in sight, not in the way
+    stz w_immov                 ; a cart or board in the way
     ldy #$0000
 @e:
     lda E_TYPE,y
@@ -2243,8 +2298,8 @@ input_excuse:
     lda E_LANE,y
     cmp w_lane
     bne @n
-    lda E_FLAGS,y               ; a red ! over them: they heard you, however
-    and #$40                    ; far ahead
+    lda E_FLAGS,y               ; a red ! over them: in your way, and they
+    and #$40                    ; hear you, however far ahead
     bne @heard
     A16
     lda E_WX,y
@@ -2252,18 +2307,12 @@ input_excuse:
     sbc w_dist
     clc
     adc #8                      ; from 8 px behind ...
-    cmp #(128 + 8)              ; ... to 128 ahead: somebody to talk to
+    cmp #(128 + 8)              ; ... to 128 ahead: in sight, not in the way
     A8
     bcs @n
     inc d_b
-    A16
-    cmp #(EXCUSE_PX + 8)        ; within 64: they step aside
-    A8
-    bcs @n
-    bra @close
+    bra @n
 @heard:
-    inc d_b
-@close:
     lda E_TYPE,y
     cmp #T_CART
     bcc @walk
@@ -2286,12 +2335,7 @@ input_excuse:
     lda d_f
     bne @moved
     lda w_immov
-    bne @budge
-    lda d_b
     beq @none
-    SFX SFX_STEP                ; too far yet: polite, but nobody moves
-    bra @say
-@budge:
     SFX SFX_BACK                ; asking a hot dog cart to move
     ldx #.loword(str_budge)
     lda #TP_YELLOW
@@ -2299,7 +2343,6 @@ input_excuse:
     jmp popup
 @moved:
     SFX SFX_SELECT
-@say:
     lda w_clock                 ; a Torontonian has more than one way to say it
     and #$03
     asl a
@@ -2319,15 +2362,25 @@ input_excuse:
     SFX SFX_BACK                ; you stopped dead to shout at nobody
     lda #ST_STUMBLE             ; ... and stand there looking around
     sta w_state
-    ldx #20
+    ldx #EXCUSE_T
     stx w_timer
-    stz w_streak
+    lda w_streak
+    sec
+    sbc #BUMP_N
+    bcs @st
+    lda #0
+@st:
+    sta w_streak
     stz w_groove
     A16
     stz w_speed
     stz w_target
     A8
     ldx #.loword(str_nobody)
+    lda d_b                     ; (somebody up ahead, but not in your way)
+    beq @say
+    ldx #.loword(str_far)
+@say:
     lda #TP_GREY
     ldy #40
     jmp popup
@@ -2338,6 +2391,7 @@ str_excuse2: .byte "PARDON ME! COMING THROUGH!", 0
 str_excuse3: .byte "SORRY, JUST SQUEEZING BY!", 0
 str_excuse4: .byte "ON YOUR LEFT! ER, RIGHT!", 0
 str_nobody:  .byte "EXCUSE ME? ...NOBODY THERE", 0
+str_far:     .byte "EXCUSE ME? ...THEY CAN'T HEAR", 0
 str_budge:   .byte "IT WON'T BUDGE! UP/DOWN!", 0
 
 ; X = slot: move to a free neighbouring lane, or flatten against the
@@ -2423,6 +2477,19 @@ bump_player:
     lda #BUMP_DT
     sta w_timer
 @half:
+    A8
+    lda w_bumps                 ; a spill (every bump but the first): you
+    cmp #2                      ; stop dead to mop up and say sorry, and the
+    bcc @warn1                  ; groove is gone, so walking into people
+    stz w_streak                ; costs the train, not just points
+    A16
+    stz w_speed
+    lda #SPILL_T
+    sta w_timer
+    bra @tgt
+@warn1:
+    A16
+@tgt:
     lda w_speed
     sta w_target
     lda w_dist
@@ -2907,8 +2974,8 @@ ents_update:
     inx
     cpx #(NUM_ENT*2)
     jne @ent
-    jsr cut_window
     jsr lane_advice
+    jsr cut_window
     ; the first A in the arrow's place: what it means (when nothing else
     ; is up)
     lda w_adv
@@ -3025,25 +3092,170 @@ warn_check:
     bra @x16
     .a8
 
-; w_cutw: the nearest one in your way when leaving the lane now would be
-; cutting it fine (draw_warn flashes their ! gold while a chain is open)
+; The undocumented chain's tell. While a chain is open (w_slt), the one in
+; your way (w_warn) gets a gold ! and a beep (w_cutw) TELL_T frames before
+; cutting past them counts: as they come within cut_px plus TELL_T frames of
+; closing in, with a lane to cut into (the arrow turns gold too), and only
+; while that leaves TELL_WIN frames or more of window before you'd walk into
+; them (else it's just a red !). Exactly TELL_T frames after the gold ! the
+; window opens (w_cwt 0) and it stays open until you'd walk into them; the
+; chain is held open meanwhile (tick_timers). Without a gold ! up, anybody a
+; lane over you could step in behind in time wears a gold ring (chain_next).
+TELL_T   = 15
+TELL_WIN = 8                    ; frames of window at least
 cut_window:
+    lda w_state
+    bne @off
+    lda w_slt
+    beq @off
+    ldy w_warn
+    bmi @off
+    cpy w_cutw
+    bne @new
+    lda w_cwt                   ; the gold ! stands: count down to the window
+    beq @x
+    dec w_cwt
+@x:
+    rts
+@new:
+    lda w_adv                   ; a lane to cut into
+    beq @off
+    cmp #3
+    beq @off
+    lda E_FLAGS,y               ; (dodged or cut past already: not again)
+    and #$10
+    bne @off
+    jsr cut_px                  ; tmp3: the window's far edge
+    lda #TELL_T
+    jsr close_px
+    .a16
+    beq @off16                  ; (not closing in)
+    clc
+    adc tmp3
+    sta tmp4                    ; the gold ! goes up inside this
+    jsr ent_rel
+    cmp tmp4
+    bcs @off16
+    A8
+    lda #(TELL_T + TELL_WIN)    ; ... while there's time for a window
+    jsr close_px
+    .a16
+    clc
+    adc #12
+    sta tmp4
+    jsr ent_rel
+    cmp tmp4
+    bcc @off16
+    A8
+    sty w_cutw
+    lda #TELL_T
+    sta w_cwt
+    SFX SFX_READY
+    rts
+@off16:
+    A8
+@off:
     ldx #$FFFF
     stx w_cutw
-    lda w_state
-    bne @x
-    ldy w_warn
-    bmi @x
-    jsr cut_px
+    stz w_cwt
+    rts
+
+; Y = slot: A16 = how far ahead they are (signed). Returns A16.
+ent_rel:
     A16
     lda E_WX,y
     sec
     sbc w_dist
-    cmp tmp3
+    rts
+    .a8
+
+; Y = slot, A = frames: A16 = px you close in on them in that many frames
+; (zero flag: none). Keeps X, Y; uses tmp7. Returns A16.
+close_px:
+    .a8
+    sta tmp7
+    jsr close_v
+    .a16
+    lsr a
+    lsr a
+    lsr a
+    lsr a                       ; 1/16 px a frame
     A8
-    bcs @x
-    sty w_cutw
-@x:
+    sta WRMPYA
+    lda tmp7
+    sta WRMPYB
+    nop
+    nop
+    nop
+    nop
+    A16
+    lda RDMPYL
+    lsr a
+    lsr a
+    lsr a
+    lsr a
+    rts
+    .a8
+
+; X = slot: carry set if they wear the chain's gold ring: a chain open, no
+; gold ! up, one lane over, free to cut past, and where stepping in behind
+; them within REACT_T frames gets a gold ! with its full window before the
+; chain closes. Keeps X.
+REACT_T = 20
+chain_next:
+    .a8
+    lda w_slt
+    cmp #(REACT_T + 1)
+    bcc @no
+    lda w_state
+    bne @no
+    ldy w_cutw
+    bpl @no
+    lda E_TYPE,x
+    cmp #T_JOGGER
+    beq @no
+    lda E_FLAGS,x
+    and #$1C                    ; bumped us, stepped aside, cut past
+    bne @no
+    lda E_LANE,x
+    sec
+    sbc w_lane
+    inc a
+    beq @lane                   ; -1
+    cmp #2
+    bne @no                     ; not +1 either
+@lane:
+    txy
+    lda #(REACT_T + TELL_T + TELL_WIN)
+    jsr close_px                ; near enough to step in behind?
+    .a16
+    clc
+    adc #12
+    sta tmp4
+    jsr ent_rel
+    cmp tmp4
+    bcc @no16
+    cmp #36
+    bcc @no16
+    A8
+    lda w_slt                   ; far enough for the gold ! in time?
+    sec
+    sbc #(REACT_T - TELL_T)
+    jsr close_px
+    .a16
+    clc
+    adc #(SHAVE_PX + 12)
+    sta tmp4
+    jsr ent_rel
+    cmp tmp4
+    bcs @no16
+    A8
+    sec
+    rts
+@no16:
+    A8
+@no:
+    clc
     rts
 
 ; The lane arrow beside the walker while a red ! is up: which way is clear.
@@ -3647,7 +3859,7 @@ draw_floor:
     lda E_TYPE,x
     jeq @n
     cmp #T_PIGEON
-    beq @n
+    jeq @n
     stx w_cur
     A16
     lda E_WX,x
@@ -3669,12 +3881,21 @@ draw_floor:
     lda w_state
     cmp #ST_FINISH
     bcs @shadow
+    ldy #MS_RINGRED_BASE
     lda E_FLAGS,x
     and #$40
     bne @ring
     cpx w_jogw
-    bne @shadow
+    beq @ring
+    jsr chain_next              ; the chain's next one: a gold ring
+    bcc @shadow
+    ldy #MS_RINGYEL_BASE
 @ring:
+    cpx w_cutw                  ; (under the gold ! too)
+    bne @rr
+    ldy #MS_RINGYEL_BASE
+@rr:
+    sty tmp6
     lda E_LY,x
     sec
     sbc #12
@@ -3686,8 +3907,6 @@ draw_floor:
     sbc #8
     sta spr_x
     A8
-    ldx #MS_RINGRED_BASE
-    stx tmp6
     jsr put_ring
     bra @nx
 @shadow:
@@ -4030,9 +4249,38 @@ put_tall:
     rts
 
 ; one sprite: spr_x / spr_y = top-left, tmp6 = tile, A = size (0 8x8, 1 16x16),
-; attr = props palette, priority 3
+; attr = props palette, priority 3. On screen (x 0..255) it goes straight
+; into OAM (the strip, the arrows, the marker: a dozen a frame, and oam_put
+; costs about four times as much); oam_put only for x off the left edge.
 put_one:
     sta spr_size
+    lda spr_x+1
+    bne @slow
+    lda spr_size
+    beq @small
+    jmp put_ring                ; (16x16, props palette, priority 3)
+@small:
+    ldx oam_idx
+    cpx #(512 - 4)
+    bcs @x
+    lda spr_x
+    sta oam_buf,x
+    lda spr_y
+    sta oam_buf+1,x
+    lda tmp6
+    sta oam_buf+2,x
+    lda tmp6+1
+    and #$01
+    ora #$3A
+    sta oam_buf+3,x
+    inx
+    inx
+    inx
+    inx
+    stx oam_idx
+@x:
+    rts
+@slow:
     lda #$3A
     sta spr_attr
     ldx tmp6
@@ -4099,7 +4347,7 @@ draw_beat:
     sta tmp6
     lda grade_base+1,x
     sta tmp6+1
-    jsl oam_meta
+    jsr put_word
 @nog:
     ; next foot
     A16
@@ -4117,7 +4365,9 @@ draw_beat:
     stx tmp6
     lda #0
     jsr put_one
-    ; target (lit on a good step, and on every beat)
+    ; target: lit as a beat (a big dot) lands, and only then, so the beat
+    ; is never mistaken for your own step (the mark and the grade word
+    ; say how the step went)
     A16
     lda #(BEAT_X - 8)
     sta spr_x
@@ -4125,13 +4375,11 @@ draw_beat:
     sta spr_y
     A8
     ldx #MS_TARGETLIT_BASE
-    lda w_flash
-    bne @tg
-    lda w_beat                  ; lit as a beat (a big dot) lands
+    lda w_beat
     lsr a
     bcs @dark
     lda w_ph
-    cmp #3
+    cmp #8                      ; (lit for half the 8th: no 3-frame flicker)
     bcc @tg
 @dark:
     ldx #MS_TARGET_BASE
@@ -4195,6 +4443,48 @@ draw_beat:
 @x:
     rts
 
+; a grade word straight into OAM: ptr1 = its metasprite (8x8 pieces in a
+; row, unflipped), tmp6 = its first tile, spr_x / spr_y = where (on screen);
+; props palette, priority 3 (oam_meta costs several times as much)
+put_word:
+    ldy #$0000
+    ldx oam_idx
+@p:
+    cpx #(512 - 4)
+    bcs @done
+    lda [ptr1],y
+    cmp #$80
+    beq @done
+    clc
+    adc spr_x
+    sta oam_buf,x
+    iny
+    lda [ptr1],y
+    clc
+    adc spr_y
+    sta oam_buf+1,x
+    iny
+    lda [ptr1],y
+    clc
+    adc tmp6
+    sta oam_buf+2,x
+    lda tmp6+1
+    adc #0
+    and #$01
+    ora #$3A
+    sta oam_buf+3,x
+    iny
+    iny
+    iny
+    inx
+    inx
+    inx
+    inx
+    bra @p
+@done:
+    stx oam_idx
+    rts
+
 grade_lo:   .addr 0, 0, ms_wgood, ms_wperfect, ms_wearly, ms_wlate, ms_wmiss, ms_wdeadon
 grade_hw:   .word 0, 0, 12, 21, 15, 12, 12, 21     ; half the word's width (6 px a letter)
 grade_base: .word 0, 0, MS_WGOOD_BASE, MS_WPERFECT_BASE, MS_WEARLY_BASE, MS_WLATE_BASE, MS_WMISS_BASE, MS_WDEADON_BASE
@@ -4220,11 +4510,8 @@ draw_warn:
     sty tmp7
     cmp #3
     beq @ag
-    lda w_slt                   ; a chain open: the arrow flashes gold
-    beq @ag
-    lda w_clock
-    and #$04
-    beq @ag
+    ldy w_cutw                  ; the chain's gold !: the arrow's gold too
+    bmi @ag
     A16
     lda tmp6
     clc
@@ -4308,17 +4595,25 @@ draw_warn:
     dec spr_y
 @h:
     ldy #MS_WARN_BASE
-    lda w_slt                   ; a chain open and they're close enough to
-    beq @r                      ; cut it fine past: their ! flashes gold
-    cpx w_cutw
-    bne @r
-    lda w_clock
-    and #$04
-    beq @r
-    ldy #MS_WARNG_BASE
-@r:
-    sty tmp6
+    cpx w_cutw                  ; the chain's tell: a gold burst ! (twice
+    beq @gold                   ; the size) from TELL_T frames before the
+    sty tmp6                    ; cut counts until you'd walk into them
     lda #0
+    jmp put_one
+@gold:
+    A16
+    lda spr_x
+    sec
+    sbc #4
+    sta spr_x
+    A8
+    lda spr_y
+    sec
+    sbc #7
+    sta spr_y
+    ldy #MS_WARNBIG_BASE
+    sty tmp6
+    lda #1
     jmp put_one
 @x:
     rts

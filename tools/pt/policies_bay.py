@@ -206,13 +206,19 @@ class bay_beat(Policy):
 
 def _hand_latency():
     """The reaction latency pt's human hand adds to every input (pt.py run_bot's
-    `latency` local; 0 outside `pt.py curve`)."""
+    `latency` local; a couch driver script's PT_LATENCY or module-level `lat`;
+    0 otherwise). A person learns their own hands: the bots anticipate it."""
+    import os
+    import sys
     f = inspect.currentframe()
     while f:
         if f.f_code.co_name == 'run_bot' and 'latency' in f.f_locals:
             return int(f.f_locals['latency'] or 0)
         f = f.f_back
-    return 0
+    if os.environ.get('PT_LATENCY'):
+        return int(os.environ['PT_LATENCY'])
+    lat = getattr(sys.modules.get('__main__'), 'lat', None)
+    return lat if isinstance(lat, int) else 0
 
 
 class bay_hand(Policy):
@@ -406,6 +412,8 @@ class bay_ear(bay_hand):
         self.busy_until = 0
         self.second = None
         self.last_hit = None
+        self.kinds = {}         # emit frame -> the dot that tap aims at
+        self.aimed = None
 
     def setup(self):
         L = self.L = _hand_latency()
@@ -465,6 +473,10 @@ class bay_ear(bay_hand):
         return warn
 
     def feedback(self, d):
+        if abs(d) > 7.5 and getattr(self, 'aimed', None) == 'small':
+            d -= 15 if d > 0 else -15   # a step on the small dot shows half a beat
+                                        # off (no step on the big one): I know
+                                        # which I aimed at
         seen = d + self.rng.choice((-1, 0, 0, 1)) * 0.5
         self.err = 0.85 * self.err + 0.15 * abs(seen + 0.5)
         if self.try_dbl and self.dbl and self.err > 4.0:
@@ -473,7 +485,7 @@ class bay_ear(bay_hand):
             return
         # aim: the landing frame (-1) and the one after (0) are dead centre
         self.corr += self.alpha * (seen + 0.5)
-        self.corr = max(-12.0, min(12.0, self.corr))
+        self.corr = max(-24.0, min(24.0, self.corr))
 
     def plan(self, t):
         rng = self.rng
@@ -493,6 +505,7 @@ class bay_ear(bay_hand):
             if kind == 'gold' and self.presto:
                 m |= Y
             self.queue.append((emit, m))
+            self.kinds[emit] = kind
         self.queue.sort()
         for k in [k for k in self.landings if k < t - 30]:
             del self.landings[k]
@@ -545,6 +558,8 @@ class bay_ear(bay_hand):
                 self.shaving = True
         if room(best) > here + 8 and room(best) >= 28 and (self.prefer_lanes or not can_excuse
                                                           or room(best) > 90):
+            if self.gold_t is not None and self.S < 9 and t < self.gold_t + TELL_T + 1 - self.L:
+                return 0                    # the gold !: its cut counts TELL_T frames on
             if self.shaving and not jog and abs(best - me['lane']) == 1:
                 # cut it fine past somebody on foot: move when they're 14-24 px
                 # ahead (CUT IT FINE), a little sooner the faster we close
@@ -552,7 +567,7 @@ class bay_ear(bay_hand):
                 close = max(0.2, me['speed'] - near['v'])
                 aim = 21
                 if self.S < 9:
-                    lead = 4
+                    lead = 4 + self.L       # (knows its own hands)
                 else:
                     aim = 26            # a careful cut: the far edge of the window
                     # a person's guess of "when it'll be close", made L frames
@@ -580,17 +595,25 @@ class bay_ear(bay_hand):
                 return X if soft[0] < me['lane'] else B
         return 0
 
+    gold_t = None
+
     def act(self, t, tel, rng):
         self.rng = rng
         if self.L is None:
             self.setup()
         spr = self.screen()
         warn = self.look_beat(t, spr)
+        if self.tiles['WARNBIG'] in set(tile for _, _, tile in spr):
+            if self.gold_t is None:
+                self.gold_t = t
+        else:
+            self.gold_t = None
         self.plan(t)
         while self.queue and self.queue[0][0] <= t:
-            _, m = self.queue.pop(0)
+            e, m = self.queue.pop(0)
             if self.tap_until > t - 1:
                 continue        # a thumb can't press twice at once
+            self.aimed = self.kinds.pop(e, None)
             self.tap_mask = m
             self.tap_until = t + TAP
         if t < self.tap_until:
@@ -618,153 +641,186 @@ class bay_ear(bay_hand):
         return 0
 
 
-class bay_weave(bay_ear):
-    """The title demo: the expert (bay_ear at 0 frames: DOUBLE TIME, PRESTO,
-    CUT IT FINEs) who also weaves. While a shave's chain is open (2 s) it
-    steps in behind somebody in the next lane, so the next cut is a shave
-    too: the undocumented chain, shown in play."""
-    weave_px = (44, 120)
-
-    def act(self, t, tel, rng):
-        m = super().act(t, tel, rng)
-        if m or t < self.tap_until or t < self.act_until or t < self.busy_until:
-            return m
-        if t % 3:
-            return 0
-        seen = self.eyes.look()
-        if not seen:
-            return 0
-        me, ents = seen
-        ram = self.eyes.g.core.peek(self.eyes.base + 656, 2)
-        if not ram[1] or me['state'] != 0:          # no chain open
-            return 0
-        nxt = self.queue[0][0] if self.queue else t + 99
-        if t + 5 >= nxt:
-            return 0
-        for e in ents:
-            e['rel'] = _rel(e, me)
-        live = [e for e in ents if not e['flags'] & 0x1C]
-        if any(e['lane'] == me['lane'] and -2 < e['rel'] < 150 and e['type'] != T_JOGGER for e in live):
-            return 0                                # somebody to shave right here
-        lo, hi = self.weave_px
-        for lane in (me['lane'] - 1, me['lane'] + 1):
-            if not 0 <= lane <= 2:
-                continue
-            there = sorted(e['rel'] for e in ents if e['lane'] == lane and not e['flags'] & 0x0C
-                           and e['type'] != T_JOGGER and e['rel'] > -20)
-            jog = any(e['lane'] == lane and e['type'] == T_JOGGER and -150 < e['rel'] < 10 for e in ents)
-            if there and lo <= there[0] <= hi and not jog and there[0] > 30:
-                # a walker to cut past, with room behind them to fall in
-                m = X if lane < me['lane'] else B
-                self.act_mask = m
-                self.act_until = t + TAP
-                self.busy_until = t + 10
-                return m
-        return 0
+TELL_T = 15         # ev_bay.s: the chain's gold ! goes up this many frames before the cut counts
 
 
-class bay_cue(bay_weave):
-    """The tell check for the undocumented chain: a practised player (L 10-12)
-    who cuts it fine by eye (bay_ear's expert cut) and then watches only the
-    screen. The popup ("CUT IT FINE!", or the chain's own) says a chain is
-    open for about 2 s: it steps in behind somebody in the next lane, and
-    the moment their ! flashes gold it moves the way the (gold) arrow points.
-    It never reads the chain's state from RAM; `episodes` / `landed` count
-    gold cues and chains landed off them (measurement only)."""
+class bay_cue(bay_ear):
+    """The tell check for the undocumented chain (pt.py curve-style: run it at
+    latency L, +-3 frames). Walks as bay_ear and cuts it fine by eye to open
+    a chain. Then it goes by the screen: the CUT IT FINE / chain popup says a
+    chain is open, so it holds its lane moves for a gold !; a gold ring a
+    lane over says who to fall in behind, so it steps over; the moment a gold
+    ! goes up (with its beep) it presses the way the gold arrow points, and
+    the hand's latency L lands the press. It never reads the chain's state or
+    the window from RAM. `episodes` / `landed` count gold !s and chains landed
+    off them, `log` each one (measurement only); an episode whose gold ! went
+    up while a lane press of its own was still in flight is logged 'moving'
+    (not a reaction to the tell)."""
     skill = None
     shave = True
+    wait = 0            # frames it waits after the gold ! before pressing
+    rings = True        # follows the gold rings (the setup)
 
     def __init__(self):
         super().__init__()
-        self.chain_until = -1
-        self.last_pop = ''
         self.gold_was = False
         self.episodes = 0
         self.landed = 0
         self.watch = None
+        self.press_at = None
+        self.ring_at = -99
+        self.lane_t = -99
+        self.chain_until = -1
+        self.last_pop = ''
+        self.log = []
+
+    def _slaloms(self):
+        if self.eyes.base is None:
+            self.eyes.look()
+        return self.game.core.peek(self.eyes.base + 659, 1)[0]
+
+    def _ahead(self):
+        """(px to the nearest one ahead in my lane, my lane): the eyes."""
+        seen = self.eyes.look()
+        if not seen:
+            return 999, None
+        me, ents = seen
+        rel = [_rel(e, me) for e in ents if e['lane'] == me['lane'] and not e['flags'] & 0x0C
+               and e['type'] != T_JOGGER]
+        rel = [r for r in rel if r > -2]
+        return (min(rel) if rel else 999), me['lane']
+
+    def hazards(self, t, rng):
+        # a chain open: hold the lane for its gold ! unless about to walk in
+        if t < self.chain_until and self._ahead()[0] > 24:
+            return 0
+        return bay_ear.hazards(self, t, rng)
 
     def act(self, t, tel, rng):
+        m = self._act(t, tel, rng)
+        if m & (X | B | UP | DOWN):
+            if t >= self.act_until - TAP and m == self.act_mask and self.lane_t < t - TAP:
+                self.lane_t = t
+        return m
+
+    def _act(self, t, tel, rng):
         self.rng = rng
         if self.L is None:
             self.setup()
         row = self.game.text_rows()[9]
         if row != self.last_pop:
             if 'CUT IT FINE' in row or 'SLALOM' in row:
-                self.chain_until = t + 105         # read it: ~2 s to find the next
+                self.chain_until = t + 150      # read it: a chain is open
             self.last_pop = row
-        # measurement only: did a chain land after a gold cue?
-        if self.watch is not None:
-            n = self.game.core.peek(self.eyes.base + 659, 1)[0] if self.eyes.base else 0
-            if n > self.watch[1]:
-                self.landed += 1
-                self.watch = None
-            elif t > self.watch[0] + 60:
-                self.watch = None
-        if t >= self.chain_until:
-            self.gold_was = False
-            return bay_ear.act(self, t, tel, rng)
         spr = self.screen()
-        self.look_beat(t, spr)
-        self.plan(t)
-        while self.queue and self.queue[0][0] <= t:
-            _, m = self.queue.pop(0)
-            if self.tap_until > t - 1:
-                continue
-            self.tap_mask = m
-            self.tap_until = t + TAP
-        if t < self.tap_until:
-            return self.tap_mask
-        if t < self.act_until:
-            return self.act_mask
         T = self.tiles
         tiles = set(tile for _, _, tile in spr)
-        gold = T['WARNG'] in tiles
+        gold = T['WARNBIG'] in tiles
+        # measurement only: did a chain land off this gold !?
+        if self.watch is not None:
+            o, n, moving = self.watch
+            if self._slaloms() > n:
+                self.landed += 1
+                self.log.append((o, t - o, 'moving landed' if moving else 'landed'))
+                self.watch = None
+            elif not gold and t > o + 8:
+                self.log.append((o, t - o, 'moving' if moving else 'missed'))
+                self.watch = None
         if gold and not self.gold_was:
             self.episodes += 1
-            if self.eyes.base is None:
-                self.eyes.look()
-            self.watch = (t, self.game.core.peek(self.eyes.base + 659, 1)[0])
-        self.gold_was = gold or self.gold_was and T['WARN'] in tiles
-        if gold and t >= self.busy_until:
-            if T['LANEUPG'] in tiles or T['LANEUP'] in tiles:
-                m = X
-            elif T['LANEDNG'] in tiles or T['LANEDN'] in tiles:
-                m = B
-            else:
-                me = self.eyes.look()[0]
-                m = B if me['lane'] == 0 else X
-            self.act_mask = m
-            self.act_until = t + TAP
-            self.busy_until = t + self.L + 10
+            self.watch = (t, self._slaloms(), t - self.lane_t <= self.L + 4)
+            self.press_at = t + self.wait
+            self.chain_until = max(self.chain_until, t + 60)
+        self.gold_was = gold
+        if not gold:
+            self.press_at = None
+        if self.press_at is not None and t >= self.press_at and t >= self.tap_until:
+            m = X if T['LANEUPG'] in tiles else B if T['LANEDNG'] in tiles else 0
+            if m:
+                self.press_at = None
+                self.act_mask = m
+                self.act_until = t + TAP
+                self.busy_until = t + self.L + 10
+                self.look_beat(t, spr)          # (the feet are planned as ever)
+                self.plan(t)
+                return m
+        if gold or self.press_at is not None:
+            # waiting on the gold !: feet only, no other lane move
+            self.look_beat(t, spr)
+            self.plan(t)
+            while self.queue and self.queue[0][0] <= t:
+                _, m = self.queue.pop(0)
+                if self.tap_until > t - 1:
+                    continue
+                self.tap_mask = m
+                self.tap_until = t + TAP
+            if t < self.tap_until:
+                return self.tap_mask
+            return self.act_mask if t < self.act_until else 0
+        m = bay_ear.act(self, t, tel, rng)
+        if m or not self.rings or t < self.tap_until or t < self.act_until or t < self.busy_until:
             return m
-        if t % 3 or t < self.busy_until:
+        # a gold ring a lane over: fall in behind them (not with somebody
+        # under a red ! right here: they may be the next gold !)
+        if t % 3 or t - self.ring_at < self.L + 12:
             return 0
-        # chain open, nobody to cut past here: fall in behind somebody next door
-        seen = self.eyes.look()
-        if not seen:
+        me_y = None
+        for x, y, tile in spr:
+            if tile == T['RINGYEL'] and x == 64:
+                me_y = y
+        if me_y is None:
             return 0
-        me, ents = seen
-        if me['state'] != 0:
-            return 0
-        for e in ents:
-            e['rel'] = _rel(e, me)
-        live = [e for e in ents if not e['flags'] & 0x1C]
-        if any(e['lane'] == me['lane'] and -2 < e['rel'] < 150 and e['type'] != T_JOGGER for e in live):
-            return 0
-        lo, hi = self.weave_px
-        for lane in (me['lane'] - 1, me['lane'] + 1):
-            if not 0 <= lane <= 2:
-                continue
-            there = sorted(e['rel'] for e in ents if e['lane'] == lane and not e['flags'] & 0x0C
-                           and e['type'] != T_JOGGER and e['rel'] > -20)
-            jog = any(e['lane'] == lane and e['type'] == T_JOGGER and -250 < e['rel'] < 10 for e in ents)
-            if there and lo <= there[0] <= hi and not jog and there[0] > 30:
-                m = X if lane < me['lane'] else B
+        for x, y, tile in spr:
+            if tile == T['RINGYEL'] and x != 64 and abs(y - me_y) in (19, 20, 21):
+                nxt = self.queue[0][0] if self.queue else t + 99
+                if t + 5 >= nxt or self._ahead()[0] < 104:
+                    return 0
+                m = X if y < me_y else B
+                self.ring_at = t
                 self.act_mask = m
                 self.act_until = t + TAP
                 self.busy_until = t + self.L + 10
                 return m
         return 0
+
+
+class bay_weave(bay_cue):
+    """The title demo: the expert (bay_ear at 0 frames: DOUBLE TIME, PRESTO,
+    CUT IT FINEs) who also reads the chain's tell: after a cut it falls in
+    behind whoever wears the gold ring, and cuts past them TELL_T + 2 frames
+    after their gold ! goes up: the undocumented chain, shown in play."""
+    wait = TELL_T + 2
+
+
+class bay_cue_blind(bay_cue):
+    """bay_ear with bay_cue's bookkeeping, the tell ignored: the same walk and
+    cuts, never looks for gold (how often the chain lands by accident for a
+    player who cuts it fine)."""
+    rings = False
+
+    def hazards(self, t, rng):
+        return bay_ear.hazards(self, t, rng)
+
+    def _act(self, t, tel, rng):
+        self.rng = rng
+        if self.L is None:
+            self.setup()
+        spr = self.screen()
+        gold = self.tiles['WARNBIG'] in set(tile for _, _, tile in spr)
+        if self.watch is not None:
+            o, n, moving = self.watch
+            if self._slaloms() > n:
+                self.landed += 1
+                self.log.append((o, t - o, 'landed'))
+                self.watch = None
+            elif not gold and t > o + 8:
+                self.log.append((o, t - o, 'missed'))
+                self.watch = None
+        if gold and not self.gold_was:
+            self.episodes += 1
+            self.watch = (t, self._slaloms(), False)
+        self.gold_was = gold
+        return bay_ear.act(self, t, tel, rng)
 
 
 class bay_steady(bay_ear):
@@ -788,6 +844,13 @@ class bay_ear_dt(bay_ear):
     double = True
     presto_on = True
 
+
+
+class bay_ear_dt2(bay_ear):
+    """bay_ear that always walks DOUBLE TIME and never swipes PRESTO: the
+    DOUBLE TIME line on its own, against bay_ear_single."""
+    double = True
+    presto_on = False
 
 
 class bay_ear_single(bay_ear):
@@ -862,6 +925,18 @@ class bay_prompt(bay_ear):
 class bay_prompt_deaf(bay_prompt):
     """bay_prompt's feet, cues ignored: the baseline obeying must beat."""
     obey = False
+
+
+class bay_aspam(bay_prompt):
+    """Mo's habit: bay_prompt's feet, lanes ignored, A (EXCUSE ME) every 45
+    frames whatever is ahead. Must not beat bay_prompt (obeying the arrow)."""
+    obey = False
+
+    def act(self, t, tel, rng):
+        m = super().act(t, tel, rng)
+        if not m and t % 45 < 3 and t >= self.tap_until:
+            return A
+        return m
 
 
 class bay_prompt_blind(bay_prompt):
@@ -1073,13 +1148,14 @@ class bay_mashy(Policy):
         return m
 
 
-POLICIES = {c.__name__: c for c in [bay_beat, bay_hand, bay_ear, bay_prompt, bay_dana, bay_cue, bay_prompt_deaf, bay_prompt_blind, bay_flipper, bay_steady, bay_ear_raw, bay_ear_dt, bay_ear_single, bay_weave, bay_walkman, bay_casual, bay_stepper, bay_ace, bay_human, bay_sloppy, bay_rookie, bay_blind,
+POLICIES = {c.__name__: c for c in [bay_beat, bay_hand, bay_ear, bay_prompt, bay_dana, bay_cue, bay_cue_blind, bay_prompt_deaf, bay_aspam, bay_prompt_blind, bay_flipper, bay_steady, bay_ear_raw, bay_ear_dt, bay_ear_dt2, bay_ear_single, bay_weave, bay_walkman, bay_casual, bay_stepper, bay_ace, bay_human, bay_sloppy, bay_rookie, bay_blind,
                                      bay_spam, bay_steady6, bay_double, bay_halfout, bay_mash,
                                      bay_mash10, bay_mashy]}
 
 DEFAULTS = {'bay': ['idle', 'mash_a', 'random_input', 'bay_mash', 'bay_mash10', 'bay_mashy',
                     'bay_steady6', 'bay_halfout', 'bay_blind', 'bay_spam', 'bay_double', 'bay_rookie',
                     'bay_human', 'bay_stepper', 'bay_casual', 'bay_sloppy', 'bay_steady', 'bay_prompt_deaf',
+                    'bay_walkman', 'bay_aspam',
                     'bay_prompt', 'bay_hand', 'bay_ear', 'bay_weave',
                     'bay_beat', 'bay_ace']}
 

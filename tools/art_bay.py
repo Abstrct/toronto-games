@@ -391,6 +391,18 @@ def beat_ui(sh, d):
     d.rectangle([115, 25, 117, 27], fill=3)
     sh.outline(104, 24, 8, 8)
     sh.outline(112, 24, 8, 8)
+    # the chain's tell, over whoever you could cut past next (16x16 at
+    # 112,64): a gold burst round a dark '!', twice the red one's size so it
+    # reads from the couch
+    burst = [(119.5 + r * math.cos(a * math.pi / 8), 71.5 + r * math.sin(a * math.pi / 8))
+             for a, r in zip(range(16), [7.4, 5.2] * 8)]
+    d.polygon(burst, fill=3)
+    d.rectangle([119, 66, 120, 73], fill=1)
+    d.rectangle([119, 75, 120, 76], fill=1)
+    sh.outline(112, 64, 16, 16)
+    # (the walker frame below pokes its head 2 px up into this row: a stray
+    # dot after DEAD ON on screen)
+    d.rectangle([0, 120, 63, 127], fill=0)
     word(sh, 0, 120, 'DEAD ON', 3)
     word(sh, 0, 112, 'PERFECT', 3)
     word(sh, 48, 112, 'GOOD', 4)
@@ -676,6 +688,7 @@ def build_sprites():
     sh.obj('warng', 96, 24, 8, 8, 4, 7)
     sh.obj('laneupg', 104, 24, 8, 8, 4, 4)
     sh.obj('lanedng', 112, 24, 8, 8, 4, 4)
+    sh.obj('warnbig', 112, 64, 16, 16, 8, 8)
     sh.obj('footl', 24, 104, 8, 8, 4, 4)
     sh.obj('footr', 64, 96, 8, 8, 4, 4)
     sh.obj('target', 32, 96, 16, 16, 8, 8)
